@@ -1,0 +1,29 @@
+{
+  "name": "aso-monorepo",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/shared",
+    "packages/hub",
+    "packages/worker",
+    "packages/cli",
+    "packages/dashboard"
+  ],
+  "scripts": {
+    "build": "tsc -b packages/cli",
+    "build:dashboard": "npm run build -w @aso/dashboard",
+    "clean": "tsc -b --clean packages/cli",
+    "aso": "node packages/cli/dist/index.js",
+    "test": "npm run build && node --test \"packages/*/test/*.test.ts\""
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/ws": "^8.18.2",
+    "typescript": "^7.0.2"
+  }
+}

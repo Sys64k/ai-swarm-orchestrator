@@ -1,0 +1,22 @@
+{
+  "name": "@aso/cli",
+  "version": "0.1.0",
+  "description": "AI Swarm Orchestrator - hub, worker and management CLI",
+  "type": "module",
+  "bin": {
+    "aso": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "commander": "^15.0.0",
+    "@aso/shared": "*",
+    "@aso/hub": "*",
+    "@aso/worker": "*"
+  }
+}
