@@ -1,5 +1,9 @@
+import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import {
+  NpmPackageNameSchema,
+  VersionRangeSchema,
   createLogger,
   type AgentMessageType,
   type MessageOf,
@@ -14,11 +18,28 @@ const log = createLogger("jobs");
 export type TaskAssignment = MessageOf<"TASK_ASSIGNMENT">["payload"];
 export type TestExecution = MessageOf<"TEST_EXECUTION">["payload"];
 
+export interface DependencyRequest {
+  name: string;
+  /** Semver range; omitted means latest. */
+  version?: string;
+  dev?: boolean;
+}
+
 export interface ExecutionContext {
   /** Checkout on `task/<id>`; the executor edits files here. */
   repoDir: string;
   /** Free-text progress, forwarded to the Hub as STATUS_UPDATE detail. */
   report(detail: string): void;
+  /**
+   * Ask the Hub to add an npm package. Resolves once the Hub committed it to main, this
+   * branch was rebased onto that commit (uncommitted edits preserved) and `npm ci` ran.
+   * Rejects with DependencyRejectedError if the Hub refused.
+   */
+  requestDependency(request: DependencyRequest): Promise<{ mainCommit: string }>;
+}
+
+export class DependencyRejectedError extends Error {
+  override name = "DependencyRejectedError";
 }
 
 /** Does the actual work for a task. The LLM agent loop (Phase 5) implements this. */
@@ -40,6 +61,15 @@ export interface JobRunnerOptions {
   nodeId: string;
   executor: TaskExecutor;
   send: Send;
+  /** How long to wait for the Hub to answer a dependency request. Default 15 min. */
+  dependencyTimeoutMs?: number;
+}
+
+type DependencyResponse = MessageOf<"DEPENDENCY_RESPONSE">["payload"];
+
+interface PendingDependency {
+  message: PayloadInput<"DEPENDENCY_REQUEST">;
+  resolve(response: DependencyResponse): void;
 }
 
 /** Feedback output budget (schema allows 100k; leave room for the envelope). */
@@ -52,6 +82,7 @@ const FEEDBACK_OUTPUT_CHARS = 50_000;
 export class JobRunner {
   private queue: Promise<void> = Promise.resolve();
   private active: { taskId: TaskId; job: "implement" | "test" } | undefined;
+  private readonly pendingDependencies = new Map<string, PendingDependency>();
 
   constructor(private readonly opts: JobRunnerOptions) {}
 
@@ -70,6 +101,18 @@ export class JobRunner {
 
   enqueueTest(job: TestExecution): void {
     this.enqueue({ taskId: job.taskId, job: "test" }, () => this.test(job));
+  }
+
+  handleDependencyResponse(response: DependencyResponse): void {
+    const pending = this.pendingDependencies.get(response.requestId);
+    if (!pending) return log.debug(`ignoring response for unknown dependency request ${response.requestId}`);
+    this.pendingDependencies.delete(response.requestId);
+    pending.resolve(response);
+  }
+
+  /** After a reconnect: ask again for answers that may have been lost (the Hub de-duplicates). */
+  resendPendingDependencies(): void {
+    for (const pending of this.pendingDependencies.values()) this.opts.send("DEPENDENCY_REQUEST", pending.message);
   }
 
   /** Resolves when all queued jobs are done (used by tests and shutdown). */
@@ -111,6 +154,7 @@ export class JobRunner {
       const result = await this.opts.executor.implement(task, {
         repoDir: this.repoDir,
         report: (detail) => status("in_progress", detail),
+        requestDependency: (req) => this.requestDependency(task, git, req),
       });
       const done = await git.completeTask(result?.commitMessage ?? `${task.taskId}: ${task.title}`);
       send("STATUS_UPDATE", { state: "completed", taskId: task.taskId, commit: done.commit });
@@ -118,6 +162,59 @@ export class JobRunner {
       log.warn(`task ${task.taskId} failed: ${(err as Error).message}`);
       status("failed", (err as Error).message);
     }
+  }
+
+  private async requestDependency(
+    task: TaskAssignment,
+    git: AgentGitClient,
+    req: DependencyRequest,
+  ): Promise<{ mainCommit: string }> {
+    const name = NpmPackageNameSchema.parse(req.name);
+    const version = req.version === undefined ? undefined : VersionRangeSchema.parse(req.version);
+    const label = `${name}${version ? `@${version}` : ""}`;
+    const { send } = this.opts;
+    const message: PayloadInput<"DEPENDENCY_REQUEST"> = {
+      requestId: randomUUID(),
+      taskId: task.taskId,
+      name,
+      version,
+      dev: req.dev ?? false,
+    };
+
+    send("STATUS_UPDATE", { state: "waiting_dependency", taskId: task.taskId, detail: `waiting for ${label}` });
+    const response = await new Promise<DependencyResponse>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingDependencies.delete(message.requestId);
+        reject(new Error(`no answer from the Hub for dependency ${label}`));
+      }, this.opts.dependencyTimeoutMs ?? 15 * 60_000);
+      this.pendingDependencies.set(message.requestId, {
+        message,
+        resolve: (r) => {
+          clearTimeout(timer);
+          resolve(r);
+        },
+      });
+      send("DEPENDENCY_REQUEST", message);
+    });
+
+    if (response.outcome === "rejected") {
+      send("STATUS_UPDATE", { state: "in_progress", taskId: task.taskId, detail: `dependency ${label} rejected` });
+      throw new DependencyRejectedError(response.reason);
+    }
+
+    await git.syncWithMain();
+    if (existsSync(path.join(this.repoDir, "package-lock.json"))) {
+      const result = await runCommand(["npm", "ci", "--no-audit", "--no-fund"], {
+        cwd: this.repoDir,
+        timeoutMs: 10 * 60_000,
+      });
+      if (result.exitCode !== 0) {
+        throw new Error(`npm ci failed after adding ${label}: ${result.output.slice(-2000)}`);
+      }
+    }
+    send("STATUS_UPDATE", { state: "in_progress", taskId: task.taskId, detail: `dependency ${label} installed` });
+    log.info(`dependency ${label} available (main @ ${response.mainCommit.slice(0, 8)})`);
+    return { mainCommit: response.mainCommit };
   }
 
   private async test(job: TestExecution): Promise<void> {

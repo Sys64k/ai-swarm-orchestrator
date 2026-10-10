@@ -9,8 +9,10 @@ export {
   type CompletedTask,
 } from "./git/agent-git-client.js";
 export {
+  DependencyRejectedError,
   JobRunner,
   unconfiguredExecutor,
+  type DependencyRequest,
   type ExecutionContext,
   type TaskAssignment,
   type TaskExecutor,

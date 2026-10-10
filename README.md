@@ -29,10 +29,10 @@ For the design, diagrams and protocol reference, see **[ARCHITECTURE.md](ARCHITE
 | 1 | Monorepo, `aso` CLI, Hub/Worker/Architect processes, Zod WebSocket protocol, Docker image for the Hub | ✅ Done |
 | 2 | Hardware profiling, node registry, hardware-aware task routing | ✅ Done |
 | 3 | Git flow: Hub-hosted repo over HTTP, task branches, push verification, QA pipeline, rework loop, auto-merge to `main` | ✅ Done |
-| 4 | Dependency RPC queue (`requestDependency`) | ⏳ Planned |
+| 4 | Dependency requests: the Hub adds npm packages on `main`, workers rebase and `npm ci` | ✅ Done |
 | 5 | LLM gateway: prompt queue, provider adapters, **the agent loop that writes code** | ⏳ Planned |
 | 6 | Agent roles: per-role system prompts and tool scopes | ⏳ Planned |
-| 7 | GitHub sync (`git push origin main`), packaged global CLI, `aso update`, node authentication | ⏳ Planned |
+| 7 | GitHub sync (`git push origin main`), packaged global CLI, `aso update`, node authentication | ⏳ Planned. Until then nothing is pushed anywhere; all commits stay in the local target repo |
 
 The task pipeline runs end to end: routing, then checkout, push, Hub verification, QA, rework
 and merge. The only missing piece is the component that actually writes code. Until Phase 5
@@ -138,6 +138,32 @@ rework rounds, and an event history.
 
 A task is failed after 3 node losses.
 
+## Adding dependencies
+
+Workers may never edit `package.json` or lockfiles. When an agent needs a package, it calls
+`requestDependency({ name, version?, dev? })`:
+
+1. **Pause.** The worker reports `waiting_dependency` and sends a request to the Hub.
+2. **Hub install.** Under the `main` lock, the Hub runs
+   `npm install <pkg> --package-lock-only --ignore-scripts`. This only updates `package.json`
+   and `package-lock.json`: no `node_modules` on the Hub, and no package code ever runs there.
+3. **Commit and reply.** The Hub commits both files to `main` as
+   `chore(deps): add <pkg>` and replies with the commit.
+4. **Rebase and install.** The worker rebases its task branch onto the new `main`, keeping the
+   agent's uncommitted edits, and runs `npm ci`. Then the agent continues.
+
+Rules:
+
+- **Who can ask.** Only the node currently implementing a task can request dependencies for
+  it, at most 10 per task.
+- **Allowlist.** `--allow-deps zod,@prisma/*` restricts which packages agents may add; the
+  default allows any.
+- **Rollback.** If npm fails or touches anything besides the two files, the Hub rolls back and
+  the request is rejected.
+- **npm only.** pnpm, yarn and bun projects are rejected with a clear message.
+- **Reconnects.** Requests survive them: the worker re-sends pending requests and the Hub
+  answers duplicates from its cache instead of installing twice.
+
 ## CLI reference
 
 ### `aso start-hub`
@@ -151,6 +177,7 @@ A task is failed after 3 node losses.
 | `--dashboard-port <port>` | `7421` | Dashboard port |
 | `--test-command <cmd>` | `npm test` | QA command, split on spaces, run without a shell |
 | `--no-qa` | | Merge verified work without a QA run |
+| `--allow-deps <list>` | any | npm packages agents may request; `@scope/*` allows a scope |
 | `--no-dashboard` | | Skip the dashboard (not supported with `--docker`) |
 | `--no-architect` | | Skip the Architect tmux session |
 
@@ -207,6 +234,7 @@ For the scoring formula, see [ARCHITECTURE.md](ARCHITECTURE.md#6-hardware-aware-
 | `ASO_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `ASO_TEST_COMMAND` | `npm test` | Default for `--test-command` (also passed into the container) |
 | `ASO_QA` | `1` | `0` disables QA (same as `--no-qa`) |
+| `ASO_ALLOW_DEPS` | *(any)* | Default for `--allow-deps` (also passed into the container) |
 | `ASO_UPDATE_SPEC` | `@aso/cli@latest` | Default source for `aso update` |
 
 ## Security notes
@@ -218,6 +246,10 @@ For the scoring formula, see [ARCHITECTURE.md](ARCHITECTURE.md#6-hardware-aware-
   anything outside `refs/heads/task/<id>`. Only the Hub writes `main`.
 - **Checks on both sides.** Workers' `AgentGitClient` refuses to commit `package.json` or
   lockfiles. The Hub checks again before QA, so a misbehaving worker can't get around it.
+- **Dependency installs.** On the Hub they never execute package code
+  (`--package-lock-only --ignore-scripts`). Agents can still choose *which* packages get added,
+  and workers run their install scripts during `npm ci`. Use `--allow-deps` if you want to
+  control that.
 - **Message validation.** All WebSocket traffic is validated against strict Zod schemas:
   - Unknown fields are rejected.
   - Paths can't escape the repository.

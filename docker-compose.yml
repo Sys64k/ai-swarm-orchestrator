@@ -17,6 +17,7 @@ services:
       ASO_LOG_LEVEL: "${ASO_LOG_LEVEL:-info}"
       ASO_TEST_COMMAND: "${ASO_TEST_COMMAND:-npm test}"
       ASO_QA: "${ASO_QA:-1}"
+      ASO_ALLOW_DEPS: "${ASO_ALLOW_DEPS:-}"
     restart: unless-stopped
 
 volumes:

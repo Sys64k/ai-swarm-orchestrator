@@ -1,0 +1,348 @@
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { describe, it } from "node:test";
+import { HubRepository, npmInstaller, type DependencyInstaller } from "@aso/hub";
+import { createMessage, type AgentMessage } from "@aso/shared";
+import { DependencyRejectedError, startWorker, type TaskExecutor } from "@aso/worker";
+import {
+  git,
+  hardware,
+  makeTargetRepo,
+  postTask,
+  tempDir,
+  waitFor,
+  withHub,
+  worker,
+  writeFiles,
+  type HubContext,
+  type TestClient,
+} from "./helpers.ts";
+
+const PKG = JSON.stringify({ name: "target", version: "1.0.0" }, null, 2) + "\n";
+const LOCK = (deps: Record<string, string> = {}) =>
+  JSON.stringify(
+    { name: "target", version: "1.0.0", lockfileVersion: 3, requires: true, packages: { "": { name: "target", version: "1.0.0", ...deps } } },
+    null,
+    2,
+  ) + "\n";
+
+/**
+ * Offline stand-in for npm: records the request in package.json under a custom key and
+ * writes a valid lockfile with no packages, so a real `npm ci` on workers succeeds offline.
+ */
+function fakeInstaller(log: string[] = []): DependencyInstaller {
+  return {
+    async install(dir, req) {
+      log.push(`${req.name}@${req.version ?? "latest"}${req.dev ? ":dev" : ""}`);
+      const pkg = JSON.parse(readFileSync(path.join(dir, "package.json"), "utf8"));
+      const key = req.dev ? "asoTestDevDependencies" : "asoTestDependencies";
+      pkg[key] = { ...pkg[key], [req.name]: req.version ?? "^1.0.0" };
+      writeFileSync(path.join(dir, "package.json"), JSON.stringify(pkg, null, 2) + "\n");
+      writeFileSync(path.join(dir, "package-lock.json"), LOCK());
+    },
+  };
+}
+
+const NPM_PROJECT = { "package.json": PKG, "package-lock.json": LOCK() };
+
+function response(m: AgentMessage) {
+  assert.equal(m.type, "DEPENDENCY_RESPONSE");
+  return m.type === "DEPENDENCY_RESPONSE" ? m.payload : assert.fail();
+}
+
+/** Register a fake implementer and move it to in_progress on `taskId`. */
+async function implementer(ctx: HubContext, nodeId: string, taskId: string): Promise<TestClient> {
+  const w = await worker(ctx.port, nodeId, { roles: ["backend"] });
+  await postTask(ctx.port, { taskId, role: "backend", title: "t", description: "d" });
+  const m = await w.next();
+  assert.equal(m.type, "TASK_ASSIGNMENT");
+  w.send(createMessage("STATUS_UPDATE", nodeId, { state: "in_progress", taskId }));
+  await waitFor(() => ctx.hub.tasks.get(taskId)?.state === "in_progress");
+  return w;
+}
+
+const request = (nodeId: string, taskId: string, extra: Record<string, unknown> = {}) =>
+  createMessage("DEPENDENCY_REQUEST", nodeId, {
+    requestId: crypto.randomUUID(),
+    taskId,
+    name: "left-pad",
+    ...extra,
+  } as never);
+
+describe("dependency requests (Hub)", () => {
+  it("adds the package on main and answers with the new main commit", () => {
+    const calls: string[] = [];
+    return withHub(
+      async (ctx) => {
+        const w = await implementer(ctx, "dev", "feat");
+        const before = git(ctx.repoDir, "rev-parse", "main");
+        w.send(request("dev", "feat", { version: "^1.3.0", dev: true }));
+
+        const r = response(await w.next());
+        assert.equal(r.outcome, "installed");
+        const main = git(ctx.repoDir, "rev-parse", "main");
+        assert.ok(r.outcome === "installed" && r.mainCommit === main);
+        assert.notEqual(main, before);
+        assert.deepEqual(calls, ["left-pad@^1.3.0:dev"]);
+        assert.equal(git(ctx.repoDir, "log", "-1", "--format=%s|%an", "main"), "chore(deps): add left-pad@^1.3.0 (dev)|ASO Hub");
+        // The fake installer leaves the lockfile unchanged; the real-npm test covers both files.
+        assert.equal(git(ctx.repoDir, "show", "--name-only", "--format=", "main"), "package.json");
+        assert.equal(git(ctx.repoDir, "status", "--porcelain"), "");
+        assert.ok(ctx.hub.tasks.get("feat")!.history.some((h) => /dependency left-pad@\^1.3.0 \(dev\) added on main/.test(h.event)));
+        w.ws.close();
+      },
+      { files: NPM_PROJECT, dependencyInstaller: fakeInstaller(calls) },
+    );
+  });
+
+  it("only accepts requests from the node implementing the task", () =>
+    withHub(
+      async (ctx) => {
+        const dev = await implementer(ctx, "dev", "feat");
+        const other = await worker(ctx.port, "other", { roles: ["qa"] });
+        other.send(request("other", "feat"));
+        const r = response(await other.next());
+        assert.ok(r.outcome === "rejected" && /not being implemented by other/.test(r.reason));
+        other.send(request("other", "no-such-task"));
+        assert.equal(response(await other.next()).outcome, "rejected");
+        dev.ws.close();
+        other.ws.close();
+      },
+      { files: NPM_PROJECT, dependencyInstaller: fakeInstaller() },
+    ));
+
+  it("enforces the allowlist, including @scope/* rules", () =>
+    withHub(
+      async (ctx) => {
+        const w = await implementer(ctx, "dev", "feat");
+        w.send(request("dev", "feat", { name: "zod" }));
+        assert.equal(response(await w.next()).outcome, "installed");
+        w.send(request("dev", "feat", { name: "@prisma/client" }));
+        assert.equal(response(await w.next()).outcome, "installed");
+        w.send(request("dev", "feat", { name: "left-pad" }));
+        const r = response(await w.next());
+        assert.ok(r.outcome === "rejected" && /not on the Hub's dependency allowlist/.test(r.reason));
+        w.ws.close();
+      },
+      { files: NPM_PROJECT, dependencyInstaller: fakeInstaller(), allowDependencies: ["zod", "@prisma/*"] },
+    ));
+
+  it("rolls back and rejects when the installer fails", () =>
+    withHub(
+      async (ctx) => {
+        const w = await implementer(ctx, "dev", "feat");
+        const before = git(ctx.repoDir, "rev-parse", "main");
+        w.send(request("dev", "feat", { name: "does-not-exist" }));
+        const r = response(await w.next());
+        assert.ok(r.outcome === "rejected" && /E404 not found/.test(r.reason));
+        assert.equal(git(ctx.repoDir, "rev-parse", "main"), before);
+        assert.equal(git(ctx.repoDir, "status", "--porcelain"), "");
+        w.ws.close();
+      },
+      {
+        files: NPM_PROJECT,
+        dependencyInstaller: {
+          async install(dir) {
+            writeFileSync(path.join(dir, "package.json"), "half-written");
+            throw new Error("npm ERR! E404 not found");
+          },
+        },
+      },
+    ));
+
+  it("rejects installers that touch anything but package.json and the lockfile", () =>
+    withHub(
+      async (ctx) => {
+        const w = await implementer(ctx, "dev", "feat");
+        w.send(request("dev", "feat"));
+        const r = response(await w.next());
+        assert.ok(r.outcome === "rejected" && /unexpected files: README.md, rogue.js/.test(r.reason));
+        assert.equal(git(ctx.repoDir, "status", "--porcelain"), "");
+        assert.equal(readFileSync(path.join(ctx.repoDir, "README.md"), "utf8"), "target\n");
+        w.ws.close();
+      },
+      {
+        files: NPM_PROJECT,
+        dependencyInstaller: {
+          async install(dir) {
+            writeFileSync(path.join(dir, "README.md"), "pwned\n");
+            writeFileSync(path.join(dir, "rogue.js"), "x\n");
+          },
+        },
+      },
+    ));
+
+  it("rejects non-npm projects and projects without package.json", async () => {
+    for (const [files, why] of [
+      [{ "package.json": PKG, "pnpm-lock.yaml": "x\n" }, /only npm projects are supported \(found pnpm-lock.yaml\)/],
+      [{}, /no package.json/],
+    ] as const) {
+      await withHub(
+        async (ctx) => {
+          const w = await implementer(ctx, "dev", "feat");
+          w.send(request("dev", "feat"));
+          const r = response(await w.next());
+          assert.ok(r.outcome === "rejected" && why.test(r.reason), r.outcome === "rejected" ? r.reason : "");
+          w.ws.close();
+        },
+        { files, dependencyInstaller: fakeInstaller() },
+      );
+    }
+  });
+
+  it("answers retries of the same request without installing twice", () => {
+    const calls: string[] = [];
+    return withHub(
+      async (ctx) => {
+        const w = await implementer(ctx, "dev", "feat");
+        const msg = request("dev", "feat");
+        w.send(msg);
+        const first = response(await w.next());
+        w.send({ ...msg, id: crypto.randomUUID() });
+        assert.deepEqual(response(await w.next()), first);
+        assert.equal(calls.length, 1);
+        w.ws.close();
+      },
+      { files: NPM_PROJECT, dependencyInstaller: fakeInstaller(calls) },
+    );
+  });
+
+  it("does not commit when the dependency is already satisfied", () =>
+    withHub(
+      async (ctx) => {
+        const w = await implementer(ctx, "dev", "feat");
+        const before = git(ctx.repoDir, "rev-parse", "main");
+        w.send(request("dev", "feat"));
+        const r = response(await w.next());
+        assert.ok(r.outcome === "installed" && r.mainCommit === before);
+        assert.equal(git(ctx.repoDir, "rev-parse", "main"), before);
+        w.ws.close();
+      },
+      { files: NPM_PROJECT, dependencyInstaller: { async install() {} } },
+    ));
+
+  it("serialises concurrent installs on main", () => {
+    let running = 0;
+    let maxRunning = 0;
+    const inner = fakeInstaller();
+    return withHub(
+      async (ctx) => {
+        const a = await implementer(ctx, "a", "task-a");
+        const b = await implementer(ctx, "b", "task-b");
+        a.send(request("a", "task-a", { name: "pkg-a" }));
+        b.send(request("b", "task-b", { name: "pkg-b" }));
+        const [ra, rb] = [response(await a.next(3000)), response(await b.next(3000))];
+        assert.equal(ra.outcome, "installed");
+        assert.equal(rb.outcome, "installed");
+        assert.equal(maxRunning, 1);
+        assert.match(git(ctx.repoDir, "log", "--format=%s", "-2", "main"), /pkg-b[\s\S]*pkg-a|pkg-a[\s\S]*pkg-b/);
+        a.ws.close();
+        b.ws.close();
+      },
+      {
+        files: NPM_PROJECT,
+        dependencyInstaller: {
+          async install(dir, req) {
+            maxRunning = Math.max(maxRunning, ++running);
+            await new Promise((r) => setTimeout(r, 100));
+            await inner.install(dir, req);
+            running--;
+          },
+        },
+      },
+    );
+  });
+});
+
+describe("dependency requests (real worker)", () => {
+  it("pauses, rebases onto the new main keeping edits, runs npm ci, resumes and merges", () =>
+    withHub(
+      async (ctx) => {
+        const observed: Record<string, unknown> = {};
+        const executor: TaskExecutor = {
+          async implement(_t, { repoDir, requestDependency }) {
+            writeFiles(repoDir, { "src/uses-dep.ts": "import pad from 'left-pad';\n" });
+            const { mainCommit } = await requestDependency({ name: "left-pad", version: "^1.3.0" });
+            const pkg = JSON.parse(readFileSync(path.join(repoDir, "package.json"), "utf8"));
+            observed.dep = pkg.asoTestDependencies?.["left-pad"];
+            observed.editKept = existsSync(path.join(repoDir, "src/uses-dep.ts"));
+            observed.npmCiRan = existsSync(path.join(repoDir, ".ci-ran"));
+            observed.mainCommit = mainCommit;
+            await assert.rejects(requestDependency({ name: "evil-pkg" }), DependencyRejectedError);
+            return { commitMessage: "use left-pad" };
+          },
+        };
+        const dir = tempDir("aso-w-");
+        const dev = await startWorker({ hub: `127.0.0.1:${ctx.port}`, nodeId: "dev", roles: ["backend"], workDir: dir, hardware: hardware(), executor });
+        try {
+          await waitFor(() => ctx.hub.registry.has("dev"));
+          await postTask(ctx.port, { taskId: "pad", role: "backend", title: "Use left-pad", description: "d" });
+          const record = await waitFor(
+            () => ["merged", "failed"].includes(ctx.hub.tasks.get("pad")!.state) && ctx.hub.tasks.get("pad")!,
+            30_000,
+            "task to finish",
+          );
+          assert.equal(record.state, "merged", record.history.map((h) => h.event).join("\n"));
+          assert.deepEqual(observed, { dep: "^1.3.0", editKept: true, npmCiRan: true, mainCommit: observed.mainCommit });
+          assert.equal(
+            git(ctx.repoDir, "log", "--format=%s", "main"),
+            ["Merge task/pad: Use left-pad", "use left-pad", "chore(deps): add left-pad@^1.3.0", "init"].join("\n"),
+          );
+          assert.ok(record.history.some((h) => /dependency request rejected: evil-pkg is not on the Hub's dependency allowlist/.test(h.event)));
+        } finally {
+          dev.stop();
+          await dev.runner.idle();
+          rmSync(dir, { recursive: true, force: true });
+        }
+      },
+      {
+        files: {
+          // postinstall leaves a marker so the test can tell `npm ci` really ran on the worker.
+          "package.json": JSON.stringify({
+            name: "target",
+            version: "1.0.0",
+            scripts: { postinstall: "node -e \"require('fs').writeFileSync('.ci-ran','')\"" },
+          }),
+          "package-lock.json": LOCK(),
+          ".gitignore": "node_modules/\n.ci-ran\n",
+        },
+        dependencyInstaller: fakeInstaller(),
+        allowDependencies: ["left-pad"],
+        qa: { enabled: false },
+      },
+    ));
+});
+
+describe("npm installer (real registry)", () => {
+  let online = false;
+  try {
+    execFileSync("npm", ["ping"], { stdio: "ignore", timeout: 8000 });
+    online = true;
+  } catch {
+    /* offline */
+  }
+
+  it("updates package.json and the lockfile without installing or running scripts", { skip: !online && "npm registry unreachable" }, async () => {
+    const dir = makeTargetRepo({ "package.json": PKG });
+    try {
+      const repo = await HubRepository.open(dir);
+      const result = await repo.addDependency({ name: "is-number", version: "^7.0.0", dev: false }, npmInstaller, "chore(deps): add is-number");
+      assert.ok(result.ok && result.changed, JSON.stringify(result));
+      const pkg = JSON.parse(readFileSync(path.join(dir, "package.json"), "utf8"));
+      assert.equal(pkg.dependencies["is-number"], "^7.0.0");
+      const lock = JSON.parse(readFileSync(path.join(dir, "package-lock.json"), "utf8"));
+      assert.ok(lock.packages["node_modules/is-number"]);
+      assert.equal(existsSync(path.join(dir, "node_modules")), false, "Hub must not install packages");
+      assert.equal(git(dir, "status", "--porcelain"), "");
+      assert.equal(git(dir, "show", "--name-only", "--format=", "HEAD"), "package-lock.json\npackage.json");
+
+      const bad = await repo.addDependency({ name: "aso-surely-nonexistent-pkg-x9z", dev: false }, npmInstaller, "x");
+      assert.ok(!bad.ok && /npm install aso-surely-nonexistent-pkg-x9z failed/.test(bad.reason));
+      assert.equal(git(dir, "status", "--porcelain"), "");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

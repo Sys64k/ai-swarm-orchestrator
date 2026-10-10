@@ -119,6 +119,7 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
           registered = true;
           log.info(`registered as ${msg.payload.nodeId} (roles: ${roles.join(", ")})`);
           for (const raw of outbox.splice(0)) socket.send(raw);
+          runner.resendPendingDependencies();
           clearInterval(heartbeatTimer);
           heartbeatTimer = setInterval(() => {
             sampleLoad()
@@ -138,6 +139,9 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
           log.info(`QA run for ${msg.payload.taskId} @ ${msg.payload.commit.slice(0, 8)}`);
           send("STATUS_UPDATE", { state: "accepted", taskId: msg.payload.taskId });
           runner.enqueueTest(msg.payload);
+          break;
+        case "DEPENDENCY_RESPONSE":
+          runner.handleDependencyResponse(msg.payload);
           break;
         case "PROTOCOL_ERROR":
           log.error(`hub rejected message: ${msg.payload.reason}`, msg.payload.issues);

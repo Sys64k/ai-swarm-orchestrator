@@ -52,6 +52,11 @@ program
     process.env.ASO_TEST_COMMAND || "npm test",
   )
   .option("--no-qa", "merge verified work without a QA run")
+  .option(
+    "--allow-deps <list>",
+    "comma-separated npm packages agents may request (`@scope/*` allows a scope); default: any",
+    process.env.ASO_ALLOW_DEPS || undefined,
+  )
   .action(startHubCommand);
 
 program

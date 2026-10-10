@@ -18,6 +18,7 @@ export interface StartHubOptions {
   docker: boolean;
   testCommand: string;
   qa: boolean;
+  allowDeps?: string;
 }
 
 export async function startHubCommand(opts: StartHubOptions): Promise<void> {
@@ -31,6 +32,7 @@ export async function startHubCommand(opts: StartHubOptions): Promise<void> {
     port: opts.port,
     host: opts.host,
     qa: { enabled: qaEnabled, command: testCommand },
+    allowDependencies: parseList(opts.allowDeps),
   });
   const dashboard = opts.dashboard ? launchDashboard(opts.dashboardPort, hub.port) : undefined;
   const architectStarted = opts.architect ? launchArchitect(hub.port) : false;
@@ -70,6 +72,7 @@ async function startHubInDocker(targetDir: string, opts: StartHubOptions): Promi
       ASO_DASHBOARD_PORT: String(opts.dashboardPort),
       ASO_TEST_COMMAND: parseTestCommand(opts.testCommand).join(" "),
       ASO_QA: opts.qa ? "1" : "0",
+      ASO_ALLOW_DEPS: parseList(opts.allowDeps)?.join(",") ?? "",
     },
   });
   const exited = new Promise<number>((resolve) => compose.on("exit", (code) => resolve(code ?? 1)));
@@ -123,6 +126,11 @@ function parseTestCommand(cmd: string): string[] {
   const argv = cmd.trim().split(/\s+/).filter(Boolean);
   if (argv.length === 0) throw new Error("--test-command must not be empty");
   return argv;
+}
+
+function parseList(value: string | undefined): string[] | undefined {
+  const items = value?.split(",").map((s) => s.trim()).filter(Boolean);
+  return items?.length ? items : undefined;
 }
 
 function resolveTargetDir(dir: string): string {

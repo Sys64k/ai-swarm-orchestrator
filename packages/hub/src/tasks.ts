@@ -207,6 +207,23 @@ export class TaskManager {
     }
   }
 
+  /** True while `nodeId` is the connected implementer of `taskId`. */
+  isImplementing(nodeId: string, taskId: string): boolean {
+    const task = this.tasks.get(taskId);
+    return (
+      !!task &&
+      task.nodeId === nodeId &&
+      (task.state === "assigned" || task.state === "in_progress") &&
+      task.detachedAt === undefined
+    );
+  }
+
+  /** Add an entry to a task's history (used by other Hub components). */
+  recordEvent(taskId: string, event: string): void {
+    const task = this.tasks.get(taskId);
+    if (task) this.note(task, event);
+  }
+
   /** Apply a STATUS_UPDATE. Returns an error string if the sender does not own the task. */
   handleStatus(nodeId: string, update: MessageOf<"STATUS_UPDATE">["payload"]): string | undefined {
     if (update.taskId === undefined) return undefined; // idle keepalive

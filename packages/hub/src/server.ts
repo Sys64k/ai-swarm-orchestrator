@@ -15,8 +15,9 @@ import {
   parseAgentMessage,
   type AgentMessage,
 } from "@aso/shared";
+import { DependencyManager } from "./dependencies.js";
 import { gitHttpHandler } from "./git/http-backend.js";
-import { HubRepository } from "./git/hub-repo.js";
+import { HubRepository, type DependencyInstaller } from "./git/hub-repo.js";
 import { NodeRegistry, type NodeTransport } from "./registry.js";
 import type { RoutingPolicies } from "./routing.js";
 import { TaskError, TaskManager, type QaOptions } from "./tasks.js";
@@ -38,6 +39,10 @@ export interface HubOptions {
   reclaimGraceMs?: number;
   qa?: Partial<QaOptions>;
   mainBranch?: string;
+  /** Package names (or `@scope/*`) agents may request; undefined allows any. */
+  allowDependencies?: readonly string[];
+  /** Replaces the npm-based installer (tests). */
+  dependencyInstaller?: DependencyInstaller;
 }
 
 export interface HubHandle {
@@ -67,6 +72,10 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     policies: opts.policies,
     reclaimGraceMs: opts.reclaimGraceMs,
     qa: opts.qa,
+  });
+  const deps = new DependencyManager(repo, tasks, registry, {
+    installer: opts.dependencyInstaller,
+    allow: opts.allowDependencies,
   });
 
   /** Idempotent: safe to call from both the timeout sweep and the socket close event. */
@@ -125,6 +134,11 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
         if (error) reject(conn, error, [], msg.id);
         return;
       }
+      case "DEPENDENCY_REQUEST": {
+        const error = deps.handle(conn.nodeId, msg.payload);
+        if (error) reject(conn, error, [], msg.id);
+        return;
+      }
       case "FEEDBACK_LOOP": {
         const error = tasks.handleFeedback(conn.nodeId, msg.payload);
         if (error) reject(conn, error, [], msg.id);
@@ -149,6 +163,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       targetDir: opts.targetDir,
       mainBranch: repo.mainBranch,
       qa: tasks.qa,
+      allowDependencies: opts.allowDependencies ?? null,
       connections: connections.size,
       uptimeSec: Math.round(process.uptime()),
     }),

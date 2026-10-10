@@ -12,7 +12,7 @@ and in most Markdown editors.
 6. [Hardware-aware routing](#6-hardware-aware-routing)
 7. [Task lifecycle](#7-task-lifecycle)
 8. [Git flow](#8-git-flow)
-9. [Dependency RPC (planned)](#9-dependency-rpc-planned)
+9. [Dependency requests](#9-dependency-requests)
 10. [LLM gateway (planned)](#10-llm-gateway-planned)
 11. [Agent roles (planned)](#11-agent-roles-planned)
 
@@ -119,15 +119,16 @@ flowchart LR
 |---|---|---|
 | `@aso/shared` | `protocol.ts` | `AgentMessageSchema`, task and hardware schemas, `PROTECTED_FILENAMES`, `TASK_REF_PATTERN` |
 | | `hub-address.ts` | `resolveHubUrl` (ws URL), `hubGitUrl` (Git URL from the same host and port) |
-| `@aso/hub` | `server.ts` | HTTP API, WebSocket validation pipeline, Git route, liveness and reclaim sweep |
+| `@aso/hub` | `dependencies.ts` | `DependencyManager` (ownership, allowlist, limits, dedup) and `npmInstaller` |
+| | `server.ts` | HTTP API, WebSocket validation pipeline, Git route, liveness and reclaim sweep |
 | | `registry.ts` | `NodeRegistry`: connected nodes, heartbeats, busy state |
 | | `routing.ts` | `selectNode()`: a pure, deterministic routing function |
 | | `tasks.ts` | `TaskManager`: queue, dispatch, verification, QA, rework, merge, node-loss handling |
 | | `git/http-backend.ts` | Git smart-HTTP via a `git http-backend` CGI bridge, with the push policy |
-| | `git/hub-repo.ts` | `HubRepository`: verify task commits, merge into main under a lock |
+| | `git/hub-repo.ts` | `HubRepository`: verify task commits, merge and add dependencies on main under one lock |
 | | `architect/main.ts` | Architect process (connect and register; planning comes in Phase 5/6) |
 | `@aso/worker` | `client.ts` | Connect, register (with resume claim), heartbeat, offline outbox, dispatch jobs |
-| | `jobs.ts` | `JobRunner`: implementation jobs (via a `TaskExecutor`) and QA runs |
+| | `jobs.ts` | `JobRunner`: implementation jobs (via a `TaskExecutor`, with `requestDependency`) and QA runs |
 | | `run-command.ts` | Shell-free command runner with process-group timeout |
 | | `hardware.ts` | `systeminformation` profile and disk write benchmark |
 | | `git/agent-git-client.ts` | The only Git interface agents get |
@@ -165,7 +166,7 @@ keys are rejected.
 | `TEST_EXECUTION` | hub → node | 3 | QA: test an exact commit with `setup` steps and a `command` argv |
 | `FEEDBACK_LOOP` | node → hub | 3 | QA verdict: `pass`, or `fail` with at least one failure and the output tail |
 | `FILE_OPERATION` | node → hub | 5 | Audit trail of agent file edits (sent by the agent loop) |
-| `DEPENDENCY_REQUEST` | node → hub | 4 | Ask the Hub to add an npm package |
+| `DEPENDENCY_REQUEST` | node → hub | 4 | Ask the Hub to add an npm package (idempotent by `requestId`) |
 | `DEPENDENCY_RESPONSE` | hub → node | 4 | `installed` (with the main commit) or `rejected` |
 | `PROMPT_EXECUTION` | node → hub | 5 | LLM request. No system prompt: the Hub picks it by role |
 | `PROMPT_RESULT` | hub → node | 5 | LLM response or a retryable or permanent error |
@@ -425,8 +426,8 @@ Pushes land as branch refs in the Hub repo without touching its checked-out `mai
 - No protected file changed. This is the same `PROTECTED_FILENAMES` list the worker enforces,
   so a buggy or modified worker can't sneak lockfile changes past QA.
 
-**Merging** the tested commit, not whatever the branch points to now, runs under a `main` lock
-(Phase 4's dependency installs will share it):
+**Merging** the tested commit, not whatever the branch points to now, runs under the `main`
+lock it shares with dependency installs:
 
 | Situation | Result |
 |---|---|
@@ -487,28 +488,79 @@ The QA worker distinguishes two kinds of failure:
 - **Code problems** (non-zero exit, timeout): `FEEDBACK_LOOP fail`, which starts a rework
   round.
 
-## 9. Dependency RPC (planned)
+## 9. Dependency requests
+
+Task branches may never change `package.json` or lockfiles. Both the worker and the Hub
+enforce this, so new packages go through the Hub.
 
 ```mermaid
 sequenceDiagram
   autonumber
-  participant Ag as Agent (on worker)
-  participant W as Worker
-  participant H as Hub
-  participant M as main (Hub repo)
+  participant Ag as Agent (executor)
+  participant W as Worker (JobRunner)
+  participant H as Hub (DependencyManager)
+  participant M as Hub repo main
 
-  Ag->>W: requestDependency({ name: "zod" })
-  W->>W: pause agent loop, STATUS waiting_dependency
-  W->>H: DEPENDENCY_REQUEST {requestId, name, version?, dev}
-  H->>M: withMainLock
-  H->>M: npm install name@version → commit manifest + lockfile
+  Ag->>W: ctx.requestDependency({ name, version?, dev? })
+  W->>H: STATUS waiting_dependency
+  W->>H: DEPENDENCY_REQUEST {requestId, taskId, name, version, dev}
+  H->>H: owner? allowlist? per-task limit? duplicate requestId?
+  H->>M: withMainLock: checkout clean + on main, npm project?
+  H->>M: npm install pkg --package-lock-only --ignore-scripts
+  H->>M: only package.json / package-lock.json changed? commit "chore(deps): add pkg"
   H-->>W: DEPENDENCY_RESPONSE installed {mainCommit}
-  W->>W: AgentGitClient.syncWithMain()
-  W->>Ag: resume
+  W->>W: syncWithMain() (stash edits, rebase, restore)
+  W->>W: npm ci
+  W->>H: STATUS in_progress
+  W-->>Ag: resolve { mainCommit }
 ```
 
-The Hub runs `npm install` with `execFile` (no shell). Package names and versions are already
-constrained by the schema.
+### Checks, in order
+
+| Check | On failure |
+|---|---|
+| `requestId` seen before from the same node | Re-send the cached answer, or let the in-flight one arrive; never install twice |
+| Sender is the connected implementer of `taskId` | `rejected` |
+| Name allowed by `--allow-deps` (exact name or `@scope/*`) | `rejected` |
+| At most 10 requests per task | `rejected` |
+| Hub checkout clean and on `main` | `rejected` |
+| Root `package.json` exists; no `pnpm-lock.yaml` / `yarn.lock` / `bun.lock*` | `rejected` (npm only) |
+| npm succeeds within 5 min | Roll back, `rejected` with the npm error tail |
+| Only `package.json` / `package-lock.json` changed | Roll back everything, `rejected` |
+| Nothing changed (already satisfied) | `installed` with the current main commit, no new commit |
+
+### Why the Hub never runs package code
+
+`--package-lock-only` resolves versions from the registry and writes `package.json` and the
+lockfile without creating `node_modules`. `--ignore-scripts` additionally guarantees no
+lifecycle scripts run. Without this, an agent asking for a malicious package would get code
+execution on the Hub, which holds the canonical repository (and in Phase 7, GitHub
+credentials).
+
+Workers install for real with `npm ci`, which never modifies the lockfile. They already execute
+project code, so running install scripts there doesn't widen what an agent can do.
+
+### Pushing dependency commits
+
+Dependency commits land on the **local** `main` in the target directory. Workers on the LAN
+fetch them from the Hub, and nothing is pushed anywhere else. In Phase 7, the Hub pushes `main`
+to GitHub after QA-approved merges; a dependency commit goes out together with the next merge.
+
+### Reconnects
+
+- **Offline when the answer arrives.** If the worker is offline when the Hub answers, the
+  answer is dropped. After re-registering, the worker re-sends every pending request, and the
+  Hub answers from its cache.
+- **Requests sent while offline.** These sit in the worker's outbox and are flushed on
+  reconnect, so they are not lost either.
+
+### Effect on the rest of the flow
+
+- **Branch diffs stay clean.** Dependency commits are on `main`, so they are in the merge-base
+  of the task branch. The worker's protected-file check (`origin/main...HEAD`) and the Hub's
+  pre-QA check (`main...commit`) don't count them as task changes.
+- **QA installs them.** QA runs `npm ci` because the task commit now has a
+  `package-lock.json`.
 
 ## 10. LLM gateway (planned)
 

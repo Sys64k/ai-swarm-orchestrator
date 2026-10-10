@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import path from "node:path";
 import { simpleGit, type SimpleGit } from "simple-git";
 import { createLogger, isProtectedPath, taskBranchName, type TaskId } from "@aso/shared";
@@ -7,6 +9,24 @@ const log = createLogger("hub-repo");
 export class HubRepoError extends Error {
   override name = "HubRepoError";
 }
+
+/** Files the Hub commits for a dependency change. */
+const DEPENDENCY_FILES = ["package.json", "package-lock.json"];
+
+export interface DependencySpec {
+  name: string;
+  version?: string;
+  dev: boolean;
+}
+
+export interface DependencyInstaller {
+  /** Update package.json + lockfile in `dir`; throw with a readable message on failure. */
+  install(dir: string, request: DependencySpec): Promise<void>;
+}
+
+export type DependencyResult =
+  | { ok: true; changed: boolean; mainCommit: string }
+  | { ok: false; reason: string };
 
 export type MergeResult =
   | { ok: true; mainCommit: string }
@@ -22,6 +42,8 @@ export class HubRepository {
   readonly mainBranch: string;
   private readonly git: SimpleGit;
   private mainLock: Promise<unknown> = Promise.resolve();
+  /** Untracked files present before a main-writing operation; left alone by rollbacks. */
+  private preexistingUntracked = new Set<string>();
 
   private constructor(dir: string, mainBranch: string) {
     this.dir = dir;
@@ -81,19 +103,8 @@ export class HubRepository {
   /** Merge a tested commit into main (no fast-forward, so every task is one merge commit). */
   merge(taskId: TaskId, commit: string, message: string): Promise<MergeResult> {
     return this.withMainLock(async () => {
-      const current = (await this.git.raw(["symbolic-ref", "--quiet", "--short", "HEAD"]).catch(() => "")).trim();
-      if (current !== this.mainBranch) {
-        return { ok: false, conflict: false, reason: `the Hub checkout is on "${current || "detached HEAD"}", not ${this.mainBranch}` };
-      }
-      const status = await this.git.status();
-      const dirty = status.files.filter((f) => f.index !== "?" || f.working_dir !== "?");
-      if (dirty.length) {
-        return {
-          ok: false,
-          conflict: false,
-          reason: `the Hub checkout has uncommitted changes: ${dirty.map((f) => f.path).join(", ")}`,
-        };
-      }
+      const notReady = await this.checkoutProblem();
+      if (notReady) return { ok: false, conflict: false, reason: notReady };
 
       const error = await this.git.raw(["merge", "--no-ff", "-m", message, commit]).then(
         () => undefined,
@@ -109,6 +120,72 @@ export class HubRepository {
       log.info(`merged ${taskBranchName(taskId)} into ${this.mainBranch} @ ${mainCommit.slice(0, 8)}`);
       return { ok: true, mainCommit };
     });
+  }
+
+  /**
+   * Run `installer` in the checkout and commit the resulting manifest + lockfile change to main.
+   * Anything else the installer touches is rolled back and the request rejected.
+   */
+  addDependency(
+    request: DependencySpec,
+    installer: DependencyInstaller,
+    message: string,
+  ): Promise<DependencyResult> {
+    return this.withMainLock(async () => {
+      const notReady = await this.checkoutProblem();
+      if (notReady) return { ok: false, reason: notReady };
+
+      const has = (f: string) => existsSync(path.join(this.dir, f));
+      if (!has("package.json")) return { ok: false, reason: "the target project has no package.json" };
+      const foreign = ["pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb"].filter(has);
+      if (foreign.length) return { ok: false, reason: `only npm projects are supported (found ${foreign.join(", ")})` };
+
+      const before = await this.mainHead();
+      try {
+        await installer.install(this.dir, request);
+      } catch (err) {
+        await this.restoreManifests();
+        return { ok: false, reason: (err as Error).message };
+      }
+
+      const changed = (await this.git.status()).files.map((f) => f.path);
+      const unexpected = changed.filter((f) => !DEPENDENCY_FILES.includes(f) && !this.preexistingUntracked.has(f));
+      if (unexpected.length) {
+        await this.restoreManifests(unexpected);
+        return { ok: false, reason: `installer modified unexpected files: ${unexpected.join(", ")}` };
+      }
+      const toCommit = changed.filter((f) => DEPENDENCY_FILES.includes(f));
+      if (toCommit.length === 0) return { ok: true, changed: false, mainCommit: before };
+
+      await this.git.add(toCommit);
+      await this.git.commit(message, toCommit);
+      const mainCommit = await this.mainHead();
+      log.info(`committed dependency change on ${this.mainBranch} @ ${mainCommit.slice(0, 8)}: ${message}`);
+      return { ok: true, changed: true, mainCommit };
+    });
+  }
+
+  /** Why main can't be written right now, or undefined if the checkout is clean and on main. */
+  private async checkoutProblem(): Promise<string | undefined> {
+    const current = (await this.git.raw(["symbolic-ref", "--quiet", "--short", "HEAD"]).catch(() => "")).trim();
+    if (current !== this.mainBranch) {
+      return `the Hub checkout is on "${current || "detached HEAD"}", not ${this.mainBranch}`;
+    }
+    const status = await this.git.status();
+    this.preexistingUntracked = new Set(status.not_added);
+    const dirty = status.files.filter((f) => f.index !== "?" || f.working_dir !== "?");
+    if (dirty.length) return `the Hub checkout has uncommitted changes: ${dirty.map((f) => f.path).join(", ")}`;
+    return undefined;
+  }
+
+  /** Undo installer side effects: tracked files back to HEAD, new files removed. */
+  private async restoreManifests(extra: string[] = []): Promise<void> {
+    const status = await this.git.status();
+    const created = new Set(status.not_added.filter((f) => !this.preexistingUntracked.has(f)));
+    const paths = [...new Set([...DEPENDENCY_FILES, ...extra])];
+    const tracked = paths.filter((f) => !created.has(f) && status.files.some((s) => s.path === f));
+    if (tracked.length) await this.git.raw(["checkout", "HEAD", "--", ...tracked]);
+    for (const f of created) await rm(path.join(this.dir, f), { recursive: true, force: true });
   }
 
   /** Serialises everything that writes to main (merges now, dependency installs in Phase 4). */
