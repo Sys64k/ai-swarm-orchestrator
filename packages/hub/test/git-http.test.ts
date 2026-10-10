@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { describe, it } from "node:test";
 import { checkPushPolicy, parseReceivePackCommands } from "@aso/hub";
-import { git, gitAsync, pushTaskBranch, tempDir, withHub, writeFiles } from "./helpers.ts";
+import { TOKEN, git, gitAsync, pushTaskBranch, tempDir, withHub, writeFiles } from "./helpers.ts";
 
 const A = "a".repeat(40);
 const Z = "0".repeat(40);
@@ -78,7 +78,7 @@ describe("Hub git endpoint", () => {
   it("does not expose arbitrary paths", () =>
     withHub(async ({ port }) => {
       for (const p of ["/git/project.git/config", "/git/project.git/objects/info/packs", "/git/project.git/../../etc/passwd"]) {
-        const res = await fetch(`http://127.0.0.1:${port}${p}`);
+        const res = await fetch(`http://127.0.0.1:${port}${p}`, { headers: { authorization: `Bearer ${TOKEN}` } });
         assert.equal(res.status, 404, p);
       }
     }));

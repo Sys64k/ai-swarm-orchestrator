@@ -19,6 +19,7 @@ import {
   type HubContext,
   type TestClient,
 } from "./helpers.ts";
+import { TOKEN } from "./helpers.ts";
 
 const PKG = JSON.stringify({ name: "target", version: "1.0.0" }, null, 2) + "\n";
 const LOCK = (deps: Record<string, string> = {}) =>
@@ -275,7 +276,7 @@ describe("dependency requests (real worker)", () => {
           },
         };
         const dir = tempDir("aso-w-");
-        const dev = await startWorker({ hub: `127.0.0.1:${ctx.port}`, nodeId: "dev", roles: ["backend"], workDir: dir, hardware: hardware(), executor });
+        const dev = await startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "dev", roles: ["backend"], workDir: dir, hardware: hardware(), executor });
         try {
           await waitFor(() => ctx.hub.registry.has("dev"));
           await postTask(ctx.port, { taskId: "pad", role: "backend", title: "Use left-pad", description: "d" });

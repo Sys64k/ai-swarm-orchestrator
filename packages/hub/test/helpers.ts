@@ -14,6 +14,12 @@ import {
 } from "@aso/shared";
 
 process.env.ASO_LOG_LEVEL ??= "error";
+// Never read or write the real ~/.config/aso from tests.
+process.env.ASO_CONFIG_DIR = mkdtempSync(path.join(os.tmpdir(), "aso-config-"));
+
+/** Every test Hub requires this token. */
+export const TOKEN = "aso_test-token-0123456789";
+const AUTH = `Authorization: Bearer ${TOKEN}`;
 
 const GIT_ENV = {
   ...process.env,
@@ -32,7 +38,7 @@ export function git(cwd: string, ...args: string[]): string {
  * would block the event loop the Hub needs to answer it.
  */
 export async function gitAsync(cwd: string, ...args: string[]): Promise<string> {
-  const { stdout } = await promisify(execFile)("git", args, { cwd, env: GIT_ENV, encoding: "utf8" });
+  const { stdout } = await promisify(execFile)("git", ["-c", `http.extraHeader=${AUTH}`, ...args], { cwd, env: GIT_ENV, encoding: "utf8" });
   return stdout.trim();
 }
 
@@ -61,31 +67,42 @@ export interface HubContext {
   hub: HubHandle;
   port: number;
   repoDir: string;
+  /** Bare repo acting as the remote "origin" (when withHub was given origin: true). */
+  originDir?: string;
   gitUrl: string;
 }
 
 export async function withHub(
   fn: (ctx: HubContext) => Promise<void>,
-  opts: Partial<HubOptions> & { files?: Record<string, string> } = {},
+  opts: Partial<HubOptions> & { files?: Record<string, string>; origin?: boolean } = {},
 ) {
-  const { files, ...hubOpts } = opts;
+  const { files, origin, ...hubOpts } = opts;
   const repoDir = makeTargetRepo(files);
+  let originDir: string | undefined;
+  if (origin) {
+    // A bare repository standing in for GitHub.
+    originDir = tempDir("aso-origin-");
+    git(originDir, "init", "--quiet", "--bare", "--initial-branch=main");
+    git(repoDir, "remote", "add", "origin", originDir);
+    git(repoDir, "push", "--quiet", "origin", "main");
+  }
   // Port 0: test files run in parallel processes, so let the OS pick free ports.
-  const hub = await startHub({ targetDir: repoDir, port: 0, host: "127.0.0.1", ...hubOpts });
+  const hub = await startHub({ targetDir: repoDir, port: 0, host: "127.0.0.1", token: TOKEN, ...hubOpts });
   const port = hub.port;
   try {
-    await fn({ hub, port, repoDir, gitUrl: `http://127.0.0.1:${port}/git/project.git` });
+    await fn({ hub, port, repoDir, originDir, gitUrl: `http://127.0.0.1:${port}/git/project.git` });
   } finally {
     await hub.close();
     rmSync(repoDir, { recursive: true, force: true });
+    if (originDir) rmSync(originDir, { recursive: true, force: true });
   }
 }
 
 export type TestClient = Awaited<ReturnType<typeof connect>>;
 
 /** Minimal test client that queues parsed inbound messages. */
-export async function connect(port: number) {
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+export async function connect(port: number, token: string | null = TOKEN) {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, { headers: token ? { authorization: `Bearer ${token}` } : {} } as never);
   const inbox: AgentMessage[] = [];
   const waiters: Array<(m: AgentMessage) => void> = [];
   let closeCode: number | undefined;
@@ -161,14 +178,14 @@ export async function worker(
 export async function postTask(port: number, body: unknown) {
   const res = await fetch(`http://127.0.0.1:${port}/api/tasks`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", authorization: `Bearer ${TOKEN}` },
     body: JSON.stringify(body),
   });
   return { status: res.status, body: (await res.json()) as Record<string, any> };
 }
 
 export async function getTask(port: number, id: string) {
-  return (await (await fetch(`http://127.0.0.1:${port}/api/tasks/${id}`)).json()) as Record<string, any>;
+  return (await (await fetch(`http://127.0.0.1:${port}/api/tasks/${id}`, { headers: { authorization: `Bearer ${TOKEN}` } })).json()) as Record<string, any>;
 }
 
 /** Poll until `check` returns a truthy value. */

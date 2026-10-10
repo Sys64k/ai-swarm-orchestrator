@@ -3,7 +3,10 @@
 name: aso
 services:
   hub:
-    build: .
+    build:
+      context: .
+      args:
+        ASO_BUILD: "${ASO_BUILD:-unknown}"
     image: aso-hub:local
     init: true
     user: "${ASO_UID:-1000}:${ASO_GID:-1000}"
@@ -24,6 +27,10 @@ services:
       ASO_LLM_CONCURRENCY: "${ASO_LLM_CONCURRENCY:-2}"
       # Read from the environment of `aso start-hub --docker`; never baked into the image.
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      ASO_TOKEN: "${ASO_TOKEN:?the CLI passes the Hub token}"
+      ASO_PUSH: "${ASO_PUSH:-1}"
+      # For HTTPS remotes (e.g. a GitHub fine-grained token with Contents: read/write).
+      ASO_GIT_TOKEN: "${ASO_GIT_TOKEN:-}"
     restart: unless-stopped
 
 volumes:

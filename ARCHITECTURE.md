@@ -15,6 +15,8 @@ and in most Markdown editors.
 9. [Dependency requests](#9-dependency-requests)
 10. [LLM gateway and agent loop](#10-llm-gateway-and-agent-loop)
 11. [Agent roles and planning](#11-agent-roles-and-planning)
+12. [Authentication](#12-authentication)
+13. [Distribution and updates](#13-distribution-and-updates)
 
 ---
 
@@ -48,7 +50,7 @@ flowchart TB
     ARCH["Architect<br/>tmux session aso-architect"]
     REPO[("Target project repo<br/>mounted at /project<br/>canonical main")]
     CLIH -- "docker compose up" --> CTR
-    CLIH -- "tmux new-session" --> ARCH
+    CLIH -- "tmux: aso architect" --> ARCH
     HUB --- REPO
     ARCH -- "WebSocket via published port" --> HUB
   end
@@ -70,7 +72,7 @@ flowchart TB
   WB_CO -- "git fetch / push task/*" --> HUB
   WC_CO -- "git fetch / push task/*" --> HUB
   HUB -- "Messages API (API key)" --> EXT(["Anthropic API"])
-  REPO -. "Phase 7: push origin main" .-> GH(["GitHub"])
+  HUB -- "git push origin main (after merges)" --> GH(["GitHub (origin)"])
 ```
 
 ### Two ways to run the Hub
@@ -137,7 +139,7 @@ flowchart LR
 | | `llm/conversations.ts` | `ConversationManager`: Hub-held conversations, turn checks, budget, concurrency queue |
 | | `llm/prompts.ts`, `llm/pricing.ts` | Role system prompts, task prompt (with rework feedback), price table |
 | | `plans.ts` | `PlanManager`: plan queue, Architect assignment, validation, approval → tasks |
-| `@aso/architect` | `client.ts`, `planner.ts`, `main.ts` | Architect node: registers, plans each `PLAN_REQUEST` with read-only tools via the Hub, submits `PLAN_RESULT`. `main.ts` is the tmux entrypoint |
+| `@aso/architect` | `client.ts`, `planner.ts` | Architect node: registers, plans each `PLAN_REQUEST` with read-only tools via the Hub, submits `PLAN_RESULT`. Run by the CLI's hidden `aso architect` command in tmux |
 | `@aso/worker` | `client.ts` | Connect, register (with resume claim), heartbeat, offline outbox, dispatch jobs |
 | | `jobs.ts` | `JobRunner`: implementation jobs (via a `TaskExecutor`, with `requestDependency` / `callModel`) and QA runs |
 | | `agent/executor.ts` | `LlmTaskExecutor`: the agent loop (model turn via Hub → run tools → repeat until `finish`) |
@@ -510,6 +512,35 @@ The QA worker distinguishes two kinds of failure:
 - **Code problems** (non-zero exit, timeout): `FEEDBACK_LOOP fail`, which starts a rework
   round.
 
+### Pushing to origin
+
+`GitSync` (`git/sync.ts`) pushes `main` to the target repository's `origin` after each merge.
+
+- **Coalesced pushes.** A burst of merges becomes one push.
+- **Shared lock.** Pushes share the main lock with merges and dependency installs.
+
+```mermaid
+flowchart TD
+  M["task merged into main"] --> Q{"origin remote and pushing enabled?"}
+  Q -- no --> L["stay local (status disabled)"]
+  Q -- yes --> P["git push origin main"]
+  P -- ok --> OK["status idle, task history: pushed to origin"]
+  P -- "rejected: origin moved" --> F["fetch origin main, merge origin/main into main"]
+  F -- clean --> P2["git push origin main"] --> OK
+  F -- conflict --> C["merge --abort, status conflict; resolve in the Hub checkout, then aso sync"]
+  P -- "auth or network error" --> E["status error, retry in 5 min, after the next merge, or on aso sync"]
+```
+
+**Credentials:**
+
+- **Native Hub:** uses the user's normal git credentials (SSH agent, credential helper).
+- **`ASO_GIT_TOKEN`:** for HTTPS remotes, especially from Docker. It's sent as
+  `http.<origin>/.extraHeader` (Basic, `x-access-token:<token>`), scoped to the remote's host,
+  per command, and never stored.
+- **No prompts:** the Hub sets `GIT_TERMINAL_PROMPT=0`, so a missing credential fails fast
+  instead of hanging.
+- **Clean URLs:** remote URLs are shown with userinfo stripped.
+
 ## 9. Dependency requests
 
 Task branches may never change `package.json` or lockfiles. Both the worker and the Hub
@@ -556,17 +587,17 @@ sequenceDiagram
 `--package-lock-only` resolves versions from the registry and writes `package.json` and the
 lockfile without creating `node_modules`. `--ignore-scripts` additionally guarantees no
 lifecycle scripts run. Without this, an agent asking for a malicious package would get code
-execution on the Hub, which holds the canonical repository (and in Phase 7, GitHub
-credentials).
+execution on the Hub, which holds the canonical repository and the GitHub credentials.
 
 Workers install for real with `npm ci`, which never modifies the lockfile. They already execute
 project code, so running install scripts there doesn't widen what an agent can do.
 
 ### Pushing dependency commits
 
-Dependency commits land on the **local** `main` in the target directory. Workers on the LAN
-fetch them from the Hub, and nothing is pushed anywhere else. In Phase 7, the Hub pushes `main`
-to GitHub after QA-approved merges; a dependency commit goes out together with the next merge.
+Dependency commits land on the **local** `main` in the target directory, and workers on the
+LAN fetch them from the Hub. The Hub pushes `main` to `origin` only after merges (see
+[Pushing to origin](#pushing-to-origin)), so a dependency commit goes out together with the
+next merged task.
 
 ### Reconnects
 
@@ -755,3 +786,70 @@ sequenceDiagram
 - **Plan-local keys.** Proposed tasks use keys (`api`, `login-page`), and `dependsOn` refers
   to keys. Approval submits tasks in dependency order and maps keys to the generated task ids.
 - **Linking.** Each created task records its `planId`.
+
+## 12. Authentication
+
+One shared secret, the **ASO token**, gates everything on the Hub except liveness and the
+public package.
+
+```mermaid
+flowchart LR
+  T[("~/.config/aso/token<br/>(created by start-hub, mode 600)")]
+  T --> HUB["Hub: middleware on /api/*, /git/*, /ws"]
+  T --> ARCH["Architect (same machine, reads the file)"]
+  T --> DASH["Dashboard: server-side API calls + Basic auth for browsers"]
+  W["Workers: ASO_TOKEN (env or ~/.config/aso/.env)"] -->|"WebSocket Authorization header,<br/>git http.extraHeader"| HUB
+  CLI["CLI: aso plan / sync"] -->|Bearer| HUB
+```
+
+| Surface | How the token is presented | Without it |
+|---|---|---|
+| WebSocket `/ws` | `Authorization: Bearer` on the upgrade request | `401` before upgrade; the worker logs "check ASO_TOKEN" |
+| API `/api/*` | `Bearer`, or Basic with the token as password | `401` with `WWW-Authenticate: Basic` |
+| Git `/git/project.git/*` | `http.extraHeader` per git command (never in `.git/config`) | `401` (git fails without prompting) |
+| Dashboard | Browser Basic auth (any user, token as password); server-side calls use `Bearer` | `401` login prompt |
+| `/api/health`, `/api/version`, `/dist/aso.tgz` | none | Health shows only `{status, auth}` |
+
+**Implementation notes:**
+
+- **Constant-time comparison.** Tokens are compared with `timingSafeEqual`.
+- **Defaults differ by entry point.** `startHub` requires an explicit `token`; `null` disables
+  auth and logs a warning, which only tests use. The CLI always supplies one.
+- **No TLS.** The Hub speaks plain HTTP. On an untrusted network, put it behind a TLS reverse
+  proxy or VPN.
+
+## 13. Distribution and updates
+
+`npm run package` (`scripts/package.mjs`) builds `release/aso.tgz`:
+
+| Content | What it is |
+|---|---|
+| `dist/aso.mjs` | The CLI with every JS dependency (Hub, worker, Architect, SDKs) bundled by esbuild, so installing needs no registry access |
+| `dashboard.tar.gz` | The Next.js standalone server with its own `node_modules`. It's nested because `npm pack` drops `node_modules`; it's extracted to `~/.cache/aso/dashboard-<version>` on first use |
+| `docker/` | Dockerfile and compose file that run this same package (for `start-hub --docker` from an installed package) |
+| `package.json` | `aso-cli`, `bin: aso`, and `asoBuild` (the commit, plus `-dirty` if the tree was modified) |
+
+Versions are `<semver>+<asoBuild>`. The CLI finds its files through `layout.ts`, which works
+the same whether it runs from a source checkout (`packages/cli/dist`) or an installed package.
+
+```mermaid
+sequenceDiagram
+  participant H as Hub machine
+  participant W as Worker machine
+  H->>H: npm run package → release/aso.tgz + aso.json (version)
+  Note over H: a packaged Hub re-packs itself instead (npm pack, cached)
+  W->>H: GET /api/version → {version, sha256}
+  alt version differs
+    W->>H: GET /dist/aso.tgz
+    W->>W: verify sha256, npm install -g <file>
+  else same
+    W->>W: "already up to date"
+  end
+```
+
+npm 12 refuses remote tarball URLs, so `aso update` downloads the package, verifies its
+checksum and installs the local file. First installs do the same by hand with `curl` and
+`npm install -g`.
+
+The Docker image builds the package during `docker build`. The CLI passes the host's commit as
+`ASO_BUILD`, since the image has no `.git`, so a containerized Hub serves the package too.

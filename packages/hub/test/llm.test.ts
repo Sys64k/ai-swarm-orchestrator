@@ -22,6 +22,7 @@ import {
   type HubContext,
   type TestClient,
 } from "./helpers.ts";
+import { TOKEN } from "./helpers.ts";
 
 delete process.env.ANTHROPIC_API_KEY; // tests must never reach the real API
 
@@ -301,8 +302,8 @@ console.log("greeting ok");\n`;
     return withHub(
       async (ctx) => {
         const dirs = [tempDir("aso-dev-"), tempDir("aso-qa-")];
-        const dev = await startWorker({ hub: `127.0.0.1:${ctx.port}`, nodeId: "dev", roles: ["backend"], workDir: dirs[0], hardware: hardware() });
-        const qa = await startWorker({ hub: `127.0.0.1:${ctx.port}`, nodeId: "qa", roles: ["qa"], workDir: dirs[1], hardware: hardware() });
+        const dev = await startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "dev", roles: ["backend"], workDir: dirs[0], hardware: hardware() });
+        const qa = await startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "qa", roles: ["qa"], workDir: dirs[1], hardware: hardware() });
         try {
           await waitFor(() => ctx.hub.registry.has("dev") && ctx.hub.registry.has("qa"));
           await postTask(ctx.port, { taskId: "greet", role: "backend", title: "Add greeting", description: "greeting.txt must contain hello" });
@@ -344,7 +345,7 @@ console.log("greeting ok");\n`;
     return withHub(
       async (ctx) => {
         const dir = tempDir("aso-dev-");
-        const dev = await startWorker({ hub: `127.0.0.1:${ctx.port}`, nodeId: "dev", roles: ["backend"], workDir: dir, hardware: hardware() });
+        const dev = await startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "dev", roles: ["backend"], workDir: dir, hardware: hardware() });
         try {
           await waitFor(() => ctx.hub.registry.has("dev"));
           await postTask(ctx.port, { taskId: "greet", role: "backend", title: "Add greeting", description: "d" });

@@ -3,7 +3,7 @@ import { after, before, describe, it } from "node:test";
 import { createMessage } from "@aso/shared";
 import { rmSync } from "node:fs";
 import { startHub, type HubHandle } from "@aso/hub";
-import { connect as connectTo, makeTargetRepo } from "./helpers.ts";
+import { TOKEN, connect as connectTo, makeTargetRepo } from "./helpers.ts";
 
 let PORT: number;
 let hub: HubHandle;
@@ -11,7 +11,7 @@ let repoDir: string;
 
 before(async () => {
   repoDir = makeTargetRepo();
-  hub = await startHub({ targetDir: repoDir, port: 0, host: "127.0.0.1" });
+  hub = await startHub({ targetDir: repoDir, port: 0, host: "127.0.0.1", token: TOKEN });
   PORT = hub.port;
 });
 after(async () => {
@@ -52,7 +52,7 @@ describe("hub WebSocket protocol", () => {
     assert.ok(ack.type === "REGISTRATION_ACK" && ack.payload.nodeId === "arch-1");
     assert.equal(ack.from, "hub");
 
-    const nodes = (await (await fetch(`http://127.0.0.1:${PORT}/api/nodes`)).json()) as Array<{ nodeId: string }>;
+    const nodes = (await (await fetch(`http://127.0.0.1:${PORT}/api/nodes`, { headers: { authorization: `Bearer ${TOKEN}` } })).json()) as Array<{ nodeId: string }>;
     assert.ok(nodes.some((n) => n.nodeId === "arch-1"));
 
     c.send(createMessage("STATUS_UPDATE", "someone-else", { state: "idle" }));

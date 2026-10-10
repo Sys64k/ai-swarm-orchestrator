@@ -176,6 +176,31 @@ export class HubRepository {
     });
   }
 
+  /**
+   * Merge the remote's main into ours (caller holds the main lock). Used when a push is
+   * rejected because someone pushed to the remote directly.
+   */
+  async mergeRemoteMain(remote: string, git: SimpleGit): Promise<{ ok: true } | { ok: false; reason: string; conflict: boolean }> {
+    const notReady = await this.checkoutProblem();
+    if (notReady) return { ok: false, reason: notReady, conflict: false };
+    try {
+      await git.fetch(remote, this.mainBranch);
+    } catch (err) {
+      return { ok: false, reason: `fetch from ${remote} failed: ${(err as Error).message.split("\n")[0]}`, conflict: false };
+    }
+    const error = await this.git
+      .raw(["merge", "--no-ff", "-m", `Merge ${remote}/${this.mainBranch} into ${this.mainBranch}`, `${remote}/${this.mainBranch}`])
+      .then(() => undefined, (err: Error) => err);
+    const conflicted = (await this.git.status()).conflicted;
+    if (error || conflicted.length) {
+      await this.git.raw(["merge", "--abort"]).catch(() => undefined);
+      return conflicted.length
+        ? { ok: false, conflict: true, reason: `${remote}/${this.mainBranch} conflicts with ${this.mainBranch} in ${conflicted.join(", ")}; resolve it in the Hub checkout, then retry` }
+        : { ok: false, conflict: false, reason: error!.message.trim() };
+    }
+    return { ok: true };
+  }
+
   /** Why main can't be written right now, or undefined if the checkout is clean and on main. */
   private async checkoutProblem(): Promise<string | undefined> {
     const current = (await this.git.raw(["symbolic-ref", "--quiet", "--short", "HEAD"]).catch(() => "")).trim();

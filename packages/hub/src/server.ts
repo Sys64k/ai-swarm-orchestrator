@@ -1,6 +1,7 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { readFile, stat } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
-import { Hono, type Context } from "hono";
+import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { serve, type ServerType } from "@hono/node-server";
 import { createNodeWebSocket } from "@hono/node-ws";
 import type { WSContext } from "hono/ws";
@@ -13,6 +14,7 @@ import {
   WS_PATH,
   createLogger,
   createMessage,
+  isAuthorized,
   parseAgentMessage,
   type AgentMessage,
 } from "@aso/shared";
@@ -22,6 +24,7 @@ import { ConversationManager } from "./llm/conversations.js";
 import { hasPrice } from "./llm/pricing.js";
 import { gitHttpHandler } from "./git/http-backend.js";
 import { HubRepository, type DependencyInstaller } from "./git/hub-repo.js";
+import { GitSync } from "./git/sync.js";
 import { PlanError, PlanManager } from "./plans.js";
 import { NodeRegistry, type NodeTransport } from "./registry.js";
 import type { RoutingPolicies } from "./routing.js";
@@ -48,6 +51,15 @@ export interface HubOptions {
   allowDependencies?: readonly string[];
   /** Replaces the npm-based installer (tests). */
   dependencyInstaller?: DependencyInstaller;
+  /**
+   * Shared secret required on the WebSocket, API and Git endpoints. `null` disables
+   * authentication (only for tests and fully trusted setups); the CLI always sets one.
+   */
+  token: string | null;
+  /** The `aso` package this Hub serves to other machines (`aso update`, first installs). */
+  dist?: { version: () => string | undefined; tarball: () => string | undefined };
+  /** Push main to the target repo's remote after merges. Default: on when an `origin` remote exists. */
+  sync?: { enabled?: boolean; remote?: string; token?: string; retryMs?: number };
   llm?: {
     /** Defaults to the Anthropic API adapter when ANTHROPIC_API_KEY is set; otherwise no LLM. */
     adapter?: LlmAdapter;
@@ -67,6 +79,7 @@ export interface HubHandle {
   tasks: TaskManager;
   plans: PlanManager;
   repo: HubRepository;
+  sync: GitSync;
   close(): Promise<void>;
 }
 
@@ -85,7 +98,20 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   const connections = new Map<string, Connection>();
   const repo = await HubRepository.open(opts.targetDir, opts.mainBranch);
   const registry = new NodeRegistry();
+  const sync = await GitSync.create(repo, {
+    enabled: opts.sync?.enabled ?? true,
+    remote: opts.sync?.remote,
+    token: opts.sync?.token,
+    retryMs: opts.sync?.retryMs,
+  });
+  /** Merged tasks waiting for their commits to reach the remote. */
+  const unpushed = new Set<string>();
   const tasks = new TaskManager(registry, repo, {
+    onMerged: (task) => {
+      if (!sync.status().enabled) return;
+      unpushed.add(task.spec.taskId);
+      void sync.requestPush();
+    },
     policies: opts.policies,
     reclaimGraceMs: opts.reclaimGraceMs,
     qa: opts.qa,
@@ -102,6 +128,12 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     log.info(`LLM: ${adapter.name} ${adapter.model}`);
     if (!hasPrice(adapter.model)) log.warn(`no price known for ${adapter.model}; cost estimates will read $0`);
   }
+  sync.onResult((r) => {
+    for (const id of unpushed) {
+      tasks.recordEvent(id, r.ok ? `pushed to ${sync.status().remote} (${r.commit!.slice(0, 8)})` : `push to ${sync.status().remote} failed: ${r.error}`);
+    }
+    if (r.ok) unpushed.clear();
+  });
   const plans = new PlanManager(registry, tasks);
   const conversations = new ConversationManager(adapter, tasks, registry, plans, {
     taskBudgetUsd: llm.taskBudgetUsd,
@@ -207,25 +239,71 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   const app = new Hono();
   const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
 
+  if (opts.token === undefined) throw new Error("startHub requires a token (or null to disable authentication)");
+  const token = opts.token;
+  if (token === null) log.warn("authentication is DISABLED: anyone who can reach this Hub can control it");
+  const requireAuth: MiddlewareHandler = async (c, next) => {
+    if (token === null || isAuthorized(c.req.header("authorization"), token)) return next();
+    c.header("WWW-Authenticate", 'Basic realm="ASO Hub"');
+    return c.json({ error: "missing or invalid ASO token" }, 401);
+  };
+  // The CLI package is public: it contains no secrets, and new machines need it before they
+  // have a token. Version info lets `aso update` decide whether to download it.
+  let digest: { file: string; mtimeMs: number; sha256: string } | undefined;
+  const packageSha256 = async (file: string) => {
+    const { mtimeMs } = await stat(file);
+    if (digest?.file !== file || digest.mtimeMs !== mtimeMs) {
+      digest = { file, mtimeMs, sha256: createHash("sha256").update(await readFile(file)).digest("hex") };
+    }
+    return digest.sha256;
+  };
+  app.get("/api/version", async (c) => {
+    const file = opts.dist?.tarball();
+    return c.json({ version: (file && opts.dist?.version()) ?? null, package: !!file, sha256: file ? await packageSha256(file) : null });
+  });
+  app.get("/dist/aso.tgz", async (c) => {
+    const file = opts.dist?.tarball();
+    if (!file) return c.json({ error: "this Hub has no aso package to serve (run `npm run package` on it)" }, 404);
+    const data = await readFile(file);
+    return c.body(data, 200, {
+      "content-type": "application/gzip",
+      "content-disposition": 'attachment; filename="aso.tgz"',
+    });
+  });
+
+  // Health stays public (minimal) so tools can check liveness; everything else needs the token.
+  app.use("/api/*", async (c, next) => (["/api/health", "/api/version"].includes(c.req.path) ? next() : requireAuth(c, next)));
+  app.use(`${GIT_PATH}/*`, requireAuth);
+  app.use(WS_PATH, requireAuth);
+
   // Workers clone, fetch and push the target project here; pushes are limited to task/* refs.
   const git = gitHttpHandler(repo.dir);
   app.on(["GET", "POST"], [GIT_PATH, `${GIT_PATH}/*`], (c) => git(c));
 
-  app.get("/api/health", (c) =>
-    c.json({
+  app.get("/api/health", (c) => {
+    if (token !== null && !isAuthorized(c.req.header("authorization"), token)) return c.json({ status: "ok", auth: true });
+    return c.json({
       status: "ok",
+      auth: token !== null,
       targetDir: opts.targetDir,
       mainBranch: repo.mainBranch,
+      sync: sync.status(),
       qa: tasks.qa,
       allowDependencies: opts.allowDependencies ?? null,
       connections: connections.size,
       uptimeSec: Math.round(process.uptime()),
-    }),
-  );
+    });
+  });
 
   app.get("/api/nodes", (c) => c.json(registry.list()));
 
   app.get("/api/llm", (c) => c.json(conversations.status()));
+
+  app.get("/api/sync", (c) => c.json(sync.status()));
+  app.post("/api/sync", async (c) => {
+    await sync.requestPush();
+    return c.json(sync.status());
+  });
 
   const planError = (c: Context, err: unknown) => {
     if (!(err instanceof PlanError)) throw err;
@@ -347,9 +425,11 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     tasks,
     plans,
     repo,
+    sync,
     close: () =>
       new Promise<void>((resolve) => {
         clearInterval(sweep);
+        sync.stop();
         for (const c of connections.values()) c.ws.close(1001, "hub shutting down");
         server.close(() => resolve());
       }),

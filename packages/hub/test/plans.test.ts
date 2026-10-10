@@ -20,10 +20,11 @@ import {
   worker,
   writeFiles,
   type HubContext,
+  TOKEN,
 } from "./helpers.ts";
 
 async function api(ctx: HubContext, path: string, init?: RequestInit) {
-  const res = await fetch(`http://127.0.0.1:${ctx.port}${path}`, { ...init, headers: { "content-type": "application/json" } });
+  const res = await fetch(`http://127.0.0.1:${ctx.port}${path}`, { ...init, headers: { "content-type": "application/json", authorization: `Bearer ${TOKEN}` } });
   return { status: res.status, body: (await res.json()) as Record<string, any> };
 }
 
@@ -131,6 +132,7 @@ describe("plans (fake Architect)", () => {
       assert.equal(approved.status, 200);
       const ids = approved.body.taskIds as Record<string, string>;
       assert.deepEqual(Object.keys(ids).sort(), ["api", "tests", "ui"]);
+      for (const [key, id] of Object.entries(ids)) assert.match(id, new RegExp(`^${key}-[0-9a-f]{6}$`));
       assert.deepEqual(ctx.hub.tasks.get(ids.ui)!.spec.dependsOn, [ids.api]);
       assert.deepEqual(ctx.hub.tasks.get(ids.tests)!.spec.dependsOn.sort(), [ids.api, ids.ui].sort());
       assert.equal(ctx.hub.tasks.get(ids.api)!.planId, planId);
@@ -219,9 +221,9 @@ describe("Architect → plan → workers (real nodes, scripted model)", () => {
     return withHub(
       async (ctx) => {
         const dirs = [tempDir("aso-arch-"), tempDir("aso-dev-"), tempDir("aso-qa-")];
-        const architect = startArchitect({ hub: `127.0.0.1:${ctx.port}`, nodeId: "arch", workDir: dirs[0] });
-        const dev = await startWorker({ hub: `127.0.0.1:${ctx.port}`, nodeId: "dev", roles: ["backend"], workDir: dirs[1], hardware: hardware(), executor });
-        const qa = await startWorker({ hub: `127.0.0.1:${ctx.port}`, nodeId: "qa", roles: ["qa"], workDir: dirs[2], hardware: hardware(), executor });
+        const architect = startArchitect({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "arch", workDir: dirs[0] });
+        const dev = await startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "dev", roles: ["backend"], workDir: dirs[1], hardware: hardware(), executor });
+        const qa = await startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "qa", roles: ["qa"], workDir: dirs[2], hardware: hardware(), executor });
         try {
           const planId = (await api(ctx, "/api/plans", { method: "POST", body: JSON.stringify({ requirement: "Add the answer" }) })).body.planId;
           const plan = await waitFor(() => ["proposed", "failed"].includes(ctx.hub.plans.get(planId)!.state) && ctx.hub.plans.get(planId)!, 15_000);

@@ -5,6 +5,7 @@ import WebSocket from "ws";
 import {
   HEARTBEAT_INTERVAL_MS,
   HUB_TO_NODE_TYPES,
+  authorizationHeader,
   createLogger,
   createMessage,
   parseAgentMessage,
@@ -24,6 +25,8 @@ export interface ArchitectOptions {
   workDir?: string;
   nodeId?: string;
   retryDelaysMs?: number[];
+  /** Shared ASO token (required unless the Hub runs without authentication). */
+  token?: string;
 }
 
 export interface ArchitectHandle {
@@ -59,10 +62,10 @@ export function startArchitect(opts: ArchitectOptions): ArchitectHandle {
     outbox.push(raw);
   };
   const model = new ModelChannel(send);
-  const planner = new Planner({ hubUrl: url, workDir, model, retryDelaysMs: opts.retryDelaysMs });
+  const planner = new Planner({ hubUrl: url, workDir, model, retryDelaysMs: opts.retryDelaysMs, token: opts.token });
 
   const connect = () => {
-    const socket = new WebSocket(url);
+    const socket = new WebSocket(url, { headers: opts.token ? { authorization: authorizationHeader(opts.token) } : {} });
     ws = socket;
     registered = false;
     socket.on("open", () => {
@@ -109,6 +112,10 @@ export function startArchitect(opts: ArchitectOptions): ArchitectHandle {
       const delay = Math.min(30_000, 1000 * 2 ** attempt++);
       log.warn(`disconnected from hub, retrying in ${delay}ms`);
       retryTimer = setTimeout(connect, delay);
+    });
+    socket.on("unexpected-response", (_req, res) => {
+      log.error(`hub refused the connection: HTTP ${res.statusCode}${res.statusCode === 401 ? " (check ASO_TOKEN)" : ""}`);
+      socket.terminate();
     });
     socket.on("error", (err) => log.debug(`socket error: ${err.message}`));
   };

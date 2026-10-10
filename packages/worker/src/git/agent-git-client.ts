@@ -46,6 +46,15 @@ export interface AgentGitClientOptions {
   mainBranch?: string;
   /** Identity used for agent commits. */
   author?: { name: string; email: string };
+  /** ASO token for the Hub's Git endpoint; sent as a header per command, never stored in .git/config. */
+  token?: string;
+}
+
+function gitConfig(opts: AgentGitClientOptions): string[] {
+  const author = opts.author ?? { name: "ASO Agent", email: "aso-agent@localhost" };
+  const config = [`user.name=${author.name}`, `user.email=${author.email}`];
+  if (opts.token) config.push(`http.extraHeader=Authorization: Bearer ${opts.token}`);
+  return config;
 }
 
 export interface CompletedTask {
@@ -70,11 +79,7 @@ export class AgentGitClient {
     this.repoDir = path.resolve(repoDir);
     this.remote = opts.remote ?? "origin";
     this.mainBranch = opts.mainBranch ?? "main";
-    const author = opts.author ?? { name: "ASO Agent", email: "aso-agent@localhost" };
-    this.git = simpleGit({
-      baseDir: this.repoDir,
-      config: [`user.name=${author.name}`, `user.email=${author.email}`],
-    });
+    this.git = simpleGit({ baseDir: this.repoDir, config: gitConfig(opts) });
   }
 
   /** Open an existing checkout, or clone `remoteUrl` into `repoDir` first. */
@@ -87,7 +92,7 @@ export class AgentGitClient {
     const remote = opts.remote ?? "origin";
     if (!existsSync(path.join(dir, ".git"))) {
       log.info(`cloning ${remoteUrl} into ${dir}`);
-      await simpleGit().clone(remoteUrl, dir, ["--origin", remote]);
+      await simpleGit({ config: gitConfig(opts) }).clone(remoteUrl, dir, ["--origin", remote]);
     } else {
       // The Hub may have moved (new IP/port) since the checkout was created.
       const git = simpleGit({ baseDir: dir });

@@ -6,6 +6,7 @@ const GiB = 1024 ** 3;
 interface Health {
   status: string;
   targetDir: string;
+  sync?: { state: string; remote: string; url: string | null; reason?: string; lastPushedCommit?: string; lastPushAt?: string; lastError?: string };
   connections: number;
   uptimeSec: number;
 }
@@ -72,7 +73,11 @@ interface TaskView {
 
 async function get<T>(path: string): Promise<T | null> {
   try {
-    const res = await fetch(`${HUB}${path}`, { cache: "no-store" });
+    const token = process.env.ASO_TOKEN;
+    const res = await fetch(`${HUB}${path}`, {
+      cache: "no-store",
+      headers: token ? { authorization: `Bearer ${token}` } : {},
+    });
     return res.ok ? ((await res.json()) as T) : null;
   } catch {
     return null;
@@ -107,6 +112,14 @@ export default async function Home() {
       <p>
         Hub {health.status} · target <code>{health.targetDir}</code> · up {health.uptimeSec}s
       </p>
+      {health.sync && (
+        <p style={{ color: health.sync.state === "conflict" || health.sync.state === "error" ? "#b91c1c" : undefined }}>
+          Push to {health.sync.remote}: <strong>{health.sync.state}</strong>
+          {health.sync.url && <> · <code>{health.sync.url}</code></>}
+          {health.sync.lastPushedCommit && <> · last {health.sync.lastPushedCommit.slice(0, 8)}</>}
+          {(health.sync.lastError ?? health.sync.reason) && <> · {health.sync.lastError ?? health.sync.reason}</>}
+        </p>
+      )}
       <p>
         {llm?.configured ? (
           <>

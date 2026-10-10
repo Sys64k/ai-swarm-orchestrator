@@ -25,13 +25,14 @@ export class Planner {
       workDir: string;
       model: ModelChannel;
       retryDelaysMs?: number[];
+      token?: string;
     },
   ) {}
 
   async plan(planId: string): Promise<PlanOutcome> {
     try {
       const repoDir = path.join(this.opts.workDir, "project");
-      const git = await AgentGitClient.cloneOrOpen(repoDir, hubGitUrl(this.opts.hubUrl));
+      const git = await AgentGitClient.cloneOrOpen(repoDir, hubGitUrl(this.opts.hubUrl), { token: this.opts.token });
       await git.discardLocalChanges();
       const head = await git.checkoutMain();
       log.info(`${planId}: exploring main @ ${head.slice(0, 8)}`);

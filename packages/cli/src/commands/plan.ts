@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
-import { resolveHubUrl } from "@aso/shared";
+import { authorizationHeader, resolveHubUrl, resolveToken } from "@aso/shared";
 
 interface PlanView {
   planId: string;
@@ -21,11 +21,16 @@ function apiBase(hub: string): string {
 async function api<T>(base: string, path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`${base}${path}`, { ...init, headers: { "content-type": "application/json" } });
+    const token = resolveToken()?.token;
+    res = await fetch(`${base}${path}`, {
+      ...init,
+      headers: { "content-type": "application/json", ...(token ? { authorization: authorizationHeader(token) } : {}) },
+    });
   } catch {
     throw new Error(`cannot reach the Hub at ${base} (is it running? use --hub)`);
   }
   const body = (await res.json().catch(() => ({}))) as T & { error?: string };
+  if (res.status === 401) throw new Error("the Hub rejected the ASO token (set ASO_TOKEN; `aso token` on the Hub shows it)");
   if (!res.ok) throw new Error(body.error ?? `Hub returned HTTP ${res.status}`);
   return body;
 }

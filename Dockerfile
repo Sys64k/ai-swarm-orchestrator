@@ -12,8 +12,14 @@ COPY packages/cli/package.json packages/cli/
 COPY packages/dashboard/package.json packages/dashboard/
 RUN npm ci
 COPY packages packages
+COPY scripts scripts
+COPY .env.example docker-compose.yml ./
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN npm run build && npm run build:dashboard && npm prune --omit=dev
+# Build id of the source this image is built from (the CLI passes the host's git commit).
+ARG ASO_BUILD=unknown
+RUN npm run build && npm run build:dashboard \
+  && ASO_BUILD=$ASO_BUILD node scripts/package.mjs --skip-build \
+  && npm prune --omit=dev
 
 FROM node:24-bookworm-slim
 RUN apt-get update \

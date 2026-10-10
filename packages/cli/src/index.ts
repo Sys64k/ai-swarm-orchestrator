@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { existsSync } from "node:fs";
-import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
 import { Command, InvalidArgumentError } from "commander";
 import {
+  resolveToken,
+  tokenFile,
   DEFAULT_DASHBOARD_PORT,
   DEFAULT_HUB_PORT,
   WORKER_ROLES,
@@ -11,18 +11,19 @@ import {
   type WorkerRole,
 } from "@aso/shared";
 import type { Effort } from "@aso/hub";
+import { startArchitect } from "@aso/architect";
 import { llmCheckCommand } from "./commands/llm-check.js";
+import { syncCommand } from "./commands/sync.js";
+import { layout } from "./layout.js";
 import { approvePlanCommand, planCommand, rejectPlanCommand } from "./commands/plan.js";
 import { startHubCommand } from "./commands/start-hub.js";
 import { startWorkerCommand } from "./commands/start-worker.js";
 import { updateCommand } from "./commands/update.js";
 
-const pkg = createRequire(import.meta.url)("../package.json") as { name: string; version: string };
-
-// Settings such as ANTHROPIC_API_KEY can live in <aso>/.env (git-ignored). Variables already set
-// in the shell take precedence over the file.
-const envFile = fileURLToPath(new URL("../../../.env", import.meta.url));
-if (existsSync(envFile)) process.loadEnvFile(envFile);
+// Settings such as ANTHROPIC_API_KEY can live in a .env file (see layout.envFiles(): ASO_ENV_FILE,
+// ~/.config/aso/.env, or the source checkout's .env). Shell variables take precedence, then the
+// files in order.
+for (const file of layout.envFiles()) if (existsSync(file)) process.loadEnvFile(file);
 
 function parsePort(value: string): number {
   const n = Number(value);
@@ -57,7 +58,7 @@ const EFFORTS: Effort[] = ["low", "medium", "high", "xhigh", "max"];
 const program = new Command()
   .name("aso")
   .description("AI Swarm Orchestrator - local-network multi-agent development swarm")
-  .version(pkg.version);
+  .version(layout.version());
 
 program
   .command("start-hub")
@@ -75,6 +76,7 @@ program
     process.env.ASO_TEST_COMMAND || "npm test",
   )
   .option("--no-qa", "merge verified work without a QA run")
+  .option("--no-push", "keep merges local instead of pushing main to the target repo's origin")
   .option(
     "--allow-deps <list>",
     "comma-separated npm packages agents may request (`@scope/*` allows a scope); default: any",
@@ -93,6 +95,7 @@ program
   .option("-p, --port <port>", "Hub port if not given in --hub", parsePort, DEFAULT_HUB_PORT)
   .option("-r, --roles <roles>", `roles to accept (default: ${WORKER_ROLES.join(",")})`, parseRoles)
   .option("-w, --work-dir <path>", "directory for task checkouts (default: ~/.aso/work)")
+  .option("--token <token>", "ASO token from the Hub (default: ASO_TOKEN or the local token file)")
   .action(startWorkerCommand);
 
 program
@@ -118,6 +121,31 @@ program
   .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
   .action(rejectPlanCommand);
 
+// Hidden: the Architect process that `start-hub` runs in tmux (same binary in every layout).
+program
+  .command("architect", { hidden: true })
+  .option("--hub <address>", "Hub address", "127.0.0.1")
+  .option("--work-dir <path>", "read-only checkout for exploring the project")
+  .action((opts: { hub: string; workDir?: string }) => {
+    const architect = startArchitect({ hub: opts.hub, workDir: opts.workDir, token: resolveToken()?.token });
+    for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, () => (architect.stop(), process.exit(0)));
+  });
+
+program
+  .command("sync")
+  .description("Show the Hub's push status to the target repo's remote, and retry a failed push")
+  .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
+  .action(syncCommand);
+
+program
+  .command("token")
+  .description("Print this Hub's ASO token (give it to workers as ASO_TOKEN or --token)")
+  .action(() => {
+    const auth = resolveToken();
+    if (!auth) throw new Error(`no token yet: it is created on the first \`aso start-hub\` (${tokenFile()})`);
+    console.log(auth.token);
+  });
+
 program
   .command("llm-check")
   .description("Send one tiny request to verify ANTHROPIC_API_KEY and model access (costs a fraction of a cent)")
@@ -126,13 +154,10 @@ program
 
 program
   .command("update")
-  .description("Install the latest version of the aso CLI globally")
-  .option(
-    "--spec <npm_spec>",
-    "npm install spec to update from (registry name, git URL or tarball)",
-    process.env.ASO_UPDATE_SPEC ?? `${pkg.name}@latest`,
-  )
-  .action((opts: { spec: string }) => updateCommand(opts.spec, pkg.version));
+  .description("Update this machine's aso to the version the Hub serves (or pull + rebuild a source checkout)")
+  .option("--hub <address>", "Hub to update from", process.env.ASO_HUB || "127.0.0.1")
+  .option("--spec <npm_spec>", "install from this npm spec instead (tarball path/URL, registry name)", process.env.ASO_UPDATE_SPEC)
+  .action(updateCommand);
 
 program.parseAsync().catch((err: unknown) => {
   console.error(`aso: ${err instanceof Error ? err.message : String(err)}`);

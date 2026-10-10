@@ -6,6 +6,7 @@ import {
   HEARTBEAT_INTERVAL_MS,
   HUB_TO_NODE_TYPES,
   WORKER_ROLES,
+  authorizationHeader,
   createLogger,
   createMessage,
   hubGitUrl,
@@ -35,6 +36,8 @@ export interface WorkerOptions {
   /** Skip the hardware scan and use this profile (tests). */
   hardware?: HardwareProfile;
   nodeId?: string;
+  /** Shared ASO token (required unless the Hub runs without authentication). */
+  token?: string;
 }
 
 export const DEFAULT_WORK_DIR = path.join(os.homedir(), ".aso", "work");
@@ -89,10 +92,11 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
     nodeId,
     executor: opts.executor ?? new LlmTaskExecutor(),
     send,
+    token: opts.token,
   });
 
   const connect = () => {
-    const socket = new WebSocket(url);
+    const socket = new WebSocket(url, { headers: opts.token ? { authorization: authorizationHeader(opts.token) } : {} });
     ws = socket;
     registered = false;
     socket.on("open", () => {
@@ -161,6 +165,11 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
       const delay = Math.min(30_000, 1000 * 2 ** attempt++);
       log.warn(`disconnected from hub, retrying in ${delay}ms`);
       retryTimer = setTimeout(connect, delay);
+    });
+    socket.on("unexpected-response", (_req, res) => {
+      // 401 means the token is wrong; retrying won't help, but keep trying in case it's fixed on the Hub.
+      log.error(`hub refused the connection: HTTP ${res.statusCode}${res.statusCode === 401 ? " (check ASO_TOKEN)" : ""}`);
+      socket.terminate();
     });
     socket.on("error", (err) => log.debug(`socket error: ${err.message}`));
   };

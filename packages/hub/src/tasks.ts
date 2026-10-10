@@ -112,6 +112,8 @@ export interface TaskManagerOptions {
   /** How long a started job is held for a disconnected node before it is reassigned. */
   reclaimGraceMs?: number;
   qa?: Partial<QaOptions>;
+  /** Called after a task is merged into main (e.g. to push main to GitHub). */
+  onMerged?: (task: TaskRecord) => void;
 }
 
 const HISTORY_LIMIT = 50;
@@ -126,6 +128,7 @@ export class TaskManager {
   private readonly maxReworkRounds: number;
   private readonly reclaimGraceMs: number;
   readonly qa: QaOptions;
+  private readonly onMerged?: (task: TaskRecord) => void;
 
   constructor(
     private readonly registry: NodeRegistry,
@@ -138,6 +141,7 @@ export class TaskManager {
     this.maxReworkRounds = opts.maxReworkRounds ?? 3;
     this.reclaimGraceMs = opts.reclaimGraceMs ?? 5 * 60_000;
     this.qa = { ...DEFAULT_QA, ...opts.qa };
+    this.onMerged = opts.onMerged;
   }
 
   list(): TaskRecord[] {
@@ -149,12 +153,12 @@ export class TaskManager {
   }
 
   /** Validate and queue a task. `input` is untrusted (API body / Architect output). */
-  submit(input: unknown, origin: { planId?: string } = {}): TaskRecord {
+  submit(input: unknown, origin: { planId?: string; idHint?: string } = {}): TaskRecord {
     const parsed = TaskSpecInputSchema.safeParse(input);
     if (!parsed.success) {
       throw new TaskError(parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "), "invalid");
     }
-    const spec = TaskSpecSchema.parse({ ...parsed.data, taskId: parsed.data.taskId ?? this.generateId(parsed.data.title) });
+    const spec = TaskSpecSchema.parse({ ...parsed.data, taskId: parsed.data.taskId ?? this.generateId(origin.idHint ?? parsed.data.title) });
     if (this.tasks.has(spec.taskId)) throw new TaskError(`task ${spec.taskId} already exists`, "duplicate");
     for (const dep of spec.dependsOn) {
       if (dep === spec.taskId) throw new TaskError("a task cannot depend on itself", "invalid");
@@ -488,6 +492,7 @@ export class TaskManager {
       task.state = "merged";
       task.mainCommit = result.mainCommit;
       this.note(task, `merged into main @ ${result.mainCommit.slice(0, 8)}`);
+      this.onMerged?.(task);
     } else if (result.conflict) {
       this.rework(task, `merge conflict with main in ${result.files.join(", ")}; rebase onto main and resolve`);
     } else {

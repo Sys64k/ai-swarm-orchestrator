@@ -16,6 +16,7 @@ import {
   type HubContext,
   type TestClient,
 } from "./helpers.ts";
+import { TOKEN } from "./helpers.ts";
 
 const task = (taskId: string) => ({ taskId, role: "backend", title: `Task ${taskId}`, description: "d" });
 
@@ -198,6 +199,7 @@ console.log("greeting ok");
         const dirs = [tempDir("aso-w1-"), tempDir("aso-w2-")];
         const dev = await startWorker({
           hub: `127.0.0.1:${ctx.port}`,
+          token: TOKEN,
           nodeId: "dev",
           roles: ["backend"],
           workDir: dirs[0],
@@ -206,6 +208,7 @@ console.log("greeting ok");
         });
         const qa = await startWorker({
           hub: `127.0.0.1:${ctx.port}`,
+          token: TOKEN,
           nodeId: "qa",
           roles: ["qa"],
           workDir: dirs[1],
@@ -243,7 +246,7 @@ console.log("greeting ok");
   it("fails the task with a clear reason when the Hub has no LLM configured", () =>
     withHub(async (ctx) => {
       const dir = tempDir("aso-w-");
-      const dev = await startWorker({ hub: `127.0.0.1:${ctx.port}`, nodeId: "dev", roles: ["backend"], workDir: dir, hardware: hardware() });
+      const dev = await startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "dev", roles: ["backend"], workDir: dir, hardware: hardware() });
       try {
         await waitFor(() => ctx.hub.registry.has("dev"));
         await postTask(ctx.port, task("nobody-home"));

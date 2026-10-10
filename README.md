@@ -32,7 +32,7 @@ For the design, diagrams and protocol reference, see **[ARCHITECTURE.md](ARCHITE
 | 4 | Dependency requests: the Hub adds npm packages on `main`, workers rebase and `npm ci` | ✅ Done |
 | 5 | LLM gateway on the Hub (Anthropic API), coding agent loop on workers, per-task cost tracking | ✅ Done |
 | 6 | Architect planning (`aso plan`), task dependencies, role prompts and write scopes | ✅ Done |
-| 7 | GitHub sync (`git push origin main`), packaged global CLI, `aso update`, node authentication | ⏳ Planned. Until then nothing is pushed anywhere; all commits stay in the local target repo |
+| 7 | Token authentication, push to `origin` after merges, packaged CLI served by the Hub, `aso update` | ✅ Done |
 
 The whole loop runs end to end: a task is routed, and an agent on a worker explores and edits
 the code. The agent verifies its work, then the change is pushed, checked by the Hub, tested by
@@ -64,7 +64,8 @@ Agents call Claude through the **Hub only**, using the official Anthropic API.
    - **When credits run out:** requests stop until next month, unless you buy credits or
      turn on auto-reload. Nothing is charged to your plan.
 2. **Cap spending.** Give ASO its own workspace with a spend limit, and create the key there.
-3. **Put the key in `.env`** in the ASO folder, on the Hub machine:
+3. **Put the key in a `.env` file** on the Hub machine. This is the ASO folder's `.env` for a
+   source checkout, or `~/.config/aso/.env` for any install:
    ```bash
    cp .env.example .env && chmod 600 .env   # then set ANTHROPIC_API_KEY=sk-ant-... in it
    ```
@@ -98,15 +99,17 @@ prohibited outright.
 The dashboard and `GET /api/llm` show calls and estimated spend; each task shows its own
 turns and cost. Estimates use the Hub's price table. Your Console billing is authoritative.
 
-## Quick start (from source)
+## Installation
 
-Until Phase 7 packages a global CLI, install from source on **every** machine:
+### Hub machine
+
+Install from source (this repository) and build the distributable package once:
 
 ```bash
 git clone <this repo> aso && cd aso
 npm install
-npm run build
-npm link -w @aso/cli        # puts `aso` on your PATH (or use: npm run aso -- <command>)
+npm run package            # builds everything + release/aso.tgz (the package workers install)
+npm link -w @aso/cli       # puts `aso` on your PATH (or use: npm run aso -- <command>)
 ```
 
 The target project must be a git repository with at least one commit on `main`:
@@ -115,33 +118,50 @@ The target project must be a git repository with at least one commit on `main`:
 git -C ~/projects/my-app init -b main && git -C ~/projects/my-app commit --allow-empty -m "Initial commit"
 ```
 
-**On the Hub, in Docker (recommended):**
+Start the Hub, in Docker (recommended) or directly:
 
 ```bash
-aso start-hub --docker --dir ~/projects/my-app
+aso start-hub --docker --dir ~/projects/my-app   # first run builds the image (a few minutes)
+aso start-hub --dir ~/projects/my-app            # without Docker
 ```
 
-The first run builds the image, which takes a few minutes. The container runs as your
-user ID, so files the Hub writes into your project keep your ownership.
-
-**On the Hub, without Docker (for development):**
+The first start generates the **ASO token** (`~/.config/aso/token`, readable only by you).
+Every worker, the CLI and the dashboard need it. Show it with:
 
 ```bash
-npm run build:dashboard
-aso start-hub --dir ~/projects/my-app
+aso token
 ```
 
-Either way you get:
+You get:
 
-- the dashboard at `http://<hub-ip>:7421`
-- the API, WebSocket and Git endpoint at `<hub-ip>:7420`
-- the Architect in tmux (`tmux attach -t aso-architect`)
+- **Dashboard:** `http://<hub-ip>:7421`. Log in with any user name and the token as the
+  password.
+- **Hub endpoints:** the API, WebSocket and Git endpoint at `<hub-ip>:7420`.
+- **Architect:** runs in tmux (`tmux attach -t aso-architect`).
+- **Container ownership:** in Docker the container runs as your user ID, so files the Hub
+  writes into your project keep your ownership.
 
-**On each worker:**
+### Worker machines
+
+Workers install the package the Hub serves. No clone, build or npm registry access is needed:
 
 ```bash
+curl -fo /tmp/aso.tgz http://192.168.1.10:7420/dist/aso.tgz && npm install -g /tmp/aso.tgz
+mkdir -p ~/.config/aso && echo "ASO_TOKEN=<output of aso token on the Hub>" >> ~/.config/aso/.env
+chmod 600 ~/.config/aso/.env
 aso start-worker --hub 192.168.1.10 --roles backend,qa
 ```
+
+### Updating
+
+Run `aso update` on any machine:
+
+- **Installed packages:** fetches the Hub's package if its version differs, verifies its
+  SHA-256, and installs it.
+- **Source checkouts:** `git pull`, `npm ci` and a rebuild.
+
+To roll out a new version, update the Hub machine, run `npm run package` there, then run
+`aso update --hub <hub-ip>` on each worker.
 
 > **Do not edit the target directory by hand while the Hub runs.** The Hub merges approved
 > work into its `main` checkout. If that checkout has uncommitted changes or a different branch
@@ -236,6 +256,31 @@ Rules:
 - **Reconnects.** Requests survive them: the worker re-sends pending requests and the Hub
   answers duplicates from its cache instead of installing twice.
 
+## Pushing to GitHub
+
+If the target repository has an `origin` remote, the Hub pushes `main` to it after every
+merge. A burst of merges becomes one push. Each merged task's history notes the push (or its
+failure), and so do the dashboard and `aso sync`.
+
+| Situation | What the Hub does |
+|---|---|
+| Push succeeds | Done; status `idle` with the last pushed commit |
+| Someone pushed to GitHub's `main` meanwhile | Merges `origin/main` into `main` (merge commit) and pushes again |
+| That merge conflicts | Stops pushing (status `conflict`) and leaves both sides untouched. Resolve it in the Hub's checkout, then run `aso sync` |
+| Network/auth error | Retries every 5 minutes and after the next merge; `aso sync` retries now |
+| No `origin` remote, or `--no-push` | Merges stay local |
+
+**Credentials:**
+
+- **Native Hub:** pushes use your normal git setup (SSH agent, credential helper).
+- **Hub in Docker, HTTPS remote:** put a GitHub **fine-grained token**, limited to that
+  repository with *Contents: read and write*, in `ASO_GIT_TOKEN` (e.g. in the `.env`). It's
+  sent only to the remote's host, as a header, and never written to `.git/config`.
+- **Hub in Docker, SSH remote:** the container has no SSH keys. Use an HTTPS remote with a
+  token, or run the Hub natively.
+- **Branch protection:** if GitHub's `main` requires pull requests, pushes are rejected and the
+  error shows in `aso sync`.
+
 ## CLI reference
 
 ### `aso start-hub`
@@ -249,6 +294,7 @@ Rules:
 | `--dashboard-port <port>` | `7421` | Dashboard port |
 | `--test-command <cmd>` | `npm test` | QA command, split on spaces, run without a shell |
 | `--no-qa` | | Merge verified work without a QA run |
+| `--no-push` | | Keep merges local (don't push `main` to `origin`) |
 | `--allow-deps <list>` | any | npm packages agents may request; `@scope/*` allows a scope |
 | `--model <id>` | `claude-opus-5-5` | Claude model for agents |
 | `--effort <level>` | `high` | `low`, `medium`, `high`, `xhigh`, `max` |
@@ -269,6 +315,7 @@ outgoing messages and sends them once it has registered again.
 | `-p, --port <port>` | `7420` | Hub port, if `--hub` doesn't include one |
 | `-r, --roles <list>` | all | Comma-separated: `backend,frontend,qa,devops` |
 | `-w, --work-dir <path>` | `~/.aso/work` | Where the project checkout lives; the I/O benchmark runs here |
+| `--token <token>` | `ASO_TOKEN` / token file | The Hub's ASO token |
 
 ### `aso plan`
 
@@ -292,17 +339,43 @@ Sends one tiny request with `ANTHROPIC_API_KEY` to confirm the key, model access
 balance. Prints the reply, the tokens used and the estimated cost (a fraction of a cent).
 `--model <id>` checks a different model.
 
+### `aso token`
+
+Prints the Hub's ASO token (from `ASO_TOKEN` or `~/.config/aso/token`). Give it to workers.
+
+### `aso sync`
+
+Shows the push status for the target repository's remote, and retries a failed push. Run it
+after resolving a conflict. `--hub <address>` selects the Hub.
+
 ### `aso update`
 
-Runs `npm install -g` on the latest CLI. Use `--spec <npm spec>` or the `ASO_UPDATE_SPEC`
-environment variable to choose the source (a registry name, git URL or tarball). Distribution is
-finalised in Phase 7.
+Updates this machine's `aso`:
+
+- **Installed packages:** downloads the Hub's package if its version differs, checks its
+  SHA-256, and installs it.
+- **Source checkouts:** pulls and rebuilds.
+
+Options:
+
+- `--hub <address>`: the Hub to update from (default `ASO_HUB` or `127.0.0.1`).
+- `--spec <npm spec>`: install that npm spec instead.
 
 ## Hub endpoints
 
+**Authentication:**
+
+- **Protected endpoints:** everything except `/api/health`, `/api/version` and
+  `/dist/aso.tgz` requires the ASO token, as `Authorization: Bearer <token>`.
+- **Git and browsers:** these use HTTP Basic auth with any user name and the token as the
+  password.
+
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/health` | Status, target directory, main branch, QA settings, connections, uptime |
+| `GET` | `/api/health` | Without a token: `{status, auth}`. With it: also target, main branch, QA, sync status, connections, uptime |
+| `GET` | `/api/version` | Version and SHA-256 of the `aso` package this Hub serves (public) |
+| `GET` | `/dist/aso.tgz` | The `aso` package for installing/updating machines (public; contains no secrets) |
+| `GET` / `POST` | `/api/sync` | Push status / retry the push of `main` to `origin` |
 | `GET` | `/api/llm` | LLM status: model, queue, calls and estimated spend since start |
 | `GET` | `/api/nodes` | Registered nodes with hardware, latest heartbeat and current task |
 | `GET` | `/api/tasks` | All tasks with state, nodes, commits, rework round and history |
@@ -354,19 +427,29 @@ For the scoring formula, see [ARCHITECTURE.md](ARCHITECTURE.md#6-hardware-aware-
 | Variable | Default | Description |
 |---|---|---|
 | `ASO_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
+| `ASO_TOKEN` | token file | The shared ASO token (workers, CLI). The Hub reads/creates `~/.config/aso/token` when unset |
+| `ASO_HUB` | `127.0.0.1` | Default Hub address for `aso plan`, `sync`, `update` |
+| `ASO_GIT_TOKEN` | *(none)* | Hub only: token for pushing to an HTTPS `origin` (e.g. GitHub fine-grained token) |
+| `ASO_PUSH` | `1` | `0` keeps merges local (same as `--no-push`) |
+| `ASO_CONFIG_DIR` | `~/.config/aso` | Where the token file and `.env` live |
+| `ASO_ENV_FILE` | *(none)* | An extra `.env` file to load (highest priority after the shell) |
 | `ASO_TEST_COMMAND` | `npm test` | Default for `--test-command` (also passed into the container) |
 | `ASO_QA` | `1` | `0` disables QA (same as `--no-qa`) |
 | `ASO_ALLOW_DEPS` | *(any)* | Default for `--allow-deps` (also passed into the container) |
 | `ANTHROPIC_API_KEY` | *(none)* | Hub only. Without it, agents fail tasks with "no LLM configured" |
-| *(file)* `.env` | — | In the ASO folder: loaded by `aso` on start; shell variables override it. See `.env.example` |
+| *(file)* `.env` | — | Loaded on start: the shell's variables win, then `ASO_ENV_FILE`, then `~/.config/aso/.env`, then a source checkout's `.env`. See `.env.example` |
 | `ASO_MODEL`, `ASO_EFFORT`, `ASO_TASK_BUDGET`, `ASO_LLM_CONCURRENCY` | see flags | Defaults for the LLM flags (also passed into the container) |
 | `ASO_UPDATE_SPEC` | `@aso/cli@latest` | Default source for `aso update` |
 
 ## Security notes
 
-- **No authentication yet.** Anyone who can reach port 7420 can register a node, submit tasks,
-  clone the project, and push `task/*` branches. Run ASO only on a trusted LAN until node
-  authentication lands (Phase 7).
+- **Token authentication.** Every node, CLI call, Git operation and dashboard visit needs the
+  ASO token. Tokens are compared in constant time.
+- **Plain HTTP.** Traffic is unencrypted, so anyone able to sniff your LAN could read the
+  token and code. Use a trusted network, or put the Hub behind a TLS reverse proxy or VPN
+  (e.g. WireGuard/Tailscale) if the LAN isn't trusted.
+- **Rotating the token.** Delete `~/.config/aso/token`, restart the Hub, and update `ASO_TOKEN`
+  on the workers.
 - **Push restrictions.** The Git endpoint refuses pushes to `main`, tags, deletions, and
   anything outside `refs/heads/task/<id>`. Only the Hub writes `main`.
 - **Checks on both sides.** Workers' `AgentGitClient` refuses to commit `package.json` or
@@ -390,6 +473,8 @@ For the scoring formula, see [ARCHITECTURE.md](ARCHITECTURE.md#6-hardware-aware-
   But the agent can run project code (tests, scripts) with the worker user's permissions.
   What protects `main` is the Hub (push policy, protected-file verification, QA). Run workers
   as a dedicated user on machines you're comfortable letting agents build on.
+- **GitHub token.** `ASO_GIT_TOKEN` should be a fine-grained token limited to the one
+  repository. Remote URLs are shown with credentials stripped.
 - **API key.** It lives only on the Hub. With `--docker` it is passed into the container
   through the environment, so anyone who can run `docker inspect` on the Hub machine can read
   it.
@@ -401,6 +486,7 @@ packages/
   shared/     Zod protocol, agent tool schemas, role policies, plan validation, helpers
   hub/        Hono server, registry, router, tasks, plans, LLM gateway, Git endpoint + repo
   architect/  Architect node: plans requirements with read-only tools
+scripts/package.mjs              Builds the distributable package (served by the Hub)
   worker/     hardware profiler, WebSocket client, job runner, AgentGitClient
   cli/        Commander.js `aso` command
   dashboard/  Next.js App Router UI
@@ -409,7 +495,8 @@ Dockerfile, docker-compose.yml   Hub image (used by `aso start-hub --docker`)
 
 ```bash
 npm run build            # tsc -b (project references)
-npm run build:dashboard  # next build
+npm run build:dashboard  # next build (standalone server)
+npm run package          # bundle the CLI (esbuild) + dashboard into release/aso.tgz
 npm test                 # build + node:test (native TypeScript stripping, no extra deps)
 ```
 

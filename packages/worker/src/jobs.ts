@@ -68,6 +68,8 @@ export interface JobRunnerOptions {
   nodeId: string;
   executor: TaskExecutor;
   send: Send;
+  /** ASO token for the Hub's Git endpoint. */
+  token?: string;
   /** How long to wait for the Hub to answer a dependency request. Default 15 min. */
   dependencyTimeoutMs?: number;
   /** How long to wait for one model turn. Default 20 min. */
@@ -153,6 +155,7 @@ export class JobRunner {
   private async openRepo(role: string): Promise<AgentGitClient> {
     const git = await AgentGitClient.cloneOrOpen(this.repoDir, this.opts.gitUrl, {
       author: { name: `ASO ${role} agent (${this.opts.nodeId})`, email: `${this.opts.nodeId}@aso.local` },
+      token: this.opts.token,
     });
     await git.discardLocalChanges();
     return git;

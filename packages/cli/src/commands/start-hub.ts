@@ -1,10 +1,9 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
-import { createRequire } from "node:module";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { ARCHITECT_TMUX_SESSION, createLogger } from "@aso/shared";
+import { ARCHITECT_TMUX_SESSION, createLogger, resolveToken } from "@aso/shared";
 import { startHub, type Effort } from "@aso/hub";
+import { layout } from "../layout.js";
 
 const log = createLogger("cli");
 
@@ -18,6 +17,7 @@ export interface StartHubOptions {
   docker: boolean;
   testCommand: string;
   qa: boolean;
+  push: boolean;
   allowDeps?: string;
   model: string;
   effort: Effort;
@@ -27,7 +27,13 @@ export interface StartHubOptions {
 
 export async function startHubCommand(opts: StartHubOptions): Promise<void> {
   const targetDir = resolveTargetDir(opts.dir);
-  if (opts.docker) return startHubInDocker(targetDir, opts);
+  const auth = resolveToken({ create: true })!;
+  if (auth.created) {
+    log.info(`generated an ASO token in ${auth.source}; workers need it: run \`aso token\` to show it`);
+  } else {
+    log.info(`using the ASO token from ${auth.source}`);
+  }
+  if (opts.docker) return startHubInDocker(targetDir, opts, auth.token);
 
   const testCommand = parseTestCommand(opts.testCommand);
   const qaEnabled = opts.qa && process.env.ASO_QA !== "0";
@@ -35,8 +41,11 @@ export async function startHubCommand(opts: StartHubOptions): Promise<void> {
     targetDir,
     port: opts.port,
     host: opts.host,
+    token: auth.token,
+    sync: { enabled: opts.push && process.env.ASO_PUSH !== "0", token: process.env.ASO_GIT_TOKEN || undefined },
     qa: { enabled: qaEnabled, command: testCommand },
     allowDependencies: parseList(opts.allowDeps),
+    dist: { version: () => layout.distVersion(), tarball: () => layout.distTarball() },
     llm: {
       model: opts.model,
       effort: opts.effort,
@@ -59,7 +68,7 @@ export async function startHubCommand(opts: StartHubOptions): Promise<void> {
  * Runs the Hub + dashboard via docker compose and the Architect in tmux on the host (it
  * reaches the Hub through the published port). Compose runs attached so logs stream here.
  */
-async function startHubInDocker(targetDir: string, opts: StartHubOptions): Promise<void> {
+async function startHubInDocker(targetDir: string, opts: StartHubOptions, token: string): Promise<void> {
   if (!opts.dashboard) throw new Error("--no-dashboard is not supported with --docker");
   try {
     execFileSync("docker", ["compose", "version"], { stdio: "ignore" });
@@ -67,7 +76,7 @@ async function startHubInDocker(targetDir: string, opts: StartHubOptions): Promi
     throw new Error("docker compose is not available; install Docker Compose v2 or drop --docker");
   }
 
-  const composeFile = fileURLToPath(new URL("../../../../docker-compose.yml", import.meta.url));
+  const composeFile = layout.composeFile();
   if (!existsSync(composeFile)) throw new Error(`compose file not found at ${composeFile}`);
 
   const compose = spawn("docker", ["compose", "-f", composeFile, "up", "--build"], {
@@ -75,6 +84,9 @@ async function startHubInDocker(targetDir: string, opts: StartHubOptions): Promi
     env: {
       ...process.env,
       ASO_TARGET_DIR: targetDir,
+      ASO_TOKEN: token,
+      // The image has no .git; label the package it builds with the host's commit.
+      ASO_BUILD: gitBuildId(),
       ASO_UID: String(process.getuid?.() ?? 1000),
       ASO_GID: String(process.getgid?.() ?? 1000),
       ASO_BIND: opts.host,
@@ -82,6 +94,7 @@ async function startHubInDocker(targetDir: string, opts: StartHubOptions): Promi
       ASO_DASHBOARD_PORT: String(opts.dashboardPort),
       ASO_TEST_COMMAND: parseTestCommand(opts.testCommand).join(" "),
       ASO_QA: opts.qa ? "1" : "0",
+      ASO_PUSH: opts.push && process.env.ASO_PUSH !== "0" ? "1" : "0",
       ASO_ALLOW_DEPS: parseList(opts.allowDeps)?.join(",") ?? "",
       ASO_MODEL: opts.model,
       ASO_EFFORT: opts.effort,
@@ -136,6 +149,17 @@ function onShutdown(handler: (signal: NodeJS.Signals) => Promise<void>): void {
   }
 }
 
+function gitBuildId(): string {
+  try {
+    const root = layout.root;
+    const sha = execFileSync("git", ["-C", root, "rev-parse", "--short", "HEAD"], { encoding: "utf8" }).trim();
+    const dirty = execFileSync("git", ["-C", root, "status", "--porcelain"], { encoding: "utf8" }).trim() ? "-dirty" : "";
+    return sha + dirty;
+  } catch {
+    return "unknown";
+  }
+}
+
 function parseTestCommand(cmd: string): string[] {
   const argv = cmd.trim().split(/\s+/).filter(Boolean);
   if (argv.length === 0) throw new Error("--test-command must not be empty");
@@ -174,10 +198,10 @@ function launchArchitect(hubPort: number): boolean {
     log.warn(`tmux session "${ARCHITECT_TMUX_SESSION}" already exists; leaving it running`);
     return false;
   }
-  const entry = fileURLToPath(import.meta.resolve("@aso/architect/main"));
+  // The same `aso` script runs the Architect via its hidden `architect` command.
   const ok = tmux([
     "new-session", "-d", "-s", ARCHITECT_TMUX_SESSION, "--",
-    process.execPath, entry, "--hub", `127.0.0.1:${hubPort}`,
+    process.execPath, process.argv[1], "architect", "--hub", `127.0.0.1:${hubPort}`,
   ]);
   if (ok) log.info(`Architect started (tmux attach -t ${ARCHITECT_TMUX_SESSION})`);
   else log.error("failed to start Architect tmux session");
@@ -185,25 +209,28 @@ function launchArchitect(hubPort: number): boolean {
 }
 
 function launchDashboard(port: number, hubPort: number): ChildProcess | undefined {
-  const require = createRequire(import.meta.url);
-  let dashboardDir: string;
-  let nextBin: string;
-  try {
-    dashboardDir = path.dirname(require.resolve("@aso/dashboard/package.json"));
-    nextBin = require.resolve("next/dist/bin/next", { paths: [dashboardDir] });
-  } catch {
-    log.warn("dashboard package not found; skipping (use --no-dashboard to silence)");
+  const server = layout.dashboardServer();
+  if (!server) {
+    log.warn(
+      layout.mode === "source"
+        ? "dashboard not built; run `npm run build:dashboard` (or use --no-dashboard)"
+        : "this aso package has no dashboard; skipping",
+    );
     return undefined;
   }
-
-  const built = existsSync(path.join(dashboardDir, ".next", "BUILD_ID"));
-  const mode = built ? "start" : "dev";
-  const child = spawn(process.execPath, [nextBin, mode, "-p", String(port)], {
-    cwd: dashboardDir,
-    env: { ...process.env, ASO_HUB_PORT: String(hubPort) },
+  const child = spawn(process.execPath, [server], {
+    cwd: path.dirname(server),
+    // The dashboard reads the Hub API server-side and asks browsers for the same token.
+    env: {
+      ...process.env,
+      PORT: String(port),
+      HOSTNAME: "0.0.0.0",
+      ASO_HUB_PORT: String(hubPort),
+      ASO_TOKEN: resolveToken()?.token ?? "",
+    },
     stdio: "inherit",
   });
   child.on("exit", (code) => code && log.warn(`dashboard exited with code ${code}`));
-  log.info(`dashboard (${mode}) on http://localhost:${port}`);
+  log.info(`dashboard on http://localhost:${port}`);
   return child;
 }

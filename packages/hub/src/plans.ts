@@ -145,7 +145,8 @@ export class PlanManager {
           files: t.files,
           dependsOn: t.dependsOn.map((k) => ids[k]),
         },
-        { planId },
+        // The plan key ("api", "login-page") reads far better in ids than a truncated title.
+        { planId, idHint: t.key },
       );
       ids[t.key] = record.spec.taskId;
     }
