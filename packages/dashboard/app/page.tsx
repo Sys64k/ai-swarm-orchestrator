@@ -1,5 +1,8 @@
 export const dynamic = "force-dynamic";
 
+const HUB = `http://127.0.0.1:${process.env.ASO_HUB_PORT ?? "7420"}`;
+const GiB = 1024 ** 3;
+
 interface Health {
   status: string;
   targetDir: string;
@@ -7,37 +10,131 @@ interface Health {
   uptimeSec: number;
 }
 
-async function getHealth(): Promise<Health | null> {
-  const port = process.env.ASO_HUB_PORT ?? "7420";
+interface NodeView {
+  nodeId: string;
+  nodeKind: "worker" | "architect";
+  roles?: string[];
+  hardware?: {
+    hostname: string;
+    distro: string;
+    cpu: { logicalCores: number };
+    memory: { totalBytes: number };
+    docker: { available: boolean };
+    storage: { writeMBps: number };
+  };
+  heartbeat: { memoryAvailableBytes: number; cpuLoadPercent: number } | null;
+  currentTaskId: string | null;
+  lastSeenAt: string;
+}
+
+interface TaskView {
+  spec: { taskId: string; role: string; kind: string; title: string };
+  state: string;
+  nodeId?: string;
+  attempts: number;
+  waitingReason?: string;
+  routing?: { reasons: string[] };
+  detail?: string;
+}
+
+async function get<T>(path: string): Promise<T | null> {
   try {
-    const res = await fetch(`http://127.0.0.1:${port}/api/health`, { cache: "no-store" });
-    return res.ok ? ((await res.json()) as Health) : null;
+    const res = await fetch(`${HUB}${path}`, { cache: "no-store" });
+    return res.ok ? ((await res.json()) as T) : null;
   } catch {
     return null;
   }
 }
 
+const cell = { padding: "0.3rem 0.8rem", borderBottom: "1px solid #ddd", textAlign: "left" as const };
+
 export default async function Home() {
-  const health = await getHealth();
+  const [health, nodes, tasks] = await Promise.all([
+    get<Health>("/api/health"),
+    get<NodeView[]>("/api/nodes"),
+    get<TaskView[]>("/api/tasks"),
+  ]);
+
+  if (!health) {
+    return (
+      <main>
+        <h1>AI Swarm Orchestrator</h1>
+        <p>Hub unreachable at {HUB}.</p>
+      </main>
+    );
+  }
+
   return (
     <main>
+      {/* Plain auto-refresh until the dashboard gets a live WebSocket feed. */}
+      <meta httpEquiv="refresh" content="5" />
       <h1>AI Swarm Orchestrator</h1>
-      {health ? (
-        <dl>
-          <dt>Hub</dt>
-          <dd>{health.status}</dd>
-          <dt>Target project</dt>
-          <dd>
-            <code>{health.targetDir}</code>
-          </dd>
-          <dt>Connected agents</dt>
-          <dd>{health.connections}</dd>
-          <dt>Uptime</dt>
-          <dd>{health.uptimeSec}s</dd>
-        </dl>
-      ) : (
-        <p>Hub unreachable.</p>
-      )}
+      <p>
+        Hub {health.status} · target <code>{health.targetDir}</code> · up {health.uptimeSec}s
+      </p>
+
+      <h2>Nodes ({nodes?.length ?? 0})</h2>
+      <table style={{ borderCollapse: "collapse" }}>
+        <thead>
+          <tr>
+            {["Node", "Kind", "Roles", "CPU", "RAM free / total", "Disk write", "Docker", "Task"].map((h) => (
+              <th key={h} style={cell}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {nodes?.map((n) => (
+            <tr key={n.nodeId}>
+              <td style={cell}>
+                {n.nodeId}
+                {n.hardware && <div style={{ color: "#777", fontSize: "0.8em" }}>{n.hardware.distro}</div>}
+              </td>
+              <td style={cell}>{n.nodeKind}</td>
+              <td style={cell}>{n.roles?.join(", ") ?? "—"}</td>
+              <td style={cell}>
+                {n.hardware ? `${n.hardware.cpu.logicalCores} threads` : "—"}
+                {n.heartbeat && ` · ${n.heartbeat.cpuLoadPercent}%`}
+              </td>
+              <td style={cell}>
+                {n.hardware
+                  ? `${((n.heartbeat?.memoryAvailableBytes ?? 0) / GiB).toFixed(1)} / ${(n.hardware.memory.totalBytes / GiB).toFixed(1)} GiB`
+                  : "—"}
+              </td>
+              <td style={cell}>{n.hardware ? `${n.hardware.storage.writeMBps} MB/s` : "—"}</td>
+              <td style={cell}>{n.hardware ? (n.hardware.docker.available ? "yes" : "no") : "—"}</td>
+              <td style={cell}>{n.currentTaskId ?? (n.nodeKind === "worker" ? "idle" : "—")}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <h2>Tasks ({tasks?.length ?? 0})</h2>
+      <table style={{ borderCollapse: "collapse" }}>
+        <thead>
+          <tr>
+            {["Task", "Role / kind", "State", "Node", "Attempts", "Why"].map((h) => (
+              <th key={h} style={cell}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {tasks?.map((t) => (
+            <tr key={t.spec.taskId}>
+              <td style={cell}>
+                {t.spec.taskId}
+                <div style={{ color: "#777", fontSize: "0.8em" }}>{t.spec.title}</div>
+              </td>
+              <td style={cell}>{t.spec.role} / {t.spec.kind}</td>
+              <td style={cell}>{t.state}</td>
+              <td style={cell}>{t.nodeId ?? "—"}</td>
+              <td style={cell}>{t.attempts}</td>
+              <td style={{ ...cell, fontSize: "0.85em" }}>
+                {t.state === "pending" ? t.waitingReason : (t.detail ?? t.routing?.reasons.join("; "))}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </main>
   );
 }

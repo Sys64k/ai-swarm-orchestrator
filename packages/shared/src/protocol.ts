@@ -49,6 +49,14 @@ export const WORKER_ROLES = ["backend", "frontend", "qa", "devops"] as const sat
 export const WorkerRoleSchema = z.enum(WORKER_ROLES);
 export type WorkerRole = z.infer<typeof WorkerRoleSchema>;
 
+/**
+ * What a task needs from hardware. The role decides *who* does the work; the kind decides
+ * *where* it runs (e.g. e2e tests on high-RAM nodes, container builds on Docker hosts).
+ */
+export const TASK_KINDS = ["feature", "unit_test", "e2e_test", "db_migration", "container_build"] as const;
+export const TaskKindSchema = z.enum(TASK_KINDS);
+export type TaskKind = z.infer<typeof TaskKindSchema>;
+
 export function taskBranchName(taskId: TaskId): string {
   return `task/${TaskIdSchema.parse(taskId)}`;
 }
@@ -74,6 +82,8 @@ export const HardwareProfileSchema = z.strictObject({
     z.strictObject({ name: z.string(), type: z.string(), sizeBytes: z.number().nonnegative() }),
   ),
   docker: z.strictObject({ available: z.boolean(), version: z.string().optional() }),
+  /** Measured sequential write throughput (with fsync) of the worker's work directory. */
+  storage: z.strictObject({ workDir: z.string().min(1), writeMBps: z.number().nonnegative() }),
 });
 export type HardwareProfile = z.infer<typeof HardwareProfileSchema>;
 
@@ -98,15 +108,31 @@ const RegistrationAckPayload = z.strictObject({
   nodeId: NodeIdSchema,
 });
 
-const TaskAssignmentPayload = z.strictObject({
+/** Live load metrics, sent periodically so routing uses current rather than boot-time values. */
+const NodeHeartbeatPayload = z.strictObject({
+  memoryAvailableBytes: z.number().nonnegative(),
+  cpuLoadPercent: z.number().min(0).max(100),
+  dockerAvailable: z.boolean(),
+});
+
+/** A unit of work as produced by the Architect (or submitted via the Hub API). */
+export const TaskSpecSchema = z.strictObject({
   taskId: TaskIdSchema,
   role: WorkerRoleSchema,
+  kind: TaskKindSchema.default("feature"),
   title: z.string().min(1).max(200),
   description: z.string().min(1).max(20_000),
   acceptanceCriteria: z.array(z.string().min(1)).default([]),
   /** Optional hint of files the task is expected to touch. */
   files: z.array(RepoPathSchema).default([]),
 });
+export type TaskSpec = z.infer<typeof TaskSpecSchema>;
+
+/** Task submission input: the Hub generates a task id when none is given. */
+export const TaskSpecInputSchema = TaskSpecSchema.extend({ taskId: TaskIdSchema.optional() });
+export type TaskSpecInput = z.input<typeof TaskSpecInputSchema>;
+
+const TaskAssignmentPayload = TaskSpecSchema;
 
 const TestExecutionPayload = z.strictObject({
   taskId: TaskIdSchema,
@@ -259,6 +285,7 @@ function message<T extends string, P extends z.ZodType>(type: T, payload: P) {
 export const AgentMessageSchema = z.discriminatedUnion("type", [
   message("NODE_REGISTRATION", NodeRegistrationPayload),
   message("REGISTRATION_ACK", RegistrationAckPayload),
+  message("NODE_HEARTBEAT", NodeHeartbeatPayload),
   message("TASK_ASSIGNMENT", TaskAssignmentPayload),
   message("TEST_EXECUTION", TestExecutionPayload),
   message("FILE_OPERATION", FileOperationPayload),
@@ -283,6 +310,7 @@ export type PayloadInput<T extends AgentMessageType> = Extract<
 /** Message types a node (worker or architect) may send to the Hub. */
 export const NODE_TO_HUB_TYPES = new Set<AgentMessageType>([
   "NODE_REGISTRATION",
+  "NODE_HEARTBEAT",
   "FILE_OPERATION",
   "STATUS_UPDATE",
   "FEEDBACK_LOOP",

@@ -7,8 +7,9 @@ export async function startWorkerCommand(opts: {
   hub: string;
   port: number;
   roles?: WorkerRole[];
+  workDir?: string;
 }): Promise<void> {
-  const worker = await startWorker({ hub: opts.hub, port: opts.port, roles: opts.roles });
+  const worker = await startWorker(opts);
 
   const shutdown = (signal: string) => {
     log.info(`${signal} received, stopping worker`);

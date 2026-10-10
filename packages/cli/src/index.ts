@@ -53,6 +53,7 @@ program
   .requiredOption("--hub <ip_address>", "Hub address (IP, host:port, or ws:// URL)")
   .option("-p, --port <port>", "Hub port if not given in --hub", parsePort, DEFAULT_HUB_PORT)
   .option("-r, --roles <roles>", `roles to accept (default: ${WORKER_ROLES.join(",")})`, parseRoles)
+  .option("-w, --work-dir <path>", "directory for task checkouts (default: ~/.aso/work)")
   .action(startWorkerCommand);
 
 program

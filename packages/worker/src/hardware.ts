@@ -1,15 +1,22 @@
+import { randomBytes } from "node:crypto";
+import { mkdir, open, rm } from "node:fs/promises";
 import os from "node:os";
+import path from "node:path";
 import si from "systeminformation";
 import type { HardwareProfile } from "@aso/shared";
 
+const BENCH_BYTES = 64 * 1024 * 1024;
+const BENCH_CHUNK = 4 * 1024 * 1024;
+
 /** Collect the hardware profile the Hub uses for capability-based task routing. */
-export async function profileHardware(): Promise<HardwareProfile> {
-  const [cpu, mem, osInfo, disks, docker] = await Promise.all([
+export async function profileHardware(workDir: string): Promise<HardwareProfile> {
+  const [cpu, mem, osInfo, disks, docker, writeMBps] = await Promise.all([
     si.cpu(),
     si.mem(),
     si.osInfo(),
     si.diskLayout().catch(() => []),
     si.dockerInfo().catch(() => null),
+    measureWriteMBps(workDir),
   ]);
 
   return {
@@ -23,5 +30,51 @@ export async function profileHardware(): Promise<HardwareProfile> {
     docker: docker?.serverVersion
       ? { available: true, version: docker.serverVersion }
       : { available: false },
+    storage: { workDir, writeMBps },
   };
+}
+
+export interface LoadMetrics {
+  memoryAvailableBytes: number;
+  cpuLoadPercent: number;
+  dockerAvailable: boolean;
+}
+
+export async function sampleLoad(): Promise<LoadMetrics> {
+  const [mem, load, dockerAvailable] = await Promise.all([si.mem(), si.currentLoad(), isDockerAvailable()]);
+  return {
+    memoryAvailableBytes: mem.available,
+    cpuLoadPercent: Math.min(100, Math.max(0, Math.round(load.currentLoad * 10) / 10)),
+    dockerAvailable,
+  };
+}
+
+/** True when the Docker daemon answers (not merely when the CLI is installed). */
+async function isDockerAvailable(): Promise<boolean> {
+  try {
+    return Boolean((await si.dockerInfo()).serverVersion);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Sequential write benchmark in the work directory, where task checkouts live, so the result
+ * reflects the storage that builds and migrations will actually use.
+ */
+async function measureWriteMBps(workDir: string): Promise<number> {
+  await mkdir(workDir, { recursive: true });
+  const file = path.join(workDir, `.aso-io-bench-${process.pid}`);
+  const chunk = randomBytes(BENCH_CHUNK);
+  const handle = await open(file, "w");
+  try {
+    const start = process.hrtime.bigint();
+    for (let written = 0; written < BENCH_BYTES; written += BENCH_CHUNK) await handle.write(chunk);
+    await handle.sync();
+    const seconds = Number(process.hrtime.bigint() - start) / 1e9;
+    return Math.round(BENCH_BYTES / 1024 / 1024 / seconds);
+  } finally {
+    await handle.close();
+    await rm(file, { force: true });
+  }
 }

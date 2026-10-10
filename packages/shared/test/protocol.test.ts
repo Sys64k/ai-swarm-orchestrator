@@ -21,6 +21,7 @@ const hardware = {
   memory: { totalBytes: 16e9, availableBytes: 8e9 },
   disks: [{ name: "nvme", type: "NVMe", sizeBytes: 1e12 }],
   docker: { available: true, version: "29.0.0" },
+  storage: { workDir: "/home/u/.aso/work", writeMBps: 900 },
 };
 
 function frame(type: string, payload: unknown, extra: Record<string, unknown> = {}): string {
@@ -62,6 +63,12 @@ describe("AgentMessageSchema", () => {
     issuesOf(frame("NODE_REGISTRATION", { nodeKind: "worker", version: "1", roles: ["architect"], hardware }));
   });
 
+  it("accepts heartbeats and rejects out-of-range load", () => {
+    const hb = { memoryAvailableBytes: 1e9, cpuLoadPercent: 42.5, dockerAvailable: true };
+    assert.ok(parseAgentMessage(frame("NODE_HEARTBEAT", hb)).ok);
+    issuesOf(frame("NODE_HEARTBEAT", { ...hb, cpuLoadPercent: 140 }));
+  });
+
   it("applies defaults for TASK_ASSIGNMENT and TEST_EXECUTION", () => {
     const task = createMessage("TASK_ASSIGNMENT", "hub", {
       taskId: "add-login",
@@ -70,6 +77,7 @@ describe("AgentMessageSchema", () => {
       description: "Build it",
     });
     assert.deepEqual(task.payload.files, []);
+    assert.equal(task.payload.kind, "feature");
     const test = createMessage("TEST_EXECUTION", "hub", { taskId: "add-login", commit: SHA });
     assert.deepEqual(test.payload.command, ["npm", "test"]);
     assert.equal(test.payload.timeoutSec, 900);

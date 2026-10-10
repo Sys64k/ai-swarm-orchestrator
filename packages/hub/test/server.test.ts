@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
-import { createMessage, parseAgentMessage, type AgentMessage } from "@aso/shared";
+import { createMessage } from "@aso/shared";
 import { startHub, type HubHandle } from "@aso/hub";
-
-process.env.ASO_LOG_LEVEL ??= "error";
+import { connect as connectTo } from "./helpers.ts";
 
 const PORT = 17_900 + Math.floor(Math.random() * 90);
 let hub: HubHandle;
@@ -13,36 +12,7 @@ before(async () => {
 });
 after(() => hub.close());
 
-/** Minimal test client that queues parsed inbound messages. */
-async function connect() {
-  const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
-  const inbox: AgentMessage[] = [];
-  const waiters: Array<(m: AgentMessage) => void> = [];
-  let closeCode: number | undefined;
-  ws.addEventListener("message", (e) => {
-    const r = parseAgentMessage(String(e.data));
-    assert.ok(r.ok, "hub sent an invalid message");
-    const w = waiters.shift();
-    w ? w(r.message) : inbox.push(r.message);
-  });
-  ws.addEventListener("close", (e) => (closeCode = e.code));
-  await new Promise((res, rej) => {
-    ws.addEventListener("open", res, { once: true });
-    ws.addEventListener("error", rej, { once: true });
-  });
-  return {
-    ws,
-    send: (m: unknown) => ws.send(typeof m === "string" ? m : JSON.stringify(m)),
-    next: () =>
-      new Promise<AgentMessage>((res, rej) => {
-        const m = inbox.shift();
-        if (m) return res(m);
-        const t = setTimeout(() => rej(new Error("timed out waiting for message")), 2000);
-        waiters.push((msg) => (clearTimeout(t), res(msg)));
-      }),
-    closeCode: () => closeCode,
-  };
-}
+const connect = () => connectTo(PORT);
 
 const registration = (nodeId: string) =>
   createMessage("NODE_REGISTRATION", nodeId, { nodeKind: "architect", version: "test" });
