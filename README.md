@@ -106,7 +106,7 @@ turns and cost. Estimates use the Hub's price table. Your Console billing is aut
 Install from source (this repository) and build the distributable package once:
 
 ```bash
-git clone <this repo> aso && cd aso
+git clone git@github.com:vaisajuh/ai-swarm-orchestrator.git aso && cd aso
 npm install
 npm run package            # builds everything + release/aso.tgz (the package workers install)
 npm link -w @aso/cli       # puts `aso` on your PATH (or use: npm run aso -- <command>)
