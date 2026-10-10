@@ -12,7 +12,16 @@ export interface RolePolicy {
 }
 
 const EXPLORE: AgentToolName[] = ["list_files", "read_file", "search"];
-const BUILD: AgentToolName[] = [...EXPLORE, "write_file", "edit_file", "delete_file", "run_command", "request_dependency", "finish"];
+const BUILD: AgentToolName[] = [
+  ...EXPLORE,
+  "write_file",
+  "edit_file",
+  "delete_file",
+  "run_command",
+  "request_dependency",
+  "set_package_scripts",
+  "finish",
+];
 
 /** Test code, specs and their configuration. */
 export const QA_WRITABLE = [

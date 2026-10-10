@@ -12,7 +12,7 @@ and in most Markdown editors.
 6. [Hardware-aware routing](#6-hardware-aware-routing)
 7. [Task lifecycle](#7-task-lifecycle)
 8. [Git flow](#8-git-flow)
-9. [Dependency requests](#9-dependency-requests)
+9. [Package changes (dependencies and scripts)](#9-package-changes-dependencies-and-scripts)
 10. [LLM gateway and agent loop](#10-llm-gateway-and-agent-loop)
 11. [Agent roles and planning](#11-agent-roles-and-planning)
 12. [Authentication](#12-authentication)
@@ -181,7 +181,7 @@ keys are rejected.
 | `TEST_EXECUTION` | hub → node | 3 | QA: test an exact commit with `setup` steps and a `command` argv |
 | `FEEDBACK_LOOP` | node → hub | 3 | QA verdict: `pass`, or `fail` with at least one failure and the output tail |
 | `FILE_OPERATION` | node → hub | 5 | Audit trail of agent file edits (sent by the agent loop) |
-| `DEPENDENCY_REQUEST` | node → hub | 4 | Ask the Hub to add an npm package (idempotent by `requestId`) |
+| `DEPENDENCY_REQUEST` | node → hub | 4 | Ask the Hub for a package.json change: `add_dependency` or `set_scripts` (idempotent by `requestId`) |
 | `DEPENDENCY_RESPONSE` | hub → node | 4 | `installed` (with the main commit) or `rejected` |
 | `PROMPT_EXECUTION` | node → hub | 5 | One agent turn for a `taskId` (worker) or `planId` (Architect): `conversationId`, `turn`, and the results of the previous turn's tool calls. Nothing else: the Hub holds the conversation |
 | `PROMPT_RESULT` | hub → node | 5 | The model's visible text and tool calls for that turn, plus usage/cost; or an error marked retryable or not |
@@ -541,7 +541,7 @@ flowchart TD
   instead of hanging.
 - **Clean URLs:** remote URLs are shown with userinfo stripped.
 
-## 9. Dependency requests
+## 9. Package changes (dependencies and scripts)
 
 Task branches may never change `package.json` or lockfiles. Both the worker and the Hub
 enforce this, so new packages go through the Hub.
@@ -568,17 +568,41 @@ sequenceDiagram
   W-->>Ag: resolve { mainCommit }
 ```
 
+### Two kinds of change
+
+`DEPENDENCY_REQUEST` carries a `change`:
+
+| `change.type` | Fields | Hub action |
+|---|---|---|
+| `add_dependency` | `name`, `version?`, `dev` | `npm install --package-lock-only --ignore-scripts` |
+| `set_scripts` | `scripts: {name: command}` (1–10) | Edit `package.json` directly, merging scripts and keeping the indentation and other fields |
+
+**Empty projects.** When the target has no `package.json`, the Hub first writes a minimal one
+(`name` from the directory, `version: "0.1.0"`, `private: true`). This lets a brand-new
+repository be bootstrapped entirely by agents.
+
+**Script rules:**
+
+- **Names:** `^[a-z][a-z0-9:_-]{0,40}$`.
+- **Commands:** single-line, at most 500 characters.
+- **Lifecycle scripts refused:** `preinstall`, `install`, `postinstall`, `prepublish`,
+  `preprepare`, `prepare`, `postprepare`, `prepack`, `postpack`, `dependencies`. npm runs these
+  automatically during installs, including the workers' and QA's `npm ci`.
+- **No extra power.** Agents can already run arbitrary programs through `run_command`; scripts
+  just make that reproducible for QA.
+
 ### Checks, in order
 
 | Check | On failure |
 |---|---|
 | `requestId` seen before from the same node | Re-send the cached answer, or let the in-flight one arrive; never install twice |
 | Sender is the connected implementer of `taskId` | `rejected` |
-| Name allowed by `--allow-deps` (exact name or `@scope/*`) | `rejected` |
+| Dependency name allowed by `--allow-deps` (exact name or `@scope/*`) | `rejected` |
 | At most 10 requests per task | `rejected` |
 | Hub checkout clean and on `main` | `rejected` |
-| Root `package.json` exists; no `pnpm-lock.yaml` / `yarn.lock` / `bun.lock*` | `rejected` (npm only) |
-| npm succeeds within 5 min | Roll back, `rejected` with the npm error tail |
+| No `pnpm-lock.yaml` / `yarn.lock` / `bun.lock*` | `rejected` (npm only) |
+| Root `package.json` missing | Created (minimal), then the change is applied |
+| npm succeeds within 5 min (dependencies) / `package.json` is valid JSON (scripts) | Roll back, `rejected` with the error |
 | Only `package.json` / `package-lock.json` changed | Roll back everything, `rejected` |
 | Nothing changed (already satisfied) | `installed` with the current main commit, no new commit |
 
@@ -695,7 +719,8 @@ sequenceDiagram
 | `search` | `git grep -E` over tracked and untracked files; up to 300 matches |
 | `write_file` / `edit_file` / `delete_file` | Exact-match edits (unique unless `replace_all`); protected files refused; reported via `FILE_OPERATION` |
 | `run_command` | argv without a shell; `CI=1`; default 120 s timeout (max 900); `git`, shells, `sudo` and `npm install`-style commands refused |
-| `request_dependency` | Phase 4 flow; returns once installed and rebased |
+| `request_dependency` | Adds an npm package via the Hub; returns once installed and rebased |
+| `set_package_scripts` | Sets npm scripts via the Hub (creates package.json if missing); returns once rebased |
 | `finish` | Ends the loop with a summary and commit message; refused if other calls in the same turn failed |
 
 **Limits and safety:**

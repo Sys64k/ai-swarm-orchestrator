@@ -12,9 +12,10 @@
     "build": "tsc -b"
   },
   "dependencies": {
+    "@aso/shared": "*",
     "simple-git": "^4.0.2",
     "systeminformation": "^5.33.15",
     "ws": "^8.22.0",
-    "@aso/shared": "*"
+    "zod": "^4.6.5"
   }
 }

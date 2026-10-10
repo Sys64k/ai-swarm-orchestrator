@@ -41,6 +41,10 @@ beforeEach(() => {
       deps.push(req.name);
       return { mainCommit: "a".repeat(40) };
     },
+    setPackageScripts: async (scripts) => {
+      deps.push(`scripts:${Object.keys(scripts).join(",")}`);
+      return { mainCommit: "b".repeat(40) };
+    },
   });
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
@@ -49,7 +53,7 @@ describe("agent tools", () => {
   it("publishes JSON schemas for every tool", () => {
     const defs = agentToolDefinitions();
     assert.deepEqual(defs.map((d) => d.name), [
-      "list_files", "read_file", "search", "write_file", "edit_file", "delete_file", "run_command", "request_dependency", "finish", "submit_plan",
+      "list_files", "read_file", "search", "write_file", "edit_file", "delete_file", "run_command", "request_dependency", "set_package_scripts", "finish", "submit_plan",
     ]);
     for (const d of defs) {
       assert.equal(d.input_schema.type, "object");
@@ -126,7 +130,9 @@ describe("agent tools", () => {
     assert.match(ok(await call("request_dependency", { name: "zod", version: "^4.0.0" })), /zod@\^4.0.0 is installed/);
     err(await call("request_dependency", { name: "evil" }), /rejected by the Hub: not on allowlist/);
     err(await call("request_dependency", { name: "Bad Name" }), /invalid input/);
-    assert.deepEqual(deps, ["zod"]);
+    assert.match(ok(await call("set_package_scripts", { scripts: { test: "node --test" } })), /scripts updated on main @ bbbbbbbb \(test\)/);
+    err(await call("set_package_scripts", { scripts: { postinstall: "x" } }), /invalid input/);
+    assert.deepEqual(deps, ["zod", "scripts:test"]);
   });
 
   it("validates inputs and rejects unknown tools", async () => {
@@ -144,7 +150,13 @@ describe("agent tools", () => {
 
   it("enforces role scopes: QA writes tests only, Architect is read-only", async () => {
     const as = (role: "qa" | "architect" | "devops") =>
-      new AgentTools({ repoDir: repo, role, fileOperation: (op) => ops.push(`${op.op} ${op.path}`), requestDependency: async () => ({ mainCommit: "a".repeat(40) }) });
+      new AgentTools({
+        repoDir: repo,
+        role,
+        fileOperation: (op) => ops.push(`${op.op} ${op.path}`),
+        requestDependency: async () => ({ mainCommit: "a".repeat(40) }),
+        setPackageScripts: async () => ({ mainCommit: "b".repeat(40) }),
+      });
     const qa = as("qa");
     const qaCall = (name: string, input: Record<string, unknown>) => qa.execute({ id: "tu", name, input });
     ok(await qaCall("write_file", { path: "test/a.test.js", content: "x" }));

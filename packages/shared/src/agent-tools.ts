@@ -1,5 +1,12 @@
 import { z } from "zod";
-import { NpmPackageNameSchema, PlannedTaskSchema, RepoPathSchema, VersionRangeSchema } from "./protocol.js";
+import {
+  NpmPackageNameSchema,
+  PlannedTaskSchema,
+  RepoPathSchema,
+  ScriptCommandSchema,
+  ScriptNameSchema,
+  VersionRangeSchema,
+} from "./protocol.js";
 
 /**
  * Tools the coding agent can call. The Hub sends these definitions to the model; the worker
@@ -69,6 +76,18 @@ export const AGENT_TOOLS = {
       name: NpmPackageNameSchema,
       version: VersionRangeSchema.optional().describe("Semver range; default latest"),
       dev: z.boolean().optional().describe("Add as a devDependency"),
+    }),
+  },
+  set_package_scripts: {
+    description:
+      "Ask the Hub to add or update npm scripts in package.json (e.g. test, build, dev, lint). You cannot edit package.json " +
+      "yourself. If the project has no package.json yet, the Hub creates one. QA runs `npm test`, so the project needs a test " +
+      "script. Install lifecycle scripts (postinstall, prepare, ...) are not allowed. Blocks until the change is on main and " +
+      "your branch is rebased (your edits are kept).",
+    input: z.strictObject({
+      scripts: z
+        .record(ScriptNameSchema, ScriptCommandSchema)
+        .describe('Script name -> command, e.g. {"test": "node --test", "build": "tsc"}'),
     }),
   },
   finish: {

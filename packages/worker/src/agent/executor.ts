@@ -27,6 +27,7 @@ export class LlmTaskExecutor implements TaskExecutor {
       repoDir: ctx.repoDir,
       role: task.role,
       requestDependency: (req) => ctx.requestDependency(req),
+      setPackageScripts: (scripts) => ctx.setPackageScripts(scripts),
       fileOperation: (op) => ctx.fileOperation(op),
     });
     const conversationId = randomUUID();

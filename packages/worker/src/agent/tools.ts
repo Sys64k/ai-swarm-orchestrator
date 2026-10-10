@@ -48,6 +48,7 @@ export interface ToolHost {
   /** Decides which tools are available and which paths may be written. */
   role: AgentRole;
   requestDependency(req: DependencyRequest): Promise<{ mainCommit: string }>;
+  setPackageScripts(scripts: Record<string, string>): Promise<{ mainCommit: string }>;
   fileOperation(op: Omit<MessageOf<"FILE_OPERATION">["payload"], "taskId">): void;
 }
 
@@ -100,6 +101,8 @@ export class AgentTools {
           return await this.runCommand(parsed.data as AgentToolInput<"run_command">, done);
         case "request_dependency":
           return done(await this.requestDependency(parsed.data as AgentToolInput<"request_dependency">));
+        case "set_package_scripts":
+          return done(await this.setPackageScripts(parsed.data as AgentToolInput<"set_package_scripts">));
       }
     } catch (err) {
       return done(err instanceof ToolError ? err.message : `${call.name} failed: ${(err as Error).message}`, true);
@@ -228,6 +231,16 @@ export class AgentTools {
       ? `timed out after ${timeout_sec}s`
       : `exit code ${result.exitCode ?? result.signal}`;
     return done(`${status} (${(result.durationMs / 1000).toFixed(1)}s)\n${tail(result.output, TOOL_OUTPUT_LIMIT - 200)}`, result.exitCode !== 0);
+  }
+
+  private async setPackageScripts({ scripts }: AgentToolInput<"set_package_scripts">): Promise<string> {
+    try {
+      const { mainCommit } = await this.host.setPackageScripts(scripts);
+      return `package.json scripts updated on main @ ${mainCommit.slice(0, 8)} (${Object.keys(scripts).join(", ")}); your branch was rebased onto it`;
+    } catch (err) {
+      if (err instanceof DependencyRejectedError) throw new ToolError(`script change rejected by the Hub: ${err.message}`);
+      throw err;
+    }
   }
 
   private async requestDependency({ name, version, dev }: AgentToolInput<"request_dependency">): Promise<string> {

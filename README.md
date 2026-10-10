@@ -211,7 +211,7 @@ rework rounds, and an event history.
    - `list_files`, `read_file`, `search`
    - `write_file`, `edit_file`, `delete_file`
    - `run_command` (no shell, no git)
-   - `request_dependency`
+   - `request_dependency`, `set_package_scripts`
 3. **Verify.** The Hub checks that the reported commit is the head of `task/<id>` and doesn't
    touch `package.json` or lockfiles.
 4. **QA.** A QA worker checks out that exact commit, runs `npm ci` if the commit has a
@@ -230,10 +230,19 @@ rework rounds, and an event history.
 
 A task is failed after 3 node losses.
 
-## Adding dependencies
+## Package changes: dependencies and scripts
 
-Workers may never edit `package.json` or lockfiles. When an agent needs a package, it calls
-`requestDependency({ name, version?, dev? })`:
+Workers may never edit `package.json` or lockfiles. Agents ask the Hub instead:
+
+- **`request_dependency`** adds a package (`{ name, version?, dev? }`).
+- **`set_package_scripts`** adds or updates npm scripts such as `test`, `build`, `dev` and
+  `lint`.
+
+**Empty projects work.** If the target has no `package.json` yet, the Hub creates a minimal one
+(`name` from the folder, `version: 0.1.0`, `private: true`) with the first change. QA runs
+`npm test`, so agents are told to set a `test` script when they add tests.
+
+For a dependency, the flow is:
 
 1. **Pause.** The worker reports `waiting_dependency` and sends a request to the Hub.
 2. **Hub install.** Under the `main` lock, the Hub runs
@@ -244,9 +253,14 @@ Workers may never edit `package.json` or lockfiles. When an agent needs a packag
 4. **Rebase and install.** The worker rebases its task branch onto the new `main`, keeping the
    agent's uncommitted edits, and runs `npm ci`. Then the agent continues.
 
+Script changes follow the same path. The Hub edits `package.json` directly, keeping its
+formatting and other fields, and no `npm ci` is needed afterwards. Install lifecycle scripts
+(`preinstall`, `install`, `postinstall`, `prepare`, `prepack`, …) are refused, so installs
+never run agent-defined hooks automatically.
+
 Rules:
 
-- **Who can ask.** Only the node currently implementing a task can request dependencies for
+- **Who can ask.** Only the node currently implementing a task can request package changes for
   it, at most 10 per task.
 - **Allowlist.** `--allow-deps zod,@prisma/*` restricts which packages agents may add; the
   default allows any.

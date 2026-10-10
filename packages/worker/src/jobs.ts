@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { z } from "zod";
 import {
-  NpmPackageNameSchema,
-  VersionRangeSchema,
+  PackageChangeSchema,
   createLogger,
   type AgentMessageType,
   type MessageOf,
@@ -37,6 +37,11 @@ export interface ExecutionContext {
    * Rejects with DependencyRejectedError if the Hub refused.
    */
   requestDependency(request: DependencyRequest): Promise<{ mainCommit: string }>;
+  /**
+   * Ask the Hub to add/update npm scripts (creating package.json if the project has none).
+   * Resolves once the change is on main and this branch was rebased onto it.
+   */
+  setPackageScripts(scripts: Record<string, string>): Promise<{ mainCommit: string }>;
   /** One model turn via the Hub (which holds the conversation). */
   callModel(turn: ModelTurn): Promise<ModelReply>;
   /** Report an agent file edit to the Hub (audit trail / dashboard). */
@@ -44,6 +49,8 @@ export interface ExecutionContext {
 }
 
 export type { ModelReply, ModelTurn } from "./model-channel.js";
+
+type PackageChangeInput = z.input<typeof PackageChangeSchema>;
 
 export class DependencyRejectedError extends Error {
   override name = "DependencyRejectedError";
@@ -174,7 +181,9 @@ export class JobRunner {
       const result = await this.opts.executor.implement(task, {
         repoDir: this.repoDir,
         report: (detail) => status("in_progress", detail),
-        requestDependency: (req) => this.requestDependency(task, git, req),
+        requestDependency: (req) =>
+          this.requestPackageChange(task, git, { type: "add_dependency", name: req.name, version: req.version, dev: req.dev }),
+        setPackageScripts: (scripts) => this.requestPackageChange(task, git, { type: "set_scripts", scripts }),
         callModel: (turn) => this.model.call({ taskId: task.taskId }, turn),
         fileOperation: (op) => send("FILE_OPERATION", { ...op, taskId: task.taskId } as PayloadInput<"FILE_OPERATION">),
       });
@@ -191,28 +200,24 @@ export class JobRunner {
     }
   }
 
-  private async requestDependency(
+  private async requestPackageChange(
     task: TaskAssignment,
     git: AgentGitClient,
-    req: DependencyRequest,
+    input: PackageChangeInput,
   ): Promise<{ mainCommit: string }> {
-    const name = NpmPackageNameSchema.parse(req.name);
-    const version = req.version === undefined ? undefined : VersionRangeSchema.parse(req.version);
-    const label = `${name}${version ? `@${version}` : ""}`;
+    const change = PackageChangeSchema.parse(input);
+    const label =
+      change.type === "add_dependency"
+        ? `${change.name}${change.version ? `@${change.version}` : ""}`
+        : `scripts ${Object.keys(change.scripts).join(", ")}`;
     const { send } = this.opts;
-    const message: PayloadInput<"DEPENDENCY_REQUEST"> = {
-      requestId: randomUUID(),
-      taskId: task.taskId,
-      name,
-      version,
-      dev: req.dev ?? false,
-    };
+    const message: PayloadInput<"DEPENDENCY_REQUEST"> = { requestId: randomUUID(), taskId: task.taskId, change };
 
     send("STATUS_UPDATE", { state: "waiting_dependency", taskId: task.taskId, detail: `waiting for ${label}` });
     const response = await new Promise<DependencyResponse>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pendingDependencies.delete(message.requestId);
-        reject(new Error(`no answer from the Hub for dependency ${label}`));
+        reject(new Error(`no answer from the Hub for ${label}`));
       }, this.opts.dependencyTimeoutMs ?? 15 * 60_000);
       this.pendingDependencies.set(message.requestId, {
         message,
@@ -225,12 +230,13 @@ export class JobRunner {
     });
 
     if (response.outcome === "rejected") {
-      send("STATUS_UPDATE", { state: "in_progress", taskId: task.taskId, detail: `dependency ${label} rejected` });
+      send("STATUS_UPDATE", { state: "in_progress", taskId: task.taskId, detail: `${label} rejected` });
       throw new DependencyRejectedError(response.reason);
     }
 
     await git.syncWithMain();
-    if (existsSync(path.join(this.repoDir, "package-lock.json"))) {
+    // Only a new dependency needs installing; script changes don't touch node_modules.
+    if (change.type === "add_dependency" && existsSync(path.join(this.repoDir, "package-lock.json"))) {
       const result = await runCommand(["npm", "ci", "--no-audit", "--no-fund"], {
         cwd: this.repoDir,
         timeoutMs: 10 * 60_000,
@@ -239,10 +245,11 @@ export class JobRunner {
         throw new Error(`npm ci failed after adding ${label}: ${result.output.slice(-2000)}`);
       }
     }
-    send("STATUS_UPDATE", { state: "in_progress", taskId: task.taskId, detail: `dependency ${label} installed` });
-    log.info(`dependency ${label} available (main @ ${response.mainCommit.slice(0, 8)})`);
+    send("STATUS_UPDATE", { state: "in_progress", taskId: task.taskId, detail: `${label} applied` });
+    log.info(`${label} applied (main @ ${response.mainCommit.slice(0, 8)})`);
     return { mainCommit: response.mainCommit };
   }
+
 
   private async test(job: TestExecution): Promise<void> {
     const { send } = this.opts;

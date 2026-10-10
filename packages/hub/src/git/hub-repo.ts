@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { rm } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { simpleGit, type SimpleGit } from "simple-git";
 import {
@@ -8,6 +8,7 @@ import {
   taskBranchName,
   writeDenial,
   type AgentRole,
+  type PackageChange,
   type TaskId,
 } from "@aso/shared";
 
@@ -134,26 +135,27 @@ export class HubRepository {
   }
 
   /**
-   * Run `installer` in the checkout and commit the resulting manifest + lockfile change to main.
-   * Anything else the installer touches is rolled back and the request rejected.
+   * Apply a package.json change on main and commit it: add a dependency (via `installer`) or
+   * set scripts. A project without package.json gets a minimal one first. Anything else the
+   * change touches is rolled back and the request rejected.
    */
-  addDependency(
-    request: DependencySpec,
-    installer: DependencyInstaller,
-    message: string,
-  ): Promise<DependencyResult> {
+  changePackage(change: PackageChange, installer: DependencyInstaller, message: string): Promise<DependencyResult> {
     return this.withMainLock(async () => {
       const notReady = await this.checkoutProblem();
       if (notReady) return { ok: false, reason: notReady };
 
       const has = (f: string) => existsSync(path.join(this.dir, f));
-      if (!has("package.json")) return { ok: false, reason: "the target project has no package.json" };
       const foreign = ["pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb"].filter(has);
       if (foreign.length) return { ok: false, reason: `only npm projects are supported (found ${foreign.join(", ")})` };
 
       const before = await this.mainHead();
       try {
-        await installer.install(this.dir, request);
+        if (!has("package.json")) await this.createManifest();
+        if (change.type === "add_dependency") {
+          await installer.install(this.dir, { name: change.name, version: change.version, dev: change.dev });
+        } else {
+          await this.setScripts(change.scripts);
+        }
       } catch (err) {
         await this.restoreManifests();
         return { ok: false, reason: (err as Error).message };
@@ -171,7 +173,7 @@ export class HubRepository {
       await this.git.add(toCommit);
       await this.git.commit(message, toCommit);
       const mainCommit = await this.mainHead();
-      log.info(`committed dependency change on ${this.mainBranch} @ ${mainCommit.slice(0, 8)}: ${message}`);
+      log.info(`committed package change on ${this.mainBranch} @ ${mainCommit.slice(0, 8)}: ${message.split("\n")[0]}`);
       return { ok: true, changed: true, mainCommit };
     });
   }
@@ -199,6 +201,35 @@ export class HubRepository {
         : { ok: false, conflict: false, reason: error!.message.trim() };
     }
     return { ok: true };
+  }
+
+  /** Minimal manifest for a project that has none yet (e.g. a brand-new empty repository). */
+  private async createManifest(): Promise<void> {
+    const name =
+      path
+        .basename(this.dir)
+        .toLowerCase()
+        .replace(/[^a-z0-9._-]+/g, "-")
+        .replace(/^[._-]+|-+$/g, "") || "project";
+    const manifest = { name, version: "0.1.0", private: true };
+    await writeFile(path.join(this.dir, "package.json"), JSON.stringify(manifest, null, 2) + "\n");
+    log.info(`created package.json for ${name}`);
+  }
+
+  /** Merge scripts into package.json, keeping its indentation and other fields as they are. */
+  private async setScripts(scripts: Record<string, string>): Promise<void> {
+    const file = path.join(this.dir, "package.json");
+    const text = await readFile(file, "utf8");
+    let pkg: Record<string, unknown>;
+    try {
+      pkg = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      throw new Error("package.json is not valid JSON");
+    }
+    if (typeof pkg !== "object" || pkg === null || Array.isArray(pkg)) throw new Error("package.json is not an object");
+    const indent = /^\{\n(\s+)"/.exec(text)?.[1] ?? "  ";
+    pkg.scripts = { ...((pkg.scripts as Record<string, string>) ?? {}), ...scripts };
+    await writeFile(file, JSON.stringify(pkg, null, indent) + "\n");
   }
 
   /** Why main can't be written right now, or undefined if the checkout is clean and on main. */

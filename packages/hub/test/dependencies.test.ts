@@ -68,8 +68,14 @@ const request = (nodeId: string, taskId: string, extra: Record<string, unknown> 
   createMessage("DEPENDENCY_REQUEST", nodeId, {
     requestId: crypto.randomUUID(),
     taskId,
-    name: "left-pad",
-    ...extra,
+    change: { type: "add_dependency", name: "left-pad", ...extra },
+  } as never);
+
+const scriptsRequest = (nodeId: string, taskId: string, scripts: Record<string, string>) =>
+  createMessage("DEPENDENCY_REQUEST", nodeId, {
+    requestId: crypto.randomUUID(),
+    taskId,
+    change: { type: "set_scripts", scripts },
   } as never);
 
 describe("dependency requests (Hub)", () => {
@@ -91,7 +97,7 @@ describe("dependency requests (Hub)", () => {
         // The fake installer leaves the lockfile unchanged; the real-npm test covers both files.
         assert.equal(git(ctx.repoDir, "show", "--name-only", "--format=", "main"), "package.json");
         assert.equal(git(ctx.repoDir, "status", "--porcelain"), "");
-        assert.ok(ctx.hub.tasks.get("feat")!.history.some((h) => /dependency left-pad@\^1.3.0 \(dev\) added on main/.test(h.event)));
+        assert.ok(ctx.hub.tasks.get("feat")!.history.some((h) => /package change left-pad@\^1.3.0 \(dev\) committed on main/.test(h.event)));
         w.ws.close();
       },
       { files: NPM_PROJECT, dependencyInstaller: fakeInstaller(calls) },
@@ -175,23 +181,67 @@ describe("dependency requests (Hub)", () => {
       },
     ));
 
-  it("rejects non-npm projects and projects without package.json", async () => {
-    for (const [files, why] of [
-      [{ "package.json": PKG, "pnpm-lock.yaml": "x\n" }, /only npm projects are supported \(found pnpm-lock.yaml\)/],
-      [{}, /no package.json/],
-    ] as const) {
-      await withHub(
-        async (ctx) => {
-          const w = await implementer(ctx, "dev", "feat");
-          w.send(request("dev", "feat"));
-          const r = response(await w.next());
-          assert.ok(r.outcome === "rejected" && why.test(r.reason), r.outcome === "rejected" ? r.reason : "");
-          w.ws.close();
-        },
-        { files, dependencyInstaller: fakeInstaller() },
-      );
-    }
-  });
+  it("rejects non-npm projects", () =>
+    withHub(
+      async (ctx) => {
+        const w = await implementer(ctx, "dev", "feat");
+        w.send(request("dev", "feat"));
+        const r = response(await w.next());
+        assert.ok(r.outcome === "rejected" && /only npm projects are supported \(found pnpm-lock.yaml\)/.test(r.reason));
+        w.ws.close();
+      },
+      { files: { "package.json": PKG, "pnpm-lock.yaml": "x\n" }, dependencyInstaller: fakeInstaller() },
+    ));
+
+  it("creates package.json for a project that has none, then applies the change", () =>
+    withHub(
+      async (ctx) => {
+        const w = await implementer(ctx, "dev", "feat");
+        w.send(request("dev", "feat"));
+        assert.equal(response(await w.next()).outcome, "installed");
+        const pkg = JSON.parse(git(ctx.repoDir, "show", "main:package.json"));
+        assert.equal(pkg.private, true);
+        assert.equal(pkg.version, "0.1.0");
+        assert.match(pkg.name, /^aso-target-/, "named after the project directory");
+        assert.deepEqual(pkg.asoTestDependencies, { "left-pad": "^1.0.0" });
+        w.ws.close();
+      },
+      { dependencyInstaller: fakeInstaller() },
+    ));
+
+  it("sets npm scripts, keeping other fields and formatting", () =>
+    withHub(
+      async (ctx) => {
+        const w = await implementer(ctx, "dev", "feat");
+        w.send(scriptsRequest("dev", "feat", { test: "node --test", build: "tsc" }));
+        const r = response(await w.next());
+        assert.equal(r.outcome, "installed");
+        const text = git(ctx.repoDir, "show", "main:package.json");
+        assert.deepEqual(JSON.parse(text), { name: "target", version: "1.0.0", scripts: { lint: "eslint .", test: "node --test", build: "tsc" } });
+        assert.match(text, /^\{\n\t"name"/, "tab indentation preserved");
+        assert.equal(git(ctx.repoDir, "log", "-1", "--format=%s", "main"), 'chore: set npm scripts test="node --test", build="tsc"');
+        assert.equal(git(ctx.repoDir, "show", "--name-only", "--format=", "main"), "package.json");
+
+        // Same scripts again: nothing to commit.
+        const before = git(ctx.repoDir, "rev-parse", "main");
+        w.send(scriptsRequest("dev", "feat", { test: "node --test" }));
+        const again = response(await w.next());
+        assert.ok(again.outcome === "installed" && again.mainCommit === before);
+        w.ws.close();
+      },
+      { files: { "package.json": JSON.stringify({ name: "target", version: "1.0.0", scripts: { lint: "eslint ." } }, null, "\t") + "\n" } },
+    ));
+
+  it("creates package.json with scripts in an empty project", () =>
+    withHub(async (ctx) => {
+      const w = await implementer(ctx, "dev", "feat");
+      w.send(scriptsRequest("dev", "feat", { test: "node --test" }));
+      assert.equal(response(await w.next()).outcome, "installed");
+      const pkg = JSON.parse(git(ctx.repoDir, "show", "main:package.json"));
+      assert.deepEqual(pkg.scripts, { test: "node --test" });
+      assert.equal(pkg.private, true);
+      w.ws.close();
+    }));
 
   it("answers retries of the same request without installing twice", () => {
     const calls: string[] = [];
@@ -296,7 +346,7 @@ describe("dependency requests (real worker)", () => {
           ]);
           // The task commit was rebased onto the dependency commit.
           assert.equal(git(ctx.repoDir, "log", "-1", "--format=%s", "main^2~1"), "chore(deps): add left-pad@^1.3.0");
-          assert.ok(record.history.some((h) => /dependency request rejected: evil-pkg is not on the Hub's dependency allowlist/.test(h.event)));
+          assert.ok(record.history.some((h) => /package change rejected: evil-pkg is not on the Hub's dependency allowlist/.test(h.event)));
         } finally {
           dev.stop();
           await dev.runner.idle();
@@ -321,6 +371,47 @@ describe("dependency requests (real worker)", () => {
     ));
 });
 
+describe("empty project bootstrap (real worker)", () => {
+  it("lets an agent set up the test script in a repo with no package.json, then passes QA and merges", () =>
+    withHub(
+      async (ctx) => {
+        const executor: TaskExecutor = {
+          async implement(_t, { repoDir, setPackageScripts }) {
+            writeFiles(repoDir, {
+              "src/sum.js": "export const sum = (a, b) => a + b;\n",
+              "test/sum.test.js": 'import { test } from "node:test";\nimport assert from "node:assert/strict";\nimport { sum } from "../src/sum.js";\ntest("sum", () => assert.equal(sum(2, 3), 5));\n',
+            });
+            await setPackageScripts({ test: "node --test" });
+            return { commitMessage: "feat: sum" };
+          },
+        };
+        const dirs = [tempDir("aso-dev-"), tempDir("aso-qa-")];
+        const dev = await startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "dev", roles: ["backend"], workDir: dirs[0], hardware: hardware(), executor });
+        const qa = await startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "qa", roles: ["qa"], workDir: dirs[1], hardware: hardware() });
+        try {
+          await waitFor(() => ctx.hub.registry.has("dev") && ctx.hub.registry.has("qa"));
+          await postTask(ctx.port, { taskId: "sum", role: "backend", title: "Add sum", description: "d" });
+          const record = await waitFor(
+            () => ["merged", "failed"].includes(ctx.hub.tasks.get("sum")!.state) && ctx.hub.tasks.get("sum")!,
+            30_000,
+            "task to finish",
+          );
+          assert.equal(record.state, "merged", record.history.map((h) => h.event).join("\n"));
+          const pkg = JSON.parse(git(ctx.repoDir, "show", "main:package.json"));
+          assert.equal(pkg.scripts.test, "node --test");
+          // ESM test file without "type": "module": Node detects the syntax, and QA's npm test passed.
+          assert.ok(record.history.some((h) => /QA passed/.test(h.event)));
+        } finally {
+          dev.stop();
+          qa.stop();
+          await Promise.all([dev.runner.idle(), qa.runner.idle()]);
+          for (const d of dirs) rmSync(d, { recursive: true, force: true });
+        }
+      },
+      { qa: { command: ["npm", "test"] } },
+    ));
+});
+
 describe("npm installer (real registry)", () => {
   let online = false;
   try {
@@ -334,7 +425,7 @@ describe("npm installer (real registry)", () => {
     const dir = makeTargetRepo({ "package.json": PKG });
     try {
       const repo = await HubRepository.open(dir);
-      const result = await repo.addDependency({ name: "is-number", version: "^7.0.0", dev: false }, npmInstaller, "chore(deps): add is-number");
+      const result = await repo.changePackage({ type: "add_dependency", name: "is-number", version: "^7.0.0", dev: false }, npmInstaller, "chore(deps): add is-number");
       assert.ok(result.ok && result.changed, JSON.stringify(result));
       const pkg = JSON.parse(readFileSync(path.join(dir, "package.json"), "utf8"));
       assert.equal(pkg.dependencies["is-number"], "^7.0.0");
@@ -344,7 +435,7 @@ describe("npm installer (real registry)", () => {
       assert.equal(git(dir, "status", "--porcelain"), "");
       assert.equal(git(dir, "show", "--name-only", "--format=", "HEAD"), "package-lock.json\npackage.json");
 
-      const bad = await repo.addDependency({ name: "aso-surely-nonexistent-pkg-x9z", dev: false }, npmInstaller, "x");
+      const bad = await repo.changePackage({ type: "add_dependency", name: "aso-surely-nonexistent-pkg-x9z", dev: false }, npmInstaller, "x");
       assert.ok(!bad.ok && /npm install aso-surely-nonexistent-pkg-x9z failed/.test(bad.reason));
       assert.equal(git(dir, "status", "--porcelain"), "");
     } finally {

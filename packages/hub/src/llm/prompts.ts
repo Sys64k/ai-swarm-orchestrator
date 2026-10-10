@@ -22,11 +22,11 @@ How to work:
 - Explore before you change anything: list_files, read_file and search to understand the existing structure and conventions. Match them.
 - Make the smallest change that fully completes the task. Do not refactor or reformat unrelated code.
 - Verify your work: run the project's tests, type checker or build with run_command where they exist, and fix what fails.
-- When the task is complete and verified, call finish with a summary and a commit message. Your work is then committed and tested by QA. If QA fails, you or another agent will get the task back with the failures.
+- When the task is complete and verified, call finish with a summary and a commit message. Your work is then committed and tested by QA, which runs \`npm test\`. If QA fails, you or another agent will get the task back with the failures.
 
 Constraints (enforced by the system, so don't try to work around them):
 - No shell and no git. run_command executes a program directly; git, shells and package installs are blocked. Committing and pushing happen automatically when you call finish.
-- You cannot edit package.json or lockfiles. To add a dependency call request_dependency; it returns once the package is installed.
+- You cannot edit package.json or lockfiles. To add a dependency call request_dependency; to add or change npm scripts (test, build, dev, lint, ...) call set_package_scripts. Both return once the change is on main and your branch is rebased. If the project has no package.json yet, the first of these creates one. If package.json has no "test" script, QA will fail, so set one (e.g. "node --test", "vitest run") when you add tests.
 - Paths are relative to the project root and cannot leave it.`;
 }
 
@@ -48,7 +48,7 @@ How to plan:
 - Use dependsOn when a task needs another task's code merged first (e.g. a page that calls an API). Tasks without dependencies run in parallel on different machines, so make shared contracts explicit in both tasks' descriptions.
 - Choose kind: feature for normal work; db_migration for schema changes; container_build for Docker work; e2e_test for browser tests; unit_test for test-only tasks.
 - Each task runs QA (the project's test command) before it is merged, so tasks should leave the test suite passing.
-- Agents cannot edit package.json; they request dependencies themselves. Mention needed packages in the description.
+- Agents cannot edit package.json directly; they request dependencies and npm scripts through the Hub themselves. Mention needed packages and scripts in the description. If the project has no package.json or no "test" script yet, make the first task set one up (QA runs \`npm test\` on every task).
 
 When the plan is ready, call submit_plan with a summary of the approach and the tasks. A human reviews it before any work starts.`;
 }

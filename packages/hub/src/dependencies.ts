@@ -4,7 +4,7 @@ import {
   type MessageOf,
   type PayloadInput,
 } from "@aso/shared";
-import type { DependencyInstaller, DependencySpec, HubRepository } from "./git/hub-repo.js";
+import type { DependencyInstaller, HubRepository } from "./git/hub-repo.js";
 import type { NodeRegistry } from "./registry.js";
 import type { TaskManager } from "./tasks.js";
 
@@ -96,32 +96,36 @@ export class DependencyManager {
       reject(`task ${req.taskId} is not being implemented by ${nodeId}`);
       return undefined;
     }
-    if (this.allow && !this.allowed(req.name)) {
-      reject(`${req.name} is not on the Hub's dependency allowlist`);
+    const { change } = req;
+    if (change.type === "add_dependency" && this.allow && !this.allowed(change.name)) {
+      reject(`${change.name} is not on the Hub's dependency allowlist`);
       return undefined;
     }
     const count = (this.perTask.get(req.taskId) ?? 0) + 1;
     if (count > this.maxPerTask) {
-      reject(`task ${req.taskId} reached the limit of ${this.maxPerTask} dependency requests`);
+      reject(`task ${req.taskId} reached the limit of ${this.maxPerTask} package change requests`);
       return undefined;
     }
     this.perTask.set(req.taskId, count);
 
-    const spec: DependencySpec = { name: req.name, version: req.version, dev: req.dev };
-    const label = `${req.name}${req.version ? `@${req.version}` : ""}${req.dev ? " (dev)" : ""}`;
+    const label =
+      change.type === "add_dependency"
+        ? `${change.name}${change.version ? `@${change.version}` : ""}${change.dev ? " (dev)" : ""}`
+        : `scripts ${Object.entries(change.scripts).map(([k, v]) => `${k}="${v}"`).join(", ")}`;
+    const subject = change.type === "add_dependency" ? `chore(deps): add ${label}` : `chore: set npm ${label}`;
     log.info(`${nodeId} requests ${label} for task ${req.taskId}`);
-    this.tasks.recordEvent(req.taskId, `dependency requested: ${label}`);
+    this.tasks.recordEvent(req.taskId, `package change requested: ${label}`);
 
     void this.repo
-      .addDependency(spec, this.installer, `chore(deps): add ${label}\n\nRequested by task ${req.taskId}.`)
+      .changePackage(change, this.installer, `${subject}\n\nRequested by task ${req.taskId}.`)
       .then(
         (result) => {
           if (!result.ok) return reject(result.reason);
           this.tasks.recordEvent(
             req.taskId,
             result.changed
-              ? `dependency ${label} added on main @ ${result.mainCommit.slice(0, 8)}`
-              : `dependency ${label} already satisfied on main`,
+              ? `package change ${label} committed on main @ ${result.mainCommit.slice(0, 8)}`
+              : `package change ${label} already in place on main`,
           );
           this.finish(entry, { requestId: req.requestId, outcome: "installed", mainCommit: result.mainCommit });
         },
@@ -134,7 +138,7 @@ export class DependencyManager {
     entry.response = response;
     if (response.outcome === "rejected") {
       log.warn(`dependency request ${response.requestId} rejected: ${response.reason}`);
-      this.tasks.recordEvent(entry.taskId, `dependency request rejected: ${response.reason}`);
+      this.tasks.recordEvent(entry.taskId, `package change rejected: ${response.reason}`);
     }
     this.respond(entry.nodeId, response);
   }

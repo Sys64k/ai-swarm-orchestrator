@@ -266,12 +266,47 @@ const FeedbackLoopPayload = z.discriminatedUnion("outcome", [
   }),
 ]);
 
+/** npm runs these automatically during install; agents may not define them. */
+export const LIFECYCLE_SCRIPTS: ReadonlySet<string> = new Set([
+  "preinstall", "install", "postinstall", "prepublish", "preprepare", "prepare", "postprepare",
+  "prepack", "postpack", "dependencies",
+]);
+
+export const ScriptNameSchema = z
+  .string()
+  .regex(/^[a-z][a-z0-9:_-]{0,40}$/, "script names are lowercase letters, digits and :_-")
+  .refine((n) => !LIFECYCLE_SCRIPTS.has(n), { message: "install lifecycle scripts are not allowed" });
+
+export const ScriptCommandSchema = z
+  .string()
+  .min(1)
+  .max(500)
+  .refine((c) => !/[\r\n]/.test(c), { message: "script commands must be a single line" });
+
+/**
+ * A change to package.json that only the Hub may make (on main). If the project has no
+ * package.json yet, the Hub creates a minimal one first.
+ */
+export const PackageChangeSchema = z.discriminatedUnion("type", [
+  z.strictObject({
+    type: z.literal("add_dependency"),
+    name: NpmPackageNameSchema,
+    version: VersionRangeSchema.optional(),
+    dev: z.boolean().default(false),
+  }),
+  z.strictObject({
+    type: z.literal("set_scripts"),
+    scripts: z
+      .record(ScriptNameSchema, ScriptCommandSchema)
+      .refine((s) => Object.keys(s).length >= 1 && Object.keys(s).length <= 10, { message: "set 1 to 10 scripts" }),
+  }),
+]);
+export type PackageChange = z.infer<typeof PackageChangeSchema>;
+
 const DependencyRequestPayload = z.strictObject({
   requestId: z.uuid(),
   taskId: TaskIdSchema,
-  name: NpmPackageNameSchema,
-  version: VersionRangeSchema.optional(),
-  dev: z.boolean().default(false),
+  change: PackageChangeSchema,
 });
 
 const DependencyResponsePayload = z.discriminatedUnion("outcome", [

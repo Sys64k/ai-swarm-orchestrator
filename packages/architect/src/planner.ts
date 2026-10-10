@@ -43,6 +43,9 @@ export class Planner {
         requestDependency: async () => {
           throw new Error("the Architect cannot add dependencies");
         },
+        setPackageScripts: async () => {
+          throw new Error("the Architect cannot change package.json");
+        },
         fileOperation: () => undefined,
       });
 
