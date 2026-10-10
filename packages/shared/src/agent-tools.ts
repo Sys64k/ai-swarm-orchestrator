@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { NpmPackageNameSchema, RepoPathSchema, VersionRangeSchema } from "./protocol.js";
+import { NpmPackageNameSchema, PlannedTaskSchema, RepoPathSchema, VersionRangeSchema } from "./protocol.js";
 
 /**
  * Tools the coding agent can call. The Hub sends these definitions to the model; the worker
@@ -80,6 +80,15 @@ export const AGENT_TOOLS = {
       commit_message: z.string().min(1).max(500).describe("Conventional, imperative commit message"),
     }),
   },
+  submit_plan: {
+    description:
+      "Architect only. Submit the plan: a summary and the tasks to delegate. Each task has a plan-local key; " +
+      "dependsOn lists keys of tasks that must be merged first. The plan goes to a human for approval.",
+    input: z.strictObject({
+      summary: z.string().min(1).max(10_000).describe("The approach, key design decisions and how the tasks fit together"),
+      tasks: z.array(PlannedTaskSchema).min(1).max(25),
+    }),
+  },
 } as const;
 
 export type AgentToolName = keyof typeof AGENT_TOOLS;
@@ -90,8 +99,10 @@ export function isAgentToolName(name: string): name is AgentToolName {
 }
 
 /** Tool definitions in the shape the Messages API expects (`input_schema` is JSON Schema). */
-export function agentToolDefinitions(): Array<{ name: AgentToolName; description: string; input_schema: Record<string, unknown> }> {
-  return (Object.keys(AGENT_TOOLS) as AgentToolName[]).map((name) => {
+export function agentToolDefinitions(
+  names: readonly AgentToolName[] = Object.keys(AGENT_TOOLS) as AgentToolName[],
+): Array<{ name: AgentToolName; description: string; input_schema: Record<string, unknown> }> {
+  return names.map((name) => {
     const { $schema: _, ...schema } = z.toJSONSchema(AGENT_TOOLS[name].input) as Record<string, unknown>;
     return { name, description: AGENT_TOOLS[name].description, input_schema: schema };
   });

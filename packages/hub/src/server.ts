@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { serve, type ServerType } from "@hono/node-server";
 import { createNodeWebSocket } from "@hono/node-ws";
 import type { WSContext } from "hono/ws";
@@ -22,6 +22,7 @@ import { ConversationManager } from "./llm/conversations.js";
 import { hasPrice } from "./llm/pricing.js";
 import { gitHttpHandler } from "./git/http-backend.js";
 import { HubRepository, type DependencyInstaller } from "./git/hub-repo.js";
+import { PlanError, PlanManager } from "./plans.js";
 import { NodeRegistry, type NodeTransport } from "./registry.js";
 import type { RoutingPolicies } from "./routing.js";
 import { TaskError, TaskManager, type QaOptions } from "./tasks.js";
@@ -54,6 +55,7 @@ export interface HubOptions {
     effort?: Effort;
     maxTokens?: number;
     taskBudgetUsd?: number;
+    planBudgetUsd?: number;
     maxTurns?: number;
     concurrency?: number;
   };
@@ -63,6 +65,7 @@ export interface HubHandle {
   port: number;
   registry: NodeRegistry;
   tasks: TaskManager;
+  plans: PlanManager;
   repo: HubRepository;
   close(): Promise<void>;
 }
@@ -99,8 +102,10 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     log.info(`LLM: ${adapter.name} ${adapter.model}`);
     if (!hasPrice(adapter.model)) log.warn(`no price known for ${adapter.model}; cost estimates will read $0`);
   }
-  const conversations = new ConversationManager(adapter, tasks, registry, {
+  const plans = new PlanManager(registry, tasks);
+  const conversations = new ConversationManager(adapter, tasks, registry, plans, {
     taskBudgetUsd: llm.taskBudgetUsd,
+    planBudgetUsd: llm.planBudgetUsd,
     maxTurns: llm.maxTurns,
     concurrency: llm.concurrency,
   });
@@ -111,7 +116,9 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
 
   /** Idempotent: safe to call from both the timeout sweep and the socket close event. */
   const dropNode = (nodeId: string, transport: NodeTransport) => {
-    if (registry.unregister(nodeId, transport)) tasks.handleNodeGone(nodeId);
+    if (!registry.unregister(nodeId, transport)) return;
+    tasks.handleNodeGone(nodeId);
+    plans.handleNodeGone(nodeId);
   };
 
   const reject = (conn: Connection, reason: string, issues: string[] = [], refId?: string) => {
@@ -147,6 +154,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       );
       registry.send(msg.from, "REGISTRATION_ACK", { nodeId: msg.from });
       tasks.nodeRegistered(msg.from, p.nodeKind === "worker" ? p.resume : undefined);
+      plans.dispatch();
       return tasks.dispatch();
     }
 
@@ -177,6 +185,11 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       }
       case "FILE_OPERATION": {
         const error = tasks.recordFileOperation(conn.nodeId, msg.payload);
+        if (error) reject(conn, error, [], msg.id);
+        return;
+      }
+      case "PLAN_RESULT": {
+        const error = plans.handleResult(conn.nodeId, msg.payload);
         if (error) reject(conn, error, [], msg.id);
         return;
       }
@@ -213,6 +226,45 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   app.get("/api/nodes", (c) => c.json(registry.list()));
 
   app.get("/api/llm", (c) => c.json(conversations.status()));
+
+  const planError = (c: Context, err: unknown) => {
+    if (!(err instanceof PlanError)) throw err;
+    const status = err.code === "not_found" ? 404 : err.code === "conflict" ? 409 : 400;
+    return c.json({ error: err.message }, status);
+  };
+
+  app.get("/api/plans", (c) => c.json(plans.list()));
+
+  app.get("/api/plans/:id", (c) => {
+    const plan = plans.get(c.req.param("id"));
+    return plan ? c.json(plan) : c.json({ error: "not found" }, 404);
+  });
+
+  app.post("/api/plans", async (c) => {
+    const body = (await c.req.json().catch(() => null)) as { requirement?: unknown } | null;
+    try {
+      return c.json(plans.create(body?.requirement), 201);
+    } catch (err) {
+      return planError(c, err);
+    }
+  });
+
+  app.post("/api/plans/:id/approve", (c) => {
+    try {
+      return c.json(plans.approve(c.req.param("id")));
+    } catch (err) {
+      if (err instanceof TaskError) return c.json({ error: err.message }, 400);
+      return planError(c, err);
+    }
+  });
+
+  app.post("/api/plans/:id/reject", (c) => {
+    try {
+      return c.json(plans.reject(c.req.param("id")));
+    } catch (err) {
+      return planError(c, err);
+    }
+  });
 
   app.get("/api/tasks", (c) => c.json(tasks.list()));
 
@@ -293,6 +345,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     port: boundPort,
     registry,
     tasks,
+    plans,
     repo,
     close: () =>
       new Promise<void>((resolve) => {

@@ -23,4 +23,5 @@ export {
 export { AnthropicApiAdapter, LlmError, type Effort, type LlmAdapter, type LlmRequest, type LlmResponse } from "./llm/adapter.js";
 export { ConversationManager } from "./llm/conversations.js";
 export { priceUsage } from "./llm/pricing.js";
-export { systemPrompt, taskPrompt } from "./llm/prompts.js";
+export { architectSystemPrompt, planPrompt, systemPrompt, taskPrompt } from "./llm/prompts.js";
+export { PlanError, PlanManager, type PlanRecord, type PlanState } from "./plans.js";

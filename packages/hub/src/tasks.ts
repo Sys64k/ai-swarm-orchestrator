@@ -59,6 +59,10 @@ export interface TaskRecord {
   llm: { calls: number } & LlmUsage;
   /** Files the agent reported touching (FILE_OPERATION), most recent last. */
   filesTouched: string[];
+  /** One line per model turn: what the agent did and what it cost. */
+  agentLog: AgentTurn[];
+  /** Plan that created this task, if any. */
+  planId?: string;
   createdAt: string;
   updatedAt: string;
   waitingReason?: string;
@@ -66,6 +70,15 @@ export interface TaskRecord {
   detail?: string;
   history: Array<{ at: string; event: string }>;
 }
+
+export interface AgentTurn {
+  at: string;
+  turn: number;
+  actions: string[];
+  costUsd: number;
+}
+
+const AGENT_LOG_LIMIT = 200;
 
 export class TaskError extends Error {
   constructor(
@@ -136,13 +149,17 @@ export class TaskManager {
   }
 
   /** Validate and queue a task. `input` is untrusted (API body / Architect output). */
-  submit(input: unknown): TaskRecord {
+  submit(input: unknown, origin: { planId?: string } = {}): TaskRecord {
     const parsed = TaskSpecInputSchema.safeParse(input);
     if (!parsed.success) {
       throw new TaskError(parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "), "invalid");
     }
     const spec = TaskSpecSchema.parse({ ...parsed.data, taskId: parsed.data.taskId ?? this.generateId(parsed.data.title) });
     if (this.tasks.has(spec.taskId)) throw new TaskError(`task ${spec.taskId} already exists`, "duplicate");
+    for (const dep of spec.dependsOn) {
+      if (dep === spec.taskId) throw new TaskError("a task cannot depend on itself", "invalid");
+      if (!this.tasks.has(dep)) throw new TaskError(`dependency ${dep} does not exist (submit it first)`, "invalid");
+    }
 
     const now = new Date().toISOString();
     const task: TaskRecord = {
@@ -154,6 +171,8 @@ export class TaskManager {
       reworkRound: 0,
       llm: { calls: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0 },
       filesTouched: [],
+      agentLog: [],
+      planId: origin.planId,
       createdAt: now,
       updatedAt: now,
       history: [],
@@ -173,6 +192,14 @@ export class TaskManager {
   }
 
   private dispatchImplementation(task: TaskRecord): void {
+    const unmet = task.spec.dependsOn.map((id) => this.tasks.get(id)!).filter((d) => d.state !== "merged");
+    if (unmet.length) {
+      const failed = unmet.filter((d) => d.state === "failed").map((d) => d.spec.taskId);
+      task.waitingReason = failed.length
+        ? `blocked: dependency ${failed.join(", ")} failed`
+        : `waiting for ${unmet.map((d) => d.spec.taskId).join(", ")} to be merged`;
+      return;
+    }
     const decision = selectNode({ role: task.spec.role, kind: task.spec.kind }, this.registry.workerSnapshots(), this.policies);
     if (!decision.ok) return this.wait(task, decision);
 
@@ -237,6 +264,13 @@ export class TaskManager {
     l.costUsd = Math.round((l.costUsd + usage.costUsd) * 1e6) / 1e6;
   }
 
+  recordAgentTurn(taskId: string, turn: Omit<AgentTurn, "at">): void {
+    const task = this.tasks.get(taskId);
+    if (!task) return;
+    task.agentLog.push({ at: new Date().toISOString(), ...turn });
+    if (task.agentLog.length > AGENT_LOG_LIMIT) task.agentLog.splice(0, task.agentLog.length - AGENT_LOG_LIMIT);
+  }
+
   /** Track an agent's file edit. Returns an error string if the sender isn't implementing the task. */
   recordFileOperation(nodeId: string, op: MessageOf<"FILE_OPERATION">["payload"]): string | undefined {
     if (!this.isImplementing(nodeId, op.taskId)) return `task ${op.taskId} is not being implemented by ${nodeId}`;
@@ -292,7 +326,7 @@ export class TaskManager {
         this.registry.release(nodeId, task.spec.taskId);
         task.state = "verifying";
         task.commit = update.commit;
-        this.note(task, `pushed ${update.commit!.slice(0, 8)}`);
+        this.note(task, `pushed ${update.commit!.slice(0, 8)}${update.detail ? `: ${update.detail}` : ""}`);
         void this.verify(task, update.commit!);
         this.dispatch();
         return undefined;
@@ -424,7 +458,7 @@ export class TaskManager {
   private async verify(task: TaskRecord, commit: string): Promise<void> {
     let problem: string | undefined;
     try {
-      problem = await this.repo.verifyTaskCommit(task.spec.taskId, commit);
+      problem = await this.repo.verifyTaskCommit(task.spec.taskId, commit, task.spec.role);
     } catch (err) {
       problem = `verification error: ${(err as Error).message}`;
     }

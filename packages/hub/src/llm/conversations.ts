@@ -2,15 +2,18 @@ import type Anthropic from "@anthropic-ai/sdk";
 import {
   agentToolDefinitions,
   createLogger,
+  ROLE_POLICIES,
+  type AgentRole,
+  type LlmUsage,
   type MessageOf,
   type PayloadInput,
-  type WorkerRole,
 } from "@aso/shared";
+import type { PlanManager } from "../plans.js";
 import type { NodeRegistry } from "../registry.js";
-import type { TaskManager } from "../tasks.js";
+import type { AgentTurn, TaskManager } from "../tasks.js";
 import { LlmError, type LlmAdapter } from "./adapter.js";
 import { priceUsage } from "./pricing.js";
-import { systemPrompt, taskPrompt } from "./prompts.js";
+import { architectSystemPrompt, planPrompt, systemPrompt, taskPrompt } from "./prompts.js";
 
 const log = createLogger("llm");
 
@@ -21,6 +24,8 @@ type OkResult = Extract<Result, { outcome: "ok" }>;
 export interface ConversationOptions {
   /** Per-task spend cap (USD, estimated). */
   taskBudgetUsd?: number;
+  /** Per-plan spend cap for the Architect (USD, estimated). */
+  planBudgetUsd?: number;
   /** Model turns per conversation. */
   maxTurns?: number;
   /** Concurrent API requests across all workers. */
@@ -29,11 +34,25 @@ export interface ConversationOptions {
   idleTimeoutMs?: number;
 }
 
+/** What a conversation works on: a task (worker agent) or a plan (Architect). */
+interface Subject {
+  kind: "task" | "plan";
+  id: string;
+  role: AgentRole;
+  budgetUsd: number;
+  spentUsd(): number;
+  firstPrompt(): string;
+  active(): boolean;
+  recordUsage(usage: LlmUsage): void;
+  recordTurn(turn: Omit<AgentTurn, "at">): void;
+  recordEvent(event: string): void;
+}
+
 interface Conversation {
   id: string;
-  taskId: string;
+  subject: Subject;
   nodeId: string;
-  role: WorkerRole;
+  tools: Anthropic.Beta.BetaTool[];
   system: string;
   /** Append-only: thinking blocks are only valid in the exact conversation that produced them. */
   messages: Anthropic.Beta.BetaMessageParam[];
@@ -54,8 +73,9 @@ export class ConversationManager {
   private readonly conversations = new Map<string, Conversation>();
   /** requestId → conversation, for answering retries. */
   private readonly requests = new Map<string, { conversationId: string; turn: number }>();
-  private readonly tools: Anthropic.Beta.BetaTool[];
+  private readonly toolsByRole = new Map<AgentRole, Anthropic.Beta.BetaTool[]>();
   private readonly taskBudgetUsd: number;
+  private readonly planBudgetUsd: number;
   private readonly maxTurns: number;
   private readonly idleTimeoutMs: number;
   private readonly slots: Semaphore;
@@ -65,16 +85,60 @@ export class ConversationManager {
     private readonly adapter: LlmAdapter | undefined,
     private readonly tasks: TaskManager,
     private readonly registry: NodeRegistry,
+    private readonly plans: PlanManager,
     opts: ConversationOptions = {},
   ) {
     this.taskBudgetUsd = opts.taskBudgetUsd ?? 5;
+    this.planBudgetUsd = opts.planBudgetUsd ?? 1;
     this.maxTurns = opts.maxTurns ?? 80;
     this.idleTimeoutMs = opts.idleTimeoutMs ?? 30 * 60_000;
     this.slots = new Semaphore(opts.concurrency ?? 2);
-    // Byte-stable and in a fixed order, so tools + system prompt form a cacheable prefix.
-    this.tools = agentToolDefinitions().map(
-      (t) => ({ ...t, eager_input_streaming: true }) as unknown as Anthropic.Beta.BetaTool,
-    );
+  }
+
+  /** Byte-stable and in a fixed order per role, so tools + system prompt form a cacheable prefix. */
+  private toolsFor(role: AgentRole): Anthropic.Beta.BetaTool[] {
+    let tools = this.toolsByRole.get(role);
+    if (!tools) {
+      tools = agentToolDefinitions(ROLE_POLICIES[role].tools).map(
+        (t) => ({ ...t, eager_input_streaming: true }) as unknown as Anthropic.Beta.BetaTool,
+      );
+      this.toolsByRole.set(role, tools);
+    }
+    return tools;
+  }
+
+  private subjectFor(nodeId: string, req: Request): Subject | string {
+    if (req.taskId !== undefined) {
+      const taskId = req.taskId;
+      if (!this.tasks.isImplementing(nodeId, taskId)) return `task ${taskId} is not being implemented by ${nodeId}`;
+      const task = this.tasks.get(taskId)!;
+      return {
+        kind: "task",
+        id: taskId,
+        role: task.spec.role,
+        budgetUsd: this.taskBudgetUsd,
+        spentUsd: () => this.tasks.get(taskId)?.llm.costUsd ?? 0,
+        firstPrompt: () => taskPrompt(this.tasks.get(taskId)!),
+        active: () => this.tasks.isImplementing(nodeId, taskId),
+        recordUsage: (u) => this.tasks.recordLlmUsage(taskId, u),
+        recordTurn: (t) => this.tasks.recordAgentTurn(taskId, t),
+        recordEvent: (e) => this.tasks.recordEvent(taskId, e),
+      };
+    }
+    const planId = req.planId!;
+    if (!this.plans.isPlanning(nodeId, planId)) return `plan ${planId} is not being planned by ${nodeId}`;
+    return {
+      kind: "plan",
+      id: planId,
+      role: "architect",
+      budgetUsd: this.planBudgetUsd,
+      spentUsd: () => this.plans.get(planId)?.llm.costUsd ?? 0,
+      firstPrompt: () => planPrompt(this.plans.get(planId)!),
+      active: () => this.plans.isPlanning(nodeId, planId),
+      recordUsage: (u) => this.plans.recordLlmUsage(planId, u),
+      recordTurn: (t) => this.plans.recordAgentTurn(planId, t),
+      recordEvent: (e) => this.plans.recordEvent(planId, e),
+    };
   }
 
   status() {
@@ -83,6 +147,7 @@ export class ConversationManager {
       adapter: this.adapter?.name ?? null,
       model: this.adapter?.model ?? null,
       taskBudgetUsd: this.taskBudgetUsd,
+      planBudgetUsd: this.planBudgetUsd,
       maxTurns: this.maxTurns,
       queue: this.slots.status(),
       conversations: this.conversations.size,
@@ -105,20 +170,18 @@ export class ConversationManager {
       this.respond(nodeId, { requestId: req.requestId, outcome: "error", error, retryable });
 
     if (!this.adapter) return void fail("no LLM configured on the Hub (set ANTHROPIC_API_KEY and restart it)");
-    if (!this.tasks.isImplementing(nodeId, req.taskId)) {
-      return void fail(`task ${req.taskId} is not being implemented by ${nodeId}`);
-    }
+    const subject = this.subjectFor(nodeId, req);
+    if (typeof subject === "string") return void fail(subject);
 
     let conv = this.conversations.get(req.conversationId);
     if (!conv) {
       if (req.turn !== 0) return void fail(`unknown conversation ${req.conversationId}`);
-      const task = this.tasks.get(req.taskId)!;
       conv = {
         id: req.conversationId,
-        taskId: req.taskId,
+        subject,
         nodeId,
-        role: task.spec.role,
-        system: systemPrompt(task.spec.role),
+        tools: this.toolsFor(subject.role),
+        system: subject.role === "architect" ? architectSystemPrompt() : systemPrompt(subject.role),
         messages: [],
         turn: 0,
         pendingToolUseIds: [],
@@ -126,9 +189,9 @@ export class ConversationManager {
         lastActivity: Date.now(),
       };
       this.conversations.set(conv.id, conv);
-      this.tasks.recordEvent(req.taskId, `agent conversation started on ${nodeId}`);
-    } else if (conv.nodeId !== nodeId || conv.taskId !== req.taskId) {
-      return void fail(`conversation ${req.conversationId} belongs to another task or node`);
+      subject.recordEvent(`agent conversation started on ${nodeId}`);
+    } else if (conv.nodeId !== nodeId || conv.subject.kind !== subject.kind || conv.subject.id !== subject.id) {
+      return void fail(`conversation ${req.conversationId} belongs to another ${conv.subject.kind} or node`);
     }
 
     if (req.turn < conv.turn) {
@@ -146,14 +209,14 @@ export class ConversationManager {
     const got = req.toolResults.map((r) => r.toolUseId).sort().join(",");
     if (expected !== got) return void fail(`tool results must answer exactly the pending tool calls [${expected}], got [${got}]`);
 
-    const spent = this.tasks.get(req.taskId)?.llm.costUsd ?? 0;
-    if (spent >= this.taskBudgetUsd) {
-      return void fail(`task ${req.taskId} reached its LLM budget ($${spent.toFixed(2)} of $${this.taskBudgetUsd})`);
+    const spent = subject.spentUsd();
+    if (spent >= subject.budgetUsd) {
+      return void fail(`${subject.kind} ${subject.id} reached its LLM budget ($${spent.toFixed(2)} of $${subject.budgetUsd})`);
     }
 
     const userMessage: Anthropic.Beta.BetaMessageParam =
       req.turn === 0
-        ? { role: "user", content: taskPrompt(this.tasks.get(req.taskId)!) }
+        ? { role: "user", content: subject.firstPrompt() }
         : {
             role: "user",
             content: req.toolResults.map((r) => ({
@@ -180,13 +243,13 @@ export class ConversationManager {
     try {
       const messages = [...conv.messages, userMessage];
       const response = await this.slots.run(() =>
-        this.adapter!.complete({ system: conv.system, tools: this.tools, messages }),
+        this.adapter!.complete({ system: conv.system, tools: conv.tools, messages }),
       );
 
       const usage = priceUsage(response.model, response.tokens);
       this.totals.calls++;
       this.totals.costUsd += usage.costUsd;
-      this.tasks.recordLlmUsage(conv.taskId, usage);
+      conv.subject.recordUsage(usage);
 
       if (response.stopReason === "refusal") {
         return fail(`the model declined this request${response.refusalCategory ? ` (${response.refusalCategory})` : ""}`, false);
@@ -217,14 +280,14 @@ export class ConversationManager {
       };
       conv.results.set(conv.turn, result);
       conv.turn++;
-      log.debug(
-        `${conv.taskId} turn ${result.turn}: ${toolCalls.map((c) => c.name).join(", ") || response.stopReason} ($${usage.costUsd.toFixed(4)})`,
-      );
+      const actions = toolCalls.length ? toolCalls.map(describeCall) : [`(${response.stopReason})`];
+      conv.subject.recordTurn({ turn: result.turn, actions, costUsd: usage.costUsd });
+      log.debug(`${conv.subject.id} turn ${result.turn}: ${actions.join(", ")} ($${usage.costUsd.toFixed(4)})`);
       this.respond(conv.nodeId, result);
     } catch (err) {
       const e = err instanceof LlmError ? err : new LlmError((err as Error).message, false);
-      log.warn(`${conv.taskId} turn ${req.turn} failed: ${e.message}`);
-      if (!e.retryable) this.tasks.recordEvent(conv.taskId, `LLM error: ${e.message}`);
+      log.warn(`${conv.subject.id} turn ${req.turn} failed: ${e.message}`);
+      if (!e.retryable) conv.subject.recordEvent(`LLM error: ${e.message}`);
       fail(e.message, e.retryable);
     } finally {
       conv.inflight = undefined;
@@ -236,7 +299,7 @@ export class ConversationManager {
   sweep(now = Date.now()): void {
     for (const conv of this.conversations.values()) {
       if (conv.inflight) continue;
-      if (now - conv.lastActivity > this.idleTimeoutMs || !this.tasks.isImplementing(conv.nodeId, conv.taskId)) {
+      if (now - conv.lastActivity > this.idleTimeoutMs || !conv.subject.active()) {
         this.conversations.delete(conv.id);
         for (const [id, r] of this.requests) if (r.conversationId === conv.id) this.requests.delete(id);
       }
@@ -271,3 +334,19 @@ class Semaphore {
 }
 
 const round = (n: number) => Math.round(n * 10_000) / 10_000;
+
+/** Compact, human-readable form of a tool call for the turn log. */
+function describeCall(call: { name: string; input: Record<string, unknown> }): string {
+  const i = call.input;
+  const arg =
+    typeof i.path === "string"
+      ? i.path
+      : Array.isArray(i.argv)
+        ? (i.argv as unknown[]).join(" ")
+        : typeof i.name === "string"
+          ? i.name
+          : typeof i.pattern === "string"
+            ? i.pattern
+            : undefined;
+  return arg ? `${call.name} ${arg.slice(0, 80)}` : call.name;
+}

@@ -3,3 +3,5 @@ export * from "./logger.js";
 export * from "./hub-address.js";
 export * from "./protocol.js";
 export * from "./agent-tools.js";
+export * from "./roles.js";
+export * from "./plan.js";

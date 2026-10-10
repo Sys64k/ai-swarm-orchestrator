@@ -212,6 +212,14 @@ export class AgentGitClient {
     this.activeTask = undefined;
   }
 
+  /** Detached checkout of the latest remote main (read-only use, e.g. the Architect exploring). */
+  async checkoutMain(): Promise<string> {
+    await this.git.fetch([this.remote, "--prune"]);
+    await this.git.raw(["checkout", "--quiet", "--detach", `${this.remote}/${this.mainBranch}`]);
+    this.activeTask = undefined;
+    return this.head();
+  }
+
   /** Detached checkout of a commit on `task/<id>`, for QA runs. */
   async checkoutCommit(taskId: TaskId, commit: string): Promise<void> {
     const branch = taskBranchName(TaskIdSchema.parse(taskId));

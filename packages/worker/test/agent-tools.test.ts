@@ -34,7 +34,7 @@ beforeEach(() => {
   deps = [];
   tools = new AgentTools({
     repoDir: repo,
-    taskId: "t1",
+    role: "backend",
     fileOperation: (op) => ops.push(`${op.op} ${op.path}`),
     requestDependency: async (req) => {
       if (req.name === "evil") throw new DependencyRejectedError("not on allowlist");
@@ -49,7 +49,7 @@ describe("agent tools", () => {
   it("publishes JSON schemas for every tool", () => {
     const defs = agentToolDefinitions();
     assert.deepEqual(defs.map((d) => d.name), [
-      "list_files", "read_file", "search", "write_file", "edit_file", "delete_file", "run_command", "request_dependency", "finish",
+      "list_files", "read_file", "search", "write_file", "edit_file", "delete_file", "run_command", "request_dependency", "finish", "submit_plan",
     ]);
     for (const d of defs) {
       assert.equal(d.input_schema.type, "object");
@@ -140,5 +140,24 @@ describe("agent tools", () => {
     const r = ok(await call("read_file", { path: "big.txt", limit: 5000 }));
     assert.ok(r.length < 51_000);
     assert.match(r, /output truncated/);
+  });
+
+  it("enforces role scopes: QA writes tests only, Architect is read-only", async () => {
+    const as = (role: "qa" | "architect" | "devops") =>
+      new AgentTools({ repoDir: repo, role, fileOperation: (op) => ops.push(`${op.op} ${op.path}`), requestDependency: async () => ({ mainCommit: "a".repeat(40) }) });
+    const qa = as("qa");
+    const qaCall = (name: string, input: Record<string, unknown>) => qa.execute({ id: "tu", name, input });
+    ok(await qaCall("write_file", { path: "test/a.test.js", content: "x" }));
+    err(await qaCall("edit_file", { path: "src/a.ts", old_string: "a", new_string: "b" }), /qa role may only modify test files/);
+    err(await qaCall("write_file", { path: "src/b.ts", content: "x" }), /outside that scope/);
+    ok(await qaCall("read_file", { path: "src/a.ts" }));
+
+    const arch = as("architect");
+    ok(await arch.execute({ id: "tu", name: "list_files", input: {} }));
+    err(await arch.execute({ id: "tu", name: "write_file", input: { path: "x.md", content: "x" } }), /not available to the architect role/);
+    err(await arch.execute({ id: "tu", name: "run_command", input: { argv: ["node", "-v"] } }), /not available to the architect role/);
+
+    ok(await as("devops").execute({ id: "tu", name: "write_file", input: { path: ".github/workflows/ci.yml", content: "on: push" } }));
+    assert.deepEqual(ops, ["create test/a.test.js", "create .github/workflows/ci.yml"]);
   });
 });

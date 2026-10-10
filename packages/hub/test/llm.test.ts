@@ -2,53 +2,28 @@ import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { describe, it } from "node:test";
 import Anthropic from "@anthropic-ai/sdk";
-import {
-  AnthropicApiAdapter,
-  LlmError,
-  priceUsage,
-  taskPrompt,
-  type LlmAdapter,
-  type LlmRequest,
-  type LlmResponse,
-} from "@aso/hub";
+import { AnthropicApiAdapter, LlmError, priceUsage, taskPrompt, type LlmRequest } from "@aso/hub";
 import { createMessage, type AgentMessage } from "@aso/shared";
 import { startWorker } from "@aso/worker";
-import { git, hardware, postTask, tempDir, waitFor, withHub, worker, type HubContext, type TestClient } from "./helpers.ts";
+import {
+  git,
+  hardware,
+  lastToolResults,
+  postTask,
+  reply,
+  ScriptedModel,
+  tempDir,
+  text,
+  toolUse,
+  waitFor,
+  withHub,
+  worker,
+  type Block,
+  type HubContext,
+  type TestClient,
+} from "./helpers.ts";
 
 delete process.env.ANTHROPIC_API_KEY; // tests must never reach the real API
-
-type Block = Record<string, unknown>;
-const toolUse = (id: string, name: string, input: Record<string, unknown>): Block => ({ type: "tool_use", id, name, input });
-const text = (t: string): Block => ({ type: "text", text: t });
-const reply = (content: Block[], stopReason = "tool_use", tokens = 1000): LlmResponse => ({
-  content: content as unknown as LlmResponse["content"],
-  stopReason,
-  model: "claude-opus-5-5",
-  tokens: { inputTokens: tokens, outputTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 0 },
-});
-
-/** Stand-in model: returns whatever the script says for the n-th call. */
-class ScriptedModel implements LlmAdapter {
-  readonly name = "scripted";
-  readonly model = "claude-opus-5-5";
-  readonly requests: LlmRequest[] = [];
-  private readonly script: (req: LlmRequest, n: number) => LlmResponse | Promise<LlmResponse>;
-  constructor(script: (req: LlmRequest, n: number) => LlmResponse | Promise<LlmResponse>) {
-    this.script = script;
-  }
-  async complete(req: LlmRequest): Promise<LlmResponse> {
-    this.requests.push(structuredClone(req));
-    return this.script(req, this.requests.length - 1);
-  }
-}
-
-/** Tool results the model received in its latest request, keyed by tool_use_id. */
-function lastToolResults(req: LlmRequest): Record<string, { content: string; is_error?: boolean }> {
-  const last = req.messages.at(-1)!;
-  const out: Record<string, { content: string; is_error?: boolean }> = {};
-  for (const b of last.content as Array<Record<string, any>>) if (b.type === "tool_result") out[b.tool_use_id] = b as never;
-  return out;
-}
 
 function result(m: AgentMessage) {
   assert.equal(m.type, "PROMPT_RESULT");
@@ -220,7 +195,7 @@ describe("LLM gateway (Hub)", () => {
 
   it("puts rework feedback into the task prompt", () => {
     const prompt = taskPrompt({
-      spec: { taskId: "t", role: "backend", kind: "feature", title: "T", description: "D", acceptanceCriteria: [], files: ["src/a.ts"] },
+      spec: { taskId: "t", role: "backend", kind: "feature", title: "T", description: "D", acceptanceCriteria: [], files: ["src/a.ts"], dependsOn: [] },
       rework: { round: 2, reason: "QA failed: 1 test", failures: [{ test: "adds", file: "src/a.test.ts", message: "expected 3" }], output: "FAIL adds" },
     } as never);
     assert.match(prompt, /## Files likely involved\n- src\/a.ts/);

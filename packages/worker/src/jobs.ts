@@ -11,6 +11,7 @@ import {
   type TaskId,
 } from "@aso/shared";
 import { AgentGitClient } from "./git/agent-git-client.js";
+import { ModelChannel, type ModelReply, type ModelTurn } from "./model-channel.js";
 import { runCommand } from "./run-command.js";
 
 const log = createLogger("jobs");
@@ -37,13 +38,12 @@ export interface ExecutionContext {
    */
   requestDependency(request: DependencyRequest): Promise<{ mainCommit: string }>;
   /** One model turn via the Hub (which holds the conversation). */
-  callModel(turn: Omit<ModelTurn, "requestId">): Promise<ModelReply>;
+  callModel(turn: ModelTurn): Promise<ModelReply>;
   /** Report an agent file edit to the Hub (audit trail / dashboard). */
   fileOperation(op: Omit<MessageOf<"FILE_OPERATION">["payload"], "taskId">): void;
 }
 
-export type ModelTurn = Omit<PayloadInput<"PROMPT_EXECUTION">, "taskId">;
-export type ModelReply = MessageOf<"PROMPT_RESULT">["payload"];
+export type { ModelReply, ModelTurn } from "./model-channel.js";
 
 export class DependencyRejectedError extends Error {
   override name = "DependencyRejectedError";
@@ -51,7 +51,7 @@ export class DependencyRejectedError extends Error {
 
 /** Does the actual work for a task. The LLM agent loop (Phase 5) implements this. */
 export interface TaskExecutor {
-  implement(task: TaskAssignment, ctx: ExecutionContext): Promise<{ commitMessage?: string } | void>;
+  implement(task: TaskAssignment, ctx: ExecutionContext): Promise<{ commitMessage?: string; summary?: string } | void>;
 }
 
 export const unconfiguredExecutor: TaskExecutor = {
@@ -76,11 +76,6 @@ export interface JobRunnerOptions {
 
 type DependencyResponse = MessageOf<"DEPENDENCY_RESPONSE">["payload"];
 
-interface PendingPrompt {
-  message: PayloadInput<"PROMPT_EXECUTION">;
-  resolve(reply: ModelReply): void;
-}
-
 interface PendingDependency {
   message: PayloadInput<"DEPENDENCY_REQUEST">;
   resolve(response: DependencyResponse): void;
@@ -97,9 +92,11 @@ export class JobRunner {
   private queue: Promise<void> = Promise.resolve();
   private active: { taskId: TaskId; job: "implement" | "test" } | undefined;
   private readonly pendingDependencies = new Map<string, PendingDependency>();
-  private readonly pendingPrompts = new Map<string, PendingPrompt>();
+  private readonly model: ModelChannel;
 
-  constructor(private readonly opts: JobRunnerOptions) {}
+  constructor(private readonly opts: JobRunnerOptions) {
+    this.model = new ModelChannel(opts.send, opts.modelTimeoutMs);
+  }
 
   /** The job in progress, reported to the Hub on re-registration. */
   get current() {
@@ -126,16 +123,13 @@ export class JobRunner {
   }
 
   handlePromptResult(reply: ModelReply): void {
-    const pending = this.pendingPrompts.get(reply.requestId);
-    if (!pending) return log.debug(`ignoring result for unknown prompt ${reply.requestId}`);
-    this.pendingPrompts.delete(reply.requestId);
-    pending.resolve(reply);
+    this.model.handleResult(reply);
   }
 
   /** After a reconnect: ask again for answers that may have been lost (the Hub de-duplicates). */
   resendPending(): void {
     for (const pending of this.pendingDependencies.values()) this.opts.send("DEPENDENCY_REQUEST", pending.message);
-    for (const pending of this.pendingPrompts.values()) this.opts.send("PROMPT_EXECUTION", pending.message);
+    this.model.resendPending();
   }
 
   /** Resolves when all queued jobs are done (used by tests and shutdown). */
@@ -178,34 +172,20 @@ export class JobRunner {
         repoDir: this.repoDir,
         report: (detail) => status("in_progress", detail),
         requestDependency: (req) => this.requestDependency(task, git, req),
-        callModel: (turn) => this.callModel(task.taskId, turn),
+        callModel: (turn) => this.model.call({ taskId: task.taskId }, turn),
         fileOperation: (op) => send("FILE_OPERATION", { ...op, taskId: task.taskId } as PayloadInput<"FILE_OPERATION">),
       });
       const done = await git.completeTask(result?.commitMessage ?? `${task.taskId}: ${task.title}`);
-      send("STATUS_UPDATE", { state: "completed", taskId: task.taskId, commit: done.commit });
+      send("STATUS_UPDATE", {
+        state: "completed",
+        taskId: task.taskId,
+        commit: done.commit,
+        detail: result?.summary?.slice(0, 2000),
+      });
     } catch (err) {
       log.warn(`task ${task.taskId} failed: ${(err as Error).message}`);
       status("failed", (err as Error).message);
     }
-  }
-
-  private callModel(taskId: TaskId, turn: Omit<ModelTurn, "requestId">): Promise<ModelReply> {
-    const message: PayloadInput<"PROMPT_EXECUTION"> = { ...turn, requestId: randomUUID(), taskId };
-    return new Promise<ModelReply>((resolve) => {
-      // Long agentic turns can take minutes; past this the Hub has certainly lost the request.
-      const timer = setTimeout(() => {
-        this.pendingPrompts.delete(message.requestId);
-        resolve({ requestId: message.requestId, outcome: "error", error: "no answer from the Hub", retryable: true });
-      }, this.opts.modelTimeoutMs ?? 20 * 60_000);
-      this.pendingPrompts.set(message.requestId, {
-        message,
-        resolve: (r) => {
-          clearTimeout(timer);
-          resolve(r);
-        },
-      });
-      this.opts.send("PROMPT_EXECUTION", message);
-    });
   }
 
   private async requestDependency(

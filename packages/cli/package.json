@@ -14,9 +14,10 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "commander": "^15.0.0",
-    "@aso/shared": "*",
+    "@aso/architect": "*",
     "@aso/hub": "*",
-    "@aso/worker": "*"
+    "@aso/shared": "*",
+    "@aso/worker": "*",
+    "commander": "^15.0.0"
   }
 }

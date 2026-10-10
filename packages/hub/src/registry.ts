@@ -68,6 +68,7 @@ export class NodeRegistry {
     if (entry) entry.heartbeat = heartbeat;
   }
 
+  /** Mark a node busy with a task (workers) or a plan (Architect). */
   assign(nodeId: string, taskId: string, now = Date.now()): void {
     const entry = this.require(nodeId);
     entry.currentTaskId = taskId;

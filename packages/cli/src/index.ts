@@ -12,6 +12,7 @@ import {
 } from "@aso/shared";
 import type { Effort } from "@aso/hub";
 import { llmCheckCommand } from "./commands/llm-check.js";
+import { approvePlanCommand, planCommand, rejectPlanCommand } from "./commands/plan.js";
 import { startHubCommand } from "./commands/start-hub.js";
 import { startWorkerCommand } from "./commands/start-worker.js";
 import { updateCommand } from "./commands/update.js";
@@ -93,6 +94,29 @@ program
   .option("-r, --roles <roles>", `roles to accept (default: ${WORKER_ROLES.join(",")})`, parseRoles)
   .option("-w, --work-dir <path>", "directory for task checkouts (default: ~/.aso/work)")
   .action(startWorkerCommand);
+
+program
+  .command("plan")
+  .description("Ask the Architect to plan a requirement, review the proposed tasks, and approve them")
+  .argument("[requirement...]", "what to build (or use --file)")
+  .option("-f, --file <path>", "read the requirement from a file")
+  .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
+  .option("-y, --yes", "approve the proposed plan without asking", false)
+  .action((words: string[], opts) => planCommand(words, opts));
+
+program
+  .command("plan-approve")
+  .description("Approve a proposed plan: its tasks are created and start running")
+  .argument("<planId>")
+  .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
+  .action(approvePlanCommand);
+
+program
+  .command("plan-reject")
+  .description("Reject a proposed plan")
+  .argument("<planId>")
+  .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
+  .action(rejectPlanCommand);
 
 program
   .command("llm-check")

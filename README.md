@@ -31,7 +31,7 @@ For the design, diagrams and protocol reference, see **[ARCHITECTURE.md](ARCHITE
 | 3 | Git flow: Hub-hosted repo over HTTP, task branches, push verification, QA pipeline, rework loop, auto-merge to `main` | ✅ Done |
 | 4 | Dependency requests: the Hub adds npm packages on `main`, workers rebase and `npm ci` | ✅ Done |
 | 5 | LLM gateway on the Hub (Anthropic API), coding agent loop on workers, per-task cost tracking | ✅ Done |
-| 6 | Agent roles: per-role system prompts and tool scopes | ⏳ Planned |
+| 6 | Architect planning (`aso plan`), task dependencies, role prompts and write scopes | ✅ Done |
 | 7 | GitHub sync (`git push origin main`), packaged global CLI, `aso update`, node authentication | ⏳ Planned. Until then nothing is pushed anywhere; all commits stay in the local target repo |
 
 The whole loop runs end to end: a task is routed, and an agent on a worker explores and edits
@@ -147,9 +147,30 @@ aso start-worker --hub 192.168.1.10 --roles backend,qa
 > work into its `main` checkout. If that checkout has uncommitted changes or a different branch
 > checked out, the merge is refused and the task fails with "merge blocked".
 
-### Submitting a task
+### Planning work with the Architect
 
-Until the Architect generates tasks, submit them through the API:
+Describe what you want; the Architect plans it and you approve before anything runs:
+
+```bash
+aso plan "Add user accounts: a users table, signup/login API routes, a login page, and tests"
+aso plan --file requirements.md        # longer requirements
+```
+
+1. **Exploration.** The Architect explores a read-only checkout of `main` and calls Claude
+   through the Hub.
+2. **Proposal.** It proposes tasks with roles, acceptance criteria and dependencies, and
+   `aso plan` streams its progress and shows the plan.
+3. **Approval.** Answer `y` to create the tasks. Use `aso plan-approve <planId>` /
+   `aso plan-reject <planId>` from scripts, or `--yes` to skip the question.
+4. **Ordering.** A task waits until every task it depends on is merged into `main`.
+   Independent tasks run in parallel on different workers.
+
+Planning a typical requirement costs cents (capped at $1 per plan); the plan shows its cost.
+The tasks themselves are capped by `--task-budget` each.
+
+### Submitting a task directly
+
+You can also submit single tasks through the API:
 
 ```bash
 curl -X POST http://localhost:7420/api/tasks \
@@ -249,6 +270,22 @@ outgoing messages and sends them once it has registered again.
 | `-r, --roles <list>` | all | Comma-separated: `backend,frontend,qa,devops` |
 | `-w, --work-dir <path>` | `~/.aso/work` | Where the project checkout lives; the I/O benchmark runs here |
 
+### `aso plan`
+
+`aso plan [requirement...]` asks the Architect to plan a requirement. It streams the
+Architect's turns, prints the proposed tasks and asks for approval.
+
+| Option | Description |
+|---|---|
+| `-f, --file <path>` | Read the requirement from a file |
+| `--hub <address>` | Hub address (default `127.0.0.1`, or `ASO_HUB`) |
+| `-y, --yes` | Approve without asking |
+
+`aso plan-approve <planId>` and `aso plan-reject <planId>` decide on a proposed plan later.
+
+The Architect runs in the `aso-architect` tmux session that `start-hub` starts. Plans wait
+while no Architect is connected.
+
 ### `aso llm-check`
 
 Sends one tiny request with `ANTHROPIC_API_KEY` to confirm the key, model access and credit
@@ -269,10 +306,33 @@ finalised in Phase 7.
 | `GET` | `/api/llm` | LLM status: model, queue, calls and estimated spend since start |
 | `GET` | `/api/nodes` | Registered nodes with hardware, latest heartbeat and current task |
 | `GET` | `/api/tasks` | All tasks with state, nodes, commits, rework round and history |
-| `GET` | `/api/tasks/:id` | A single task |
-| `POST` | `/api/tasks` | Submit a task: `role`, `title`, `description`, optional `kind`, `taskId`, `acceptanceCriteria`, `files`. Returns `201`, `400` (validation) or `409` (duplicate id) |
+| `GET` | `/api/tasks/:id` | A single task (history, agent turn log, LLM cost, files touched) |
+| `POST` | `/api/plans` | Start a plan: `{ "requirement": "..." }` → `201` with `planId` |
+| `GET` | `/api/plans`, `/api/plans/:id` | Plans with state, summary, proposed tasks, cost |
+| `POST` | `/api/plans/:id/approve` / `reject` | Decide on a proposed plan; approve returns the created task ids |
+| `POST` | `/api/tasks` | Submit a task: `role`, `title`, `description`, optional `kind`, `taskId`, `acceptanceCriteria`, `files`, `dependsOn` (existing task ids). Returns `201`, `400` (validation) or `409` (duplicate id) |
 | `GET` (WS) | `/ws` | Agent WebSocket endpoint (see [protocol](ARCHITECTURE.md#4-communication-protocol)) |
 | Git | `/git/project.git` | Clone and fetch the target project. Pushes are limited to creating or updating `task/<id>` branches |
+
+## Agent roles
+
+| Role | Focus (preferred stack; the project's own stack wins) | May write |
+|---|---|---|
+| Architect | Planning and task delegation. Writes no code | Nothing (read-only tools + `submit_plan`) |
+| `backend` | Data models, database, API routes (Prisma + PostgreSQL, Hono) | Anything except `package.json`/lockfiles |
+| `frontend` | UI pages, components, styling (Next.js App Router, Tailwind, shadcn/ui) | Anything except `package.json`/lockfiles |
+| `qa` | Tests only, never feature code (Vitest, Playwright) | Test files and test config (`**/*.test.*`, `**/*.spec.*`, `**/test/**`, `**/e2e/**`, `vitest/playwright/jest` config, …) |
+| `devops` | Containers and CI (Docker, GitHub Actions) | `Dockerfile`s, compose files, `.github/**`, `infra/**`, `deploy/**`, `scripts/**`, `Makefile`, … |
+
+**Where the scopes are enforced:**
+
+- **Worker tools.** A QA agent's attempt to edit `src/app.ts` is refused with an explanation.
+- **Hub, before QA.** A task branch that touches files outside its role's scope goes back for
+  rework.
+
+Backend and frontend are separated by their prompts rather than by paths, because project
+layouts vary too much for a fixed rule. Each role has its own system prompt; see
+`packages/hub/src/llm/prompts.ts`.
 
 ## Task kinds and routing
 
@@ -338,8 +398,9 @@ For the scoring formula, see [ARCHITECTURE.md](ARCHITECTURE.md#6-hardware-aware-
 
 ```
 packages/
-  shared/     Zod protocol, constants, logger, hub address helpers
-  hub/        Hono server, node registry, router, task pipeline, Git endpoint + repo, Architect
+  shared/     Zod protocol, agent tool schemas, role policies, plan validation, helpers
+  hub/        Hono server, registry, router, tasks, plans, LLM gateway, Git endpoint + repo
+  architect/  Architect node: plans requirements with read-only tools
   worker/     hardware profiler, WebSocket client, job runner, AgentGitClient
   cli/        Commander.js `aso` command
   dashboard/  Next.js App Router UI

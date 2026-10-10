@@ -14,7 +14,7 @@ and in most Markdown editors.
 8. [Git flow](#8-git-flow)
 9. [Dependency requests](#9-dependency-requests)
 10. [LLM gateway and agent loop](#10-llm-gateway-and-agent-loop)
-11. [Agent roles (planned)](#11-agent-roles-planned)
+11. [Agent roles and planning](#11-agent-roles-and-planning)
 
 ---
 
@@ -104,12 +104,16 @@ flowchart LR
   shared["@aso/shared<br/>protocol · constants · logger"]
   hub["@aso/hub<br/>server · registry · router · tasks · git · architect"]
   worker["@aso/worker<br/>client · jobs · hardware · AgentGitClient"]
+  arch["@aso/architect<br/>planner node"]
   cli["@aso/cli<br/>aso command"]
   dash["@aso/dashboard<br/>Next.js"]
   hub --> shared
   worker --> shared
+  arch --> worker
+  arch --> shared
   cli --> hub
   cli --> worker
+  cli --> arch
   cli --> shared
   cli -. "spawns" .-> dash
   dash -. "HTTP" .-> hub
@@ -118,6 +122,8 @@ flowchart LR
 | Package | Key modules | Responsibility |
 |---|---|---|
 | `@aso/shared` | `agent-tools.ts` | Tool names, descriptions and Zod input schemas, shared by Hub (definitions sent to the model) and worker (validation) |
+| | `roles.ts` | `ROLE_POLICIES` (tools + writable globs per role), `writeDenial`, glob matcher |
+| | `plan.ts` | `orderPlan`: validates a plan (keys, dependencies, cycles) and orders it |
 | | `protocol.ts` | `AgentMessageSchema`, task and hardware schemas, `PROTECTED_FILENAMES`, `TASK_REF_PATTERN` |
 | | `hub-address.ts` | `resolveHubUrl` (ws URL), `hubGitUrl` (Git URL from the same host and port) |
 | `@aso/hub` | `dependencies.ts` | `DependencyManager` (ownership, allowlist, limits, dedup) and `npmInstaller` |
@@ -130,7 +136,8 @@ flowchart LR
 | | `llm/adapter.ts` | `LlmAdapter` interface; `AnthropicApiAdapter` (official SDK, streaming, caching, fallbacks) |
 | | `llm/conversations.ts` | `ConversationManager`: Hub-held conversations, turn checks, budget, concurrency queue |
 | | `llm/prompts.ts`, `llm/pricing.ts` | Role system prompts, task prompt (with rework feedback), price table |
-| | `architect/main.ts` | Architect process (connect and register; task planning arrives with Phase 6) |
+| | `plans.ts` | `PlanManager`: plan queue, Architect assignment, validation, approval → tasks |
+| `@aso/architect` | `client.ts`, `planner.ts`, `main.ts` | Architect node: registers, plans each `PLAN_REQUEST` with read-only tools via the Hub, submits `PLAN_RESULT`. `main.ts` is the tmux entrypoint |
 | `@aso/worker` | `client.ts` | Connect, register (with resume claim), heartbeat, offline outbox, dispatch jobs |
 | | `jobs.ts` | `JobRunner`: implementation jobs (via a `TaskExecutor`, with `requestDependency` / `callModel`) and QA runs |
 | | `agent/executor.ts` | `LlmTaskExecutor`: the agent loop (model turn via Hub → run tools → repeat until `finish`) |
@@ -174,8 +181,10 @@ keys are rejected.
 | `FILE_OPERATION` | node → hub | 5 | Audit trail of agent file edits (sent by the agent loop) |
 | `DEPENDENCY_REQUEST` | node → hub | 4 | Ask the Hub to add an npm package (idempotent by `requestId`) |
 | `DEPENDENCY_RESPONSE` | hub → node | 4 | `installed` (with the main commit) or `rejected` |
-| `PROMPT_EXECUTION` | node → hub | 5 | One agent turn: `conversationId`, `turn`, and the results of the previous turn's tool calls. Nothing else: the Hub holds the conversation |
+| `PROMPT_EXECUTION` | node → hub | 5 | One agent turn for a `taskId` (worker) or `planId` (Architect): `conversationId`, `turn`, and the results of the previous turn's tool calls. Nothing else: the Hub holds the conversation |
 | `PROMPT_RESULT` | hub → node | 5 | The model's visible text and tool calls for that turn, plus usage/cost; or an error marked retryable or not |
+| `PLAN_REQUEST` | hub → architect | 6 | Plan this requirement (`planId`, `requirement`) |
+| `PLAN_RESULT` | architect → hub | 6 | `proposed` (summary + planned tasks with plan-local keys and `dependsOn`) or `failed` |
 | `PROTOCOL_ERROR` | hub → node | 1 | Why a message was rejected, with the offending message id |
 
 ### Validation pipeline (Hub)
@@ -334,7 +343,8 @@ adding a faster machine changes which node is "best" without retuning anything.
 
 ```mermaid
 stateDiagram-v2
-  [*] --> pending: submitted (API / Architect)
+  [*] --> pending: submitted (API / approved plan)
+  pending --> pending: dependencies not merged yet
   pending --> assigned: TASK_ASSIGNMENT
   assigned --> in_progress: worker started
   assigned --> pending: node lost (not started)
@@ -364,6 +374,10 @@ stateDiagram-v2
 | Grace period for started jobs (`reclaimGraceMs`) | 5 min | requeue |
 
 - **Queue order.** The queue is FIFO. `dispatch()` runs whenever something could unblock a task.
+- **Dependencies.** A task with `dependsOn` stays `pending` until every dependency is `merged`
+  (`waitingReason: waiting for … to be merged`). If a dependency fails, its dependants stay
+  pending as `blocked`. Dependants branch from `main`, so they start with the dependencies'
+  code.
 - **One task per node.** The node is marked busy at assignment and released when its part
   ends: implementation completed or failed, or QA verdict reported.
 - **Ownership.** Status updates and verdicts are accepted only from the node that currently
@@ -431,6 +445,8 @@ Pushes land as branch refs in the Hub repo without touching its checked-out `mai
 - There are changes relative to `main`.
 - No protected file changed. This is the same `PROTECTED_FILENAMES` list the worker enforces,
   so a buggy or modified worker can't sneak lockfile changes past QA.
+- Every changed file is within the task role's writable scope (`ROLE_POLICIES`). For example,
+  a QA branch that edits `src/` is sent back.
 
 **Merging** the tested commit, not whatever the branch points to now, runs under the `main`
 lock it shares with dependency installs:
@@ -682,15 +698,60 @@ Anthropic's terms reserve them for ordinary use of Anthropic's own apps. Automat
 the claude.ai web UI (e.g. Playwright) is prohibited by the Consumer Terms. The `LlmAdapter`
 interface leaves room for other compliant providers (e.g. Claude on Bedrock or Vertex AI).
 
-## 11. Agent roles (planned)
+## 11. Agent roles and planning
 
-| Role | Scope | Notable restrictions |
-|---|---|---|
-| Architect | Planning, schema design, task specs | Writes no code; runs only on the Hub |
-| Backend | Prisma schemas, PostgreSQL logic, Hono routes | — |
-| Frontend | Next.js App Router, Tailwind, shadcn/ui | — |
-| QA | Vitest and Playwright suites; submits `FEEDBACK_LOOP` | Never writes feature code |
-| DevOps | Dockerfiles, CI pipelines | — |
+### Roles
 
-The Hub enforces roles. It picks the system prompt and the tool set from the node's registered
-role. The protocol already prevents nodes from supplying a system prompt.
+`ROLE_POLICIES` in `@aso/shared` is the single definition of what each role may do. The Hub
+sends each role only its tools, and composes its system prompt. The worker's `AgentTools`
+refuses tools and paths outside the policy. The Hub re-checks every branch before QA.
+
+| Role | Tools | Writable | System prompt focus |
+|---|---|---|---|
+| Architect | `list_files`, `read_file`, `search`, `submit_plan` | none | Explore, then split the requirement into independently testable tasks with explicit contracts and dependencies |
+| `backend` | explore + edit + `run_command` + `request_dependency` + `finish` | any (minus protected files) | Data models, DB, API routes; prefers Prisma + PostgreSQL, Hono |
+| `frontend` | same | any (minus protected files) | UI; prefers Next.js App Router, Tailwind, shadcn/ui |
+| `qa` | same | test files and test config | Tests only; describes bugs instead of fixing feature code; prefers Vitest, Playwright |
+| `devops` | same | Dockerfiles, compose, CI, `infra/`, `deploy/`, `scripts/`, `Makefile` | Containers and CI; prefers GitHub Actions |
+
+Every prompt says to follow the project's existing stack when it differs from the
+preferences. System prompts and tool lists are byte-stable per role, so they stay in the
+prompt cache.
+
+### Planning flow
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor U as You (aso plan)
+  participant H as Hub (PlanManager)
+  participant A as Architect node
+  participant C as Hub (ConversationManager)
+  participant T as TaskManager
+
+  U->>H: POST /api/plans {requirement}
+  H->>A: PLAN_REQUEST {planId, requirement}
+  A->>A: clone/fetch Hub repo, checkout main (read-only)
+  loop until submit_plan is accepted
+    A->>C: PROMPT_EXECUTION {planId, turn, toolResults}
+    C-->>A: tool calls (list_files / read_file / search / submit_plan)
+    A->>A: run read-only tools, validate submit_plan with orderPlan
+    Note over A: invalid plan (cycle, unknown key) goes back to the model as a tool error
+  end
+  A->>H: PLAN_RESULT proposed {summary, tasks}
+  H->>H: validate again → state proposed
+  U->>H: GET /api/plans/:id (aso plan shows it)
+  U->>H: POST /api/plans/:id/approve
+  H->>T: submit tasks in dependency order (keys → task ids)
+  T->>T: dispatch tasks whose dependencies are merged
+```
+
+- **Approval is required.** A plan never starts work on its own; each task spends credits.
+  Planning itself is capped at $1 per plan (`planBudgetUsd`).
+- **One plan per Architect at a time.** Plans queue while no Architect is idle. If the
+  Architect disconnects mid-plan, the plan returns to the queue. An Architect that reconnects
+  and receives a plan it already answered re-sends its stored answer instead of planning
+  again.
+- **Plan-local keys.** Proposed tasks use keys (`api`, `login-page`), and `dependsOn` refers
+  to keys. Approval submits tasks in dependency order and maps keys to the generated task ids.
+- **Linking.** Each created task records its `planId`.

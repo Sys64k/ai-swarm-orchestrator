@@ -6,6 +6,7 @@
     "packages/shared",
     "packages/hub",
     "packages/worker",
+    "packages/architect",
     "packages/cli",
     "packages/dashboard"
   ],

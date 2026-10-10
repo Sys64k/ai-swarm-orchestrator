@@ -2,7 +2,14 @@ import { existsSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import path from "node:path";
 import { simpleGit, type SimpleGit } from "simple-git";
-import { createLogger, isProtectedPath, taskBranchName, type TaskId } from "@aso/shared";
+import {
+  createLogger,
+  isProtectedPath,
+  taskBranchName,
+  writeDenial,
+  type AgentRole,
+  type TaskId,
+} from "@aso/shared";
 
 const log = createLogger("hub-repo");
 
@@ -81,7 +88,7 @@ export class HubRepository {
    * Check a worker's claimed result before spending QA time on it. Returns an error message,
    * or undefined if the commit is the head of `task/<id>` and leaves protected files alone.
    */
-  async verifyTaskCommit(taskId: TaskId, commit: string): Promise<string | undefined> {
+  async verifyTaskCommit(taskId: TaskId, commit: string, role?: AgentRole): Promise<string | undefined> {
     const branch = taskBranchName(taskId);
     const head = await this.resolve(`refs/heads/${branch}`);
     if (!head) return `${branch} was not pushed to the Hub`;
@@ -92,6 +99,10 @@ export class HubRepository {
     if (files.length === 0) return `${branch} has no changes relative to ${this.mainBranch}`;
     const blocked = files.filter(isProtectedPath);
     if (blocked.length) return `${branch} modifies protected files: ${blocked.join(", ")}`;
+    if (role) {
+      const outOfScope = files.filter((f) => writeDenial(role, f));
+      if (outOfScope.length) return `${branch} modifies files outside the ${role} role's scope: ${outOfScope.join(", ")}`;
+    }
     return undefined;
   }
 

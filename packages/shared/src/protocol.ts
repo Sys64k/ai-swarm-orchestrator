@@ -151,8 +151,29 @@ export const TaskSpecSchema = z.strictObject({
   acceptanceCriteria: z.array(z.string().min(1)).default([]),
   /** Optional hint of files the task is expected to touch. */
   files: z.array(RepoPathSchema).default([]),
+  /** Tasks that must be merged into main before this one starts. */
+  dependsOn: z.array(TaskIdSchema).max(20).default([]),
 });
 export type TaskSpec = z.infer<typeof TaskSpecSchema>;
+
+/** Plan ids identify one Architect planning run. */
+export const PlanIdSchema = z.string().regex(/^plan-[a-z0-9]{6,32}$/, "invalid plan id");
+
+/**
+ * A task as proposed by the Architect. `key` is a plan-local name that `dependsOn` refers to;
+ * the Hub assigns real task ids when the plan is approved.
+ */
+export const PlannedTaskSchema = z.strictObject({
+  key: z.string().regex(/^[a-z0-9][a-z0-9-]{0,40}$/, "key must be lowercase alphanumerics and dashes"),
+  role: WorkerRoleSchema,
+  kind: TaskKindSchema.default("feature"),
+  title: z.string().min(1).max(200),
+  description: z.string().min(1).max(20_000),
+  acceptanceCriteria: z.array(z.string().min(1)).max(20).default([]),
+  files: z.array(RepoPathSchema).max(50).default([]),
+  dependsOn: z.array(z.string()).max(20).default([]),
+});
+export type PlannedTask = z.infer<typeof PlannedTaskSchema>;
 
 /** Task submission input: the Hub generates a task id when none is given. */
 export const TaskSpecInputSchema = TaskSpecSchema.extend({ taskId: TaskIdSchema.optional() });
@@ -272,22 +293,28 @@ const DependencyResponsePayload = z.discriminatedUnion("outcome", [
  * every model message including thinking blocks); the worker only sends the results of the
  * tool calls the model made in the previous turn. Turn 0 starts the conversation.
  */
-const PromptExecutionPayload = z.strictObject({
-  requestId: z.uuid(),
-  taskId: TaskIdSchema,
-  conversationId: z.uuid(),
-  turn: z.number().int().min(0),
-  toolResults: z
-    .array(
-      z.strictObject({
-        toolUseId: z.string().min(1).max(200),
-        content: z.string().max(200_000),
-        isError: z.boolean().default(false),
-      }),
-    )
-    .max(64)
-    .default([]),
-});
+const PromptExecutionPayload = z
+  .strictObject({
+    requestId: z.uuid(),
+    /** Exactly one of taskId (implementation) or planId (Architect planning). */
+    taskId: TaskIdSchema.optional(),
+    planId: PlanIdSchema.optional(),
+    conversationId: z.uuid(),
+    turn: z.number().int().min(0),
+    toolResults: z
+      .array(
+        z.strictObject({
+          toolUseId: z.string().min(1).max(200),
+          content: z.string().max(200_000),
+          isError: z.boolean().default(false),
+        }),
+      )
+      .max(64)
+      .default([]),
+  })
+  .refine((p) => (p.taskId === undefined) !== (p.planId === undefined), {
+    message: "exactly one of taskId or planId is required",
+  });
 
 export const LlmUsageSchema = z.strictObject({
   inputTokens: z.number().int().nonnegative(),
@@ -319,6 +346,23 @@ const PromptResultPayload = z.discriminatedUnion("outcome", [
     error: z.string(),
     retryable: z.boolean(),
   }),
+]);
+
+/** Hub → Architect: turn a requirement into a plan. */
+const PlanRequestPayload = z.strictObject({
+  planId: PlanIdSchema,
+  requirement: z.string().min(1).max(50_000),
+});
+
+/** Architect → Hub: the proposed tasks, or why planning failed. */
+const PlanResultPayload = z.discriminatedUnion("outcome", [
+  z.strictObject({
+    planId: PlanIdSchema,
+    outcome: z.literal("proposed"),
+    summary: z.string().min(1).max(10_000),
+    tasks: z.array(PlannedTaskSchema).min(1).max(25),
+  }),
+  z.strictObject({ planId: PlanIdSchema, outcome: z.literal("failed"), error: z.string().min(1).max(5000) }),
 ]);
 
 const ProtocolErrorPayload = z.strictObject({
@@ -358,6 +402,8 @@ export const AgentMessageSchema = z.discriminatedUnion("type", [
   message("DEPENDENCY_RESPONSE", DependencyResponsePayload),
   message("PROMPT_EXECUTION", PromptExecutionPayload),
   message("PROMPT_RESULT", PromptResultPayload),
+  message("PLAN_REQUEST", PlanRequestPayload),
+  message("PLAN_RESULT", PlanResultPayload),
   message("PROTOCOL_ERROR", ProtocolErrorPayload),
 ]);
 
@@ -379,6 +425,7 @@ export const NODE_TO_HUB_TYPES = new Set<AgentMessageType>([
   "FEEDBACK_LOOP",
   "DEPENDENCY_REQUEST",
   "PROMPT_EXECUTION",
+  "PLAN_RESULT",
 ]);
 
 /** Message types only the Hub may send. */
@@ -388,6 +435,7 @@ export const HUB_TO_NODE_TYPES = new Set<AgentMessageType>([
   "TEST_EXECUTION",
   "DEPENDENCY_RESPONSE",
   "PROMPT_RESULT",
+  "PLAN_REQUEST",
   "PROTOCOL_ERROR",
 ]);
 

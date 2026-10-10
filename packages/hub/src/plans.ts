@@ -1,0 +1,213 @@
+import { randomBytes } from "node:crypto";
+import {
+  createLogger,
+  orderPlan,
+  type LlmUsage,
+  type MessageOf,
+  type PlannedTask,
+} from "@aso/shared";
+import type { NodeRegistry } from "./registry.js";
+import type { AgentTurn, TaskManager } from "./tasks.js";
+
+const log = createLogger("plans");
+
+/**
+ * pending → planning → proposed → approved (tasks created)
+ *                              ↘ rejected
+ * planning → failed (Architect error) · planning → pending (Architect lost)
+ */
+export type PlanState = "pending" | "planning" | "proposed" | "approved" | "rejected" | "failed";
+
+export interface PlanRecord {
+  planId: string;
+  requirement: string;
+  state: PlanState;
+  architectNodeId?: string;
+  summary?: string;
+  tasks?: PlannedTask[];
+  /** Plan key → created task id, once approved. */
+  taskIds?: Record<string, string>;
+  error?: string;
+  llm: { calls: number } & LlmUsage;
+  agentLog: AgentTurn[];
+  history: Array<{ at: string; event: string }>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export class PlanError extends Error {
+  constructor(
+    message: string,
+    readonly code: "not_found" | "conflict" | "invalid",
+  ) {
+    super(message);
+  }
+}
+
+/** Architect planning runs: requirement in, approved plan → tasks out. */
+export class PlanManager {
+  private readonly plans = new Map<string, PlanRecord>();
+
+  constructor(
+    private readonly registry: NodeRegistry,
+    private readonly tasks: TaskManager,
+  ) {}
+
+  list(): PlanRecord[] {
+    return [...this.plans.values()];
+  }
+
+  get(planId: string): PlanRecord | undefined {
+    return this.plans.get(planId);
+  }
+
+  create(requirement: unknown): PlanRecord {
+    if (typeof requirement !== "string" || !requirement.trim()) throw new PlanError("requirement must be a non-empty string", "invalid");
+    if (requirement.length > 50_000) throw new PlanError("requirement is too long (max 50000 characters)", "invalid");
+    const now = new Date().toISOString();
+    const plan: PlanRecord = {
+      planId: `plan-${randomBytes(4).toString("hex")}`,
+      requirement: requirement.trim(),
+      state: "pending",
+      llm: { calls: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0 },
+      agentLog: [],
+      history: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.plans.set(plan.planId, plan);
+    this.note(plan, "created");
+    this.dispatch();
+    return plan;
+  }
+
+  /** Give pending plans to idle Architects. */
+  dispatch(): void {
+    for (const plan of this.plans.values()) {
+      if (plan.state !== "pending") continue;
+      const architect = this.registry
+        .list()
+        .find((n) => n.nodeKind === "architect" && n.currentTaskId === null);
+      if (!architect) return;
+      this.registry.assign(architect.nodeId, plan.planId);
+      plan.state = "planning";
+      plan.architectNodeId = architect.nodeId;
+      this.note(plan, `planning on ${architect.nodeId}`);
+      this.registry.send(architect.nodeId, "PLAN_REQUEST", { planId: plan.planId, requirement: plan.requirement });
+    }
+  }
+
+  isPlanning(nodeId: string, planId: string): boolean {
+    const plan = this.plans.get(planId);
+    return !!plan && plan.state === "planning" && plan.architectNodeId === nodeId;
+  }
+
+  /** Returns a protocol error string if the sender isn't planning this plan. */
+  handleResult(nodeId: string, result: MessageOf<"PLAN_RESULT">["payload"]): string | undefined {
+    if (!this.isPlanning(nodeId, result.planId)) return `plan ${result.planId} is not being planned by ${nodeId}`;
+    const plan = this.plans.get(result.planId)!;
+    this.registry.release(nodeId, plan.planId);
+
+    if (result.outcome === "failed") {
+      plan.state = "failed";
+      plan.error = result.error;
+      this.note(plan, `failed: ${result.error}`);
+    } else {
+      const ordered = orderPlan(result.tasks);
+      if (typeof ordered === "string") {
+        plan.state = "failed";
+        plan.error = `invalid plan: ${ordered}`;
+        this.note(plan, plan.error);
+      } else {
+        plan.state = "proposed";
+        plan.summary = result.summary;
+        plan.tasks = ordered;
+        this.note(plan, `proposed ${ordered.length} task(s); waiting for approval`);
+      }
+    }
+    this.dispatch();
+    return undefined;
+  }
+
+  /** Create the plan's tasks (dependencies first) and start dispatching them. */
+  approve(planId: string): PlanRecord {
+    const plan = this.require(planId);
+    if (plan.state !== "proposed") throw new PlanError(`plan ${planId} is ${plan.state}, not proposed`, "conflict");
+    const ids: Record<string, string> = {};
+    for (const t of plan.tasks!) {
+      const record = this.tasks.submit(
+        {
+          role: t.role,
+          kind: t.kind,
+          title: t.title,
+          description: t.description,
+          acceptanceCriteria: t.acceptanceCriteria,
+          files: t.files,
+          dependsOn: t.dependsOn.map((k) => ids[k]),
+        },
+        { planId },
+      );
+      ids[t.key] = record.spec.taskId;
+    }
+    plan.taskIds = ids;
+    plan.state = "approved";
+    this.note(plan, `approved; created ${Object.values(ids).join(", ")}`);
+    return plan;
+  }
+
+  reject(planId: string): PlanRecord {
+    const plan = this.require(planId);
+    if (plan.state !== "proposed" && plan.state !== "pending") {
+      throw new PlanError(`plan ${planId} is ${plan.state}; only pending or proposed plans can be rejected`, "conflict");
+    }
+    plan.state = "rejected";
+    this.note(plan, "rejected");
+    return plan;
+  }
+
+  /** An Architect disconnected: its plan goes back to the queue. */
+  handleNodeGone(nodeId: string): void {
+    for (const plan of this.plans.values()) {
+      if (plan.state === "planning" && plan.architectNodeId === nodeId) {
+        plan.state = "pending";
+        plan.architectNodeId = undefined;
+        this.note(plan, `requeued: ${nodeId} disconnected`);
+      }
+    }
+    this.dispatch();
+  }
+
+  recordLlmUsage(planId: string, usage: LlmUsage): void {
+    const plan = this.plans.get(planId);
+    if (!plan) return;
+    const l = plan.llm;
+    l.calls++;
+    l.inputTokens += usage.inputTokens;
+    l.outputTokens += usage.outputTokens;
+    l.cacheReadTokens += usage.cacheReadTokens;
+    l.cacheWriteTokens += usage.cacheWriteTokens;
+    l.costUsd = Math.round((l.costUsd + usage.costUsd) * 1e6) / 1e6;
+  }
+
+  recordAgentTurn(planId: string, turn: Omit<AgentTurn, "at">): void {
+    this.plans.get(planId)?.agentLog.push({ at: new Date().toISOString(), ...turn });
+  }
+
+  recordEvent(planId: string, event: string): void {
+    const plan = this.plans.get(planId);
+    if (plan) this.note(plan, event);
+  }
+
+  private require(planId: string): PlanRecord {
+    const plan = this.plans.get(planId);
+    if (!plan) throw new PlanError(`plan ${planId} not found`, "not_found");
+    return plan;
+  }
+
+  private note(plan: PlanRecord, event: string): void {
+    const at = new Date().toISOString();
+    plan.updatedAt = at;
+    plan.history.push({ at, event });
+    log.info(`${plan.planId}: ${event}`);
+  }
+}

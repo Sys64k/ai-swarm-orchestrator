@@ -174,7 +174,7 @@ function launchArchitect(hubPort: number): boolean {
     log.warn(`tmux session "${ARCHITECT_TMUX_SESSION}" already exists; leaving it running`);
     return false;
   }
-  const entry = fileURLToPath(import.meta.resolve("@aso/hub/architect"));
+  const entry = fileURLToPath(import.meta.resolve("@aso/architect/main"));
   const ok = tmux([
     "new-session", "-d", "-s", ARCHITECT_TMUX_SESSION, "--",
     process.execPath, entry, "--hub", `127.0.0.1:${hubPort}`,

@@ -35,8 +35,27 @@ interface LlmView {
   totals: { calls: number; costUsd: number };
 }
 
+interface Turn {
+  turn: number;
+  actions: string[];
+  costUsd: number;
+}
+
+interface PlanView {
+  planId: string;
+  requirement: string;
+  state: string;
+  summary?: string;
+  error?: string;
+  tasks?: Array<{ key: string; role: string; title: string; dependsOn: string[] }>;
+  taskIds?: Record<string, string>;
+  llm: { calls: number; costUsd: number };
+}
+
 interface TaskView {
-  spec: { taskId: string; role: string; kind: string; title: string };
+  spec: { taskId: string; role: string; kind: string; title: string; dependsOn: string[] };
+  agentLog: Turn[];
+  planId?: string;
   state: string;
   nodeId?: string;
   attempts: number;
@@ -63,11 +82,12 @@ async function get<T>(path: string): Promise<T | null> {
 const cell = { padding: "0.3rem 0.8rem", borderBottom: "1px solid #ddd", textAlign: "left" as const };
 
 export default async function Home() {
-  const [health, nodes, tasks, llm] = await Promise.all([
+  const [health, nodes, tasks, llm, plans] = await Promise.all([
     get<Health>("/api/health"),
     get<NodeView[]>("/api/nodes"),
     get<TaskView[]>("/api/tasks"),
     get<LlmView>("/api/llm"),
+    get<PlanView[]>("/api/plans"),
   ]);
 
   if (!health) {
@@ -133,6 +153,40 @@ export default async function Home() {
         </tbody>
       </table>
 
+      <h2>Plans ({plans?.length ?? 0})</h2>
+      {plans?.length ? (
+        plans.map((p) => (
+          <details key={p.planId} open={p.state === "proposed"} style={{ marginBottom: "0.6rem" }}>
+            <summary>
+              <code>{p.planId}</code> · <strong>{p.state}</strong> · {p.requirement.slice(0, 100)}
+              {p.llm.calls > 0 && ` · ${p.llm.calls} turns, ~$${p.llm.costUsd.toFixed(2)}`}
+            </summary>
+            {p.error && <p style={{ color: "#b91c1c" }}>{p.error}</p>}
+            {p.summary && <p style={{ whiteSpace: "pre-wrap" }}>{p.summary}</p>}
+            {p.tasks && (
+              <ol>
+                {p.tasks.map((t) => (
+                  <li key={t.key}>
+                    [{t.role}] {t.title}
+                    {t.dependsOn.length > 0 && <span style={{ color: "#777" }}> (after {t.dependsOn.join(", ")})</span>}
+                    {p.taskIds?.[t.key] && <code style={{ color: "#777" }}> → {p.taskIds[t.key]}</code>}
+                  </li>
+                ))}
+              </ol>
+            )}
+            {p.state === "proposed" && (
+              <p>
+                Approve with <code>aso plan-approve {p.planId}</code> or reject with <code>aso plan-reject {p.planId}</code>.
+              </p>
+            )}
+          </details>
+        ))
+      ) : (
+        <p style={{ color: "#777" }}>
+          No plans yet. Ask the Architect with <code>aso plan "what to build"</code>.
+        </p>
+      )}
+
       <h2>Tasks ({tasks?.length ?? 0})</h2>
       <table style={{ borderCollapse: "collapse" }}>
         <thead>
@@ -148,6 +202,9 @@ export default async function Home() {
               <td style={cell}>
                 {t.spec.taskId}
                 <div style={{ color: "#777", fontSize: "0.8em" }}>{t.spec.title}</div>
+                {t.spec.dependsOn.length > 0 && (
+                  <div style={{ color: "#777", fontSize: "0.8em" }}>after {t.spec.dependsOn.join(", ")}</div>
+                )}
               </td>
               <td style={cell}>{t.spec.role} / {t.spec.kind}</td>
               <td style={cell}>
@@ -167,6 +224,18 @@ export default async function Home() {
               </td>
               <td style={{ ...cell, fontSize: "0.85em" }}>
                 {t.state === "pending" && t.waitingReason ? t.waitingReason : t.history.at(-1)?.event}
+                {t.agentLog.length > 0 && (
+                  <details>
+                    <summary style={{ color: "#777" }}>{t.agentLog.length} agent turns</summary>
+                    <ol start={0} style={{ margin: 0 }}>
+                      {t.agentLog.slice(-15).map((a) => (
+                        <li key={`${a.turn}-${a.costUsd}`} value={a.turn}>
+                          {a.actions.join(", ")} <span style={{ color: "#999" }}>${a.costUsd.toFixed(3)}</span>
+                        </li>
+                      ))}
+                    </ol>
+                  </details>
+                )}
               </td>
             </tr>
           ))}

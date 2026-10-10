@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { startHub, type HubHandle, type HubOptions } from "@aso/hub";
+import { startHub, type HubHandle, type HubOptions, type LlmAdapter, type LlmRequest, type LlmResponse } from "@aso/hub";
 import {
   createMessage,
   parseAgentMessage,
@@ -197,3 +197,39 @@ export async function pushTaskBranch(gitUrl: string, taskId: string, files: Reco
     rmSync(dir, { recursive: true, force: true });
   }
 }
+
+// ---- Scripted model (stands in for the Anthropic API in tests) ----
+
+export type Block = Record<string, unknown>;
+export const toolUse = (id: string, name: string, input: Record<string, unknown>): Block => ({ type: "tool_use", id, name, input });
+export const text = (t: string): Block => ({ type: "text", text: t });
+export const reply = (content: Block[], stopReason = "tool_use", tokens = 1000): LlmResponse => ({
+  content: content as unknown as LlmResponse["content"],
+  stopReason,
+  model: "claude-opus-5-5",
+  tokens: { inputTokens: tokens, outputTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 0 },
+});
+
+/** Stand-in model: returns whatever the script says for the n-th call. */
+export class ScriptedModel implements LlmAdapter {
+  readonly name = "scripted";
+  readonly model = "claude-opus-5-5";
+  readonly requests: LlmRequest[] = [];
+  private readonly script: (req: LlmRequest, n: number) => LlmResponse | Promise<LlmResponse>;
+  constructor(script: (req: LlmRequest, n: number) => LlmResponse | Promise<LlmResponse>) {
+    this.script = script;
+  }
+  async complete(req: LlmRequest): Promise<LlmResponse> {
+    this.requests.push(structuredClone(req));
+    return this.script(req, this.requests.length - 1);
+  }
+}
+
+/** Tool results the model received in its latest request, keyed by tool_use_id. */
+export function lastToolResults(req: LlmRequest): Record<string, { content: string; is_error?: boolean }> {
+  const last = req.messages.at(-1)!;
+  const out: Record<string, { content: string; is_error?: boolean }> = {};
+  for (const b of last.content as Array<Record<string, any>>) if (b.type === "tool_result") out[b.tool_use_id] = b as never;
+  return out;
+}
+

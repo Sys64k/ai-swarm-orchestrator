@@ -7,6 +7,7 @@ COPY package.json package-lock.json tsconfig.base.json ./
 COPY packages/shared/package.json packages/shared/
 COPY packages/hub/package.json packages/hub/
 COPY packages/worker/package.json packages/worker/
+COPY packages/architect/package.json packages/architect/
 COPY packages/cli/package.json packages/cli/
 COPY packages/dashboard/package.json packages/dashboard/
 RUN npm ci

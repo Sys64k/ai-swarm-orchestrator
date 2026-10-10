@@ -7,6 +7,9 @@ import {
   AGENT_TOOLS,
   isAgentToolName,
   isProtectedPath,
+  ROLE_POLICIES,
+  writeDenial,
+  type AgentRole,
   type AgentToolInput,
   type MessageOf,
 } from "@aso/shared";
@@ -42,7 +45,8 @@ export interface ToolResult {
 
 export interface ToolHost {
   repoDir: string;
-  taskId: string;
+  /** Decides which tools are available and which paths may be written. */
+  role: AgentRole;
   requestDependency(req: DependencyRequest): Promise<{ mainCommit: string }>;
   fileOperation(op: Omit<MessageOf<"FILE_OPERATION">["payload"], "taskId">): void;
 }
@@ -66,7 +70,13 @@ export class AgentTools {
       content: truncate(content),
       isError,
     });
-    if (!isAgentToolName(call.name) || call.name === "finish") return done(`unknown tool: ${call.name}`, true);
+    // finish / submit_plan end the agent loop and are handled by its caller.
+    if (!isAgentToolName(call.name) || call.name === "finish" || call.name === "submit_plan") {
+      return done(`unknown tool: ${call.name}`, true);
+    }
+    if (!ROLE_POLICIES[this.host.role].tools.includes(call.name)) {
+      return done(`${call.name} is not available to the ${this.host.role} role`, true);
+    }
 
     const parsed = AGENT_TOOLS[call.name].input.safeParse(call.input);
     if (!parsed.success) {
@@ -112,6 +122,8 @@ export class AgentTools {
     if (isProtectedPath(repoPath)) {
       throw new ToolError(`${repoPath} is managed by the Hub; use request_dependency to add packages`);
     }
+    const denial = writeDenial(this.host.role, repoPath);
+    if (denial) throw new ToolError(denial);
   }
 
   private async listFiles({ path: dir }: AgentToolInput<"list_files">): Promise<string> {
