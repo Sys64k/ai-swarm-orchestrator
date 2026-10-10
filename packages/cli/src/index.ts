@@ -45,6 +45,7 @@ program
   .option("--dashboard-port <port>", "dashboard port", parsePort, DEFAULT_DASHBOARD_PORT)
   .option("--no-dashboard", "do not launch the Next.js dashboard")
   .option("--no-architect", "do not launch the Architect tmux session")
+  .option("--docker", "run the Hub and dashboard in Docker (Architect stays on the host)", false)
   .action(startHubCommand);
 
 program

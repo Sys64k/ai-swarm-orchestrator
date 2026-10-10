@@ -15,38 +15,103 @@ export interface StartHubOptions {
   dashboardPort: number;
   dashboard: boolean;
   architect: boolean;
+  docker: boolean;
 }
 
 export async function startHubCommand(opts: StartHubOptions): Promise<void> {
   const targetDir = resolveTargetDir(opts.dir);
-  const hub = await startHub({ targetDir, port: opts.port, host: opts.host });
+  if (opts.docker) return startHubInDocker(targetDir, opts);
 
+  const hub = await startHub({ targetDir, port: opts.port, host: opts.host });
   const dashboard = opts.dashboard ? launchDashboard(opts.dashboardPort, hub.port) : undefined;
   const architectStarted = opts.architect ? launchArchitect(hub.port) : false;
 
-  let shuttingDown = false;
-  const shutdown = async (signal: string) => {
-    if (shuttingDown) return;
-    shuttingDown = true;
-    log.info(`${signal} received, shutting down`);
+  onShutdown(async () => {
     dashboard?.kill("SIGTERM");
     if (architectStarted) tmux(["kill-session", "-t", ARCHITECT_TMUX_SESSION]);
     await hub.close();
     process.exit(0);
-  };
-  process.on("SIGINT", () => void shutdown("SIGINT"));
-  process.on("SIGTERM", () => void shutdown("SIGTERM"));
+  });
+}
+
+/**
+ * Runs the Hub + dashboard via docker compose and the Architect in tmux on the host (it
+ * reaches the Hub through the published port). Compose runs attached so logs stream here.
+ */
+async function startHubInDocker(targetDir: string, opts: StartHubOptions): Promise<void> {
+  if (!opts.dashboard) throw new Error("--no-dashboard is not supported with --docker");
+  try {
+    execFileSync("docker", ["compose", "version"], { stdio: "ignore" });
+  } catch {
+    throw new Error("docker compose is not available; install Docker Compose v2 or drop --docker");
+  }
+
+  const composeFile = fileURLToPath(new URL("../../../../docker-compose.yml", import.meta.url));
+  if (!existsSync(composeFile)) throw new Error(`compose file not found at ${composeFile}`);
+
+  const compose = spawn("docker", ["compose", "-f", composeFile, "up", "--build"], {
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      ASO_TARGET_DIR: targetDir,
+      ASO_UID: String(process.getuid?.() ?? 1000),
+      ASO_GID: String(process.getgid?.() ?? 1000),
+      ASO_BIND: opts.host,
+      ASO_HUB_PORT: String(opts.port),
+      ASO_DASHBOARD_PORT: String(opts.dashboardPort),
+    },
+  });
+  const exited = new Promise<number>((resolve) => compose.on("exit", (code) => resolve(code ?? 1)));
+  log.info(`starting Hub container (first run builds the image; this can take a few minutes)`);
+
+  let architectStarted = false;
+  if (opts.architect) {
+    const healthy = await waitForHealth(`http://127.0.0.1:${opts.port}/api/health`, exited);
+    if (healthy) architectStarted = launchArchitect(opts.port);
+  }
+
+  onShutdown(async (signal) => {
+    if (architectStarted) tmux(["kill-session", "-t", ARCHITECT_TMUX_SESSION]);
+    // Ctrl+C already reached compose via the terminal's process group; a second SIGINT would
+    // make compose force-kill the container. Only forward signals that came from elsewhere.
+    if (signal !== "SIGINT") compose.kill(signal);
+    process.exit(await exited);
+  });
+  const code = await exited;
+  if (architectStarted) tmux(["kill-session", "-t", ARCHITECT_TMUX_SESSION]);
+  process.exit(code);
+}
+
+async function waitForHealth(url: string, exited: Promise<number>): Promise<boolean> {
+  let done = false;
+  void exited.then(() => (done = true));
+  while (!done) {
+    try {
+      if ((await fetch(url)).ok) return true;
+    } catch {
+      /* not up yet */
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  return false;
+}
+
+function onShutdown(handler: (signal: NodeJS.Signals) => Promise<void>): void {
+  let shuttingDown = false;
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.on(signal, () => {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      log.info(`${signal} received, shutting down`);
+      void handler(signal);
+    });
+  }
 }
 
 function resolveTargetDir(dir: string): string {
   const abs = path.resolve(dir);
   if (!existsSync(abs) || !statSync(abs).isDirectory()) {
     throw new Error(`target directory does not exist: ${abs}`);
-  }
-  try {
-    execFileSync("git", ["-C", abs, "rev-parse", "--is-inside-work-tree"], { stdio: "ignore" });
-  } catch {
-    log.warn(`${abs} is not a git repository; the Git flow will need it initialised`);
   }
   return abs;
 }
