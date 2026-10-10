@@ -27,12 +27,22 @@ interface NodeView {
   lastSeenAt: string;
 }
 
+interface LlmView {
+  configured: boolean;
+  model: string | null;
+  taskBudgetUsd: number;
+  queue: { running: number; waiting: number; limit: number };
+  totals: { calls: number; costUsd: number };
+}
+
 interface TaskView {
   spec: { taskId: string; role: string; kind: string; title: string };
   state: string;
   nodeId?: string;
   attempts: number;
   reworkRound: number;
+  llm: { calls: number; costUsd: number };
+  filesTouched: string[];
   commit?: string;
   mainCommit?: string;
   detachedAt?: number;
@@ -53,10 +63,11 @@ async function get<T>(path: string): Promise<T | null> {
 const cell = { padding: "0.3rem 0.8rem", borderBottom: "1px solid #ddd", textAlign: "left" as const };
 
 export default async function Home() {
-  const [health, nodes, tasks] = await Promise.all([
+  const [health, nodes, tasks, llm] = await Promise.all([
     get<Health>("/api/health"),
     get<NodeView[]>("/api/nodes"),
     get<TaskView[]>("/api/tasks"),
+    get<LlmView>("/api/llm"),
   ]);
 
   if (!health) {
@@ -75,6 +86,16 @@ export default async function Home() {
       <h1>AI Swarm Orchestrator</h1>
       <p>
         Hub {health.status} · target <code>{health.targetDir}</code> · up {health.uptimeSec}s
+      </p>
+      <p>
+        {llm?.configured ? (
+          <>
+            LLM <code>{llm.model}</code> · {llm.totals.calls} calls · ~${llm.totals.costUsd.toFixed(2)} spent since start ·
+            queue {llm.queue.running}/{llm.queue.limit} running, {llm.queue.waiting} waiting · budget ${llm.taskBudgetUsd}/task
+          </>
+        ) : (
+          <span style={{ color: "#b45309" }}>No LLM configured: set ANTHROPIC_API_KEY on the Hub so agents can work.</span>
+        )}
       </p>
 
       <h2>Nodes ({nodes?.length ?? 0})</h2>
@@ -116,7 +137,7 @@ export default async function Home() {
       <table style={{ borderCollapse: "collapse" }}>
         <thead>
           <tr>
-            {["Task", "Role / kind", "State", "Node", "Rework", "Commit", "Latest"].map((h) => (
+            {["Task", "Role / kind", "State", "Node", "Rework", "LLM", "Commit", "Latest"].map((h) => (
               <th key={h} style={cell}>{h}</th>
             ))}
           </tr>
@@ -135,6 +156,12 @@ export default async function Home() {
               </td>
               <td style={cell}>{t.nodeId ?? "—"}</td>
               <td style={cell}>{t.reworkRound || "—"}</td>
+              <td style={cell}>
+                {t.llm.calls ? `${t.llm.calls} turns · ~$${t.llm.costUsd.toFixed(2)}` : "—"}
+                {t.filesTouched.length > 0 && (
+                  <div style={{ color: "#777", fontSize: "0.8em" }}>{t.filesTouched.length} files</div>
+                )}
+              </td>
               <td style={cell}>
                 <code>{(t.mainCommit ?? t.commit)?.slice(0, 8) ?? "—"}</code>
               </td>

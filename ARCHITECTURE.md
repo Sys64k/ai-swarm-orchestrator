@@ -13,7 +13,7 @@ and in most Markdown editors.
 7. [Task lifecycle](#7-task-lifecycle)
 8. [Git flow](#8-git-flow)
 9. [Dependency requests](#9-dependency-requests)
-10. [LLM gateway (planned)](#10-llm-gateway-planned)
+10. [LLM gateway and agent loop](#10-llm-gateway-and-agent-loop)
 11. [Agent roles (planned)](#11-agent-roles-planned)
 
 ---
@@ -69,7 +69,7 @@ flowchart TB
   WA_CO -- "git fetch / push task/*" --> HUB
   WB_CO -- "git fetch / push task/*" --> HUB
   WC_CO -- "git fetch / push task/*" --> HUB
-  HUB -. "Phase 5" .-> EXT(["LLM provider"])
+  HUB -- "Messages API (API key)" --> EXT(["Anthropic API"])
   REPO -. "Phase 7: push origin main" .-> GH(["GitHub"])
 ```
 
@@ -117,7 +117,8 @@ flowchart LR
 
 | Package | Key modules | Responsibility |
 |---|---|---|
-| `@aso/shared` | `protocol.ts` | `AgentMessageSchema`, task and hardware schemas, `PROTECTED_FILENAMES`, `TASK_REF_PATTERN` |
+| `@aso/shared` | `agent-tools.ts` | Tool names, descriptions and Zod input schemas, shared by Hub (definitions sent to the model) and worker (validation) |
+| | `protocol.ts` | `AgentMessageSchema`, task and hardware schemas, `PROTECTED_FILENAMES`, `TASK_REF_PATTERN` |
 | | `hub-address.ts` | `resolveHubUrl` (ws URL), `hubGitUrl` (Git URL from the same host and port) |
 | `@aso/hub` | `dependencies.ts` | `DependencyManager` (ownership, allowlist, limits, dedup) and `npmInstaller` |
 | | `server.ts` | HTTP API, WebSocket validation pipeline, Git route, liveness and reclaim sweep |
@@ -126,9 +127,14 @@ flowchart LR
 | | `tasks.ts` | `TaskManager`: queue, dispatch, verification, QA, rework, merge, node-loss handling |
 | | `git/http-backend.ts` | Git smart-HTTP via a `git http-backend` CGI bridge, with the push policy |
 | | `git/hub-repo.ts` | `HubRepository`: verify task commits, merge and add dependencies on main under one lock |
-| | `architect/main.ts` | Architect process (connect and register; planning comes in Phase 5/6) |
+| | `llm/adapter.ts` | `LlmAdapter` interface; `AnthropicApiAdapter` (official SDK, streaming, caching, fallbacks) |
+| | `llm/conversations.ts` | `ConversationManager`: Hub-held conversations, turn checks, budget, concurrency queue |
+| | `llm/prompts.ts`, `llm/pricing.ts` | Role system prompts, task prompt (with rework feedback), price table |
+| | `architect/main.ts` | Architect process (connect and register; task planning arrives with Phase 6) |
 | `@aso/worker` | `client.ts` | Connect, register (with resume claim), heartbeat, offline outbox, dispatch jobs |
-| | `jobs.ts` | `JobRunner`: implementation jobs (via a `TaskExecutor`, with `requestDependency`) and QA runs |
+| | `jobs.ts` | `JobRunner`: implementation jobs (via a `TaskExecutor`, with `requestDependency` / `callModel`) and QA runs |
+| | `agent/executor.ts` | `LlmTaskExecutor`: the agent loop (model turn via Hub → run tools → repeat until `finish`) |
+| | `agent/tools.ts` | `AgentTools`: executes the model's tool calls inside the checkout |
 | | `run-command.ts` | Shell-free command runner with process-group timeout |
 | | `hardware.ts` | `systeminformation` profile and disk write benchmark |
 | | `git/agent-git-client.ts` | The only Git interface agents get |
@@ -168,8 +174,8 @@ keys are rejected.
 | `FILE_OPERATION` | node → hub | 5 | Audit trail of agent file edits (sent by the agent loop) |
 | `DEPENDENCY_REQUEST` | node → hub | 4 | Ask the Hub to add an npm package (idempotent by `requestId`) |
 | `DEPENDENCY_RESPONSE` | hub → node | 4 | `installed` (with the main commit) or `rejected` |
-| `PROMPT_EXECUTION` | node → hub | 5 | LLM request. No system prompt: the Hub picks it by role |
-| `PROMPT_RESULT` | hub → node | 5 | LLM response or a retryable or permanent error |
+| `PROMPT_EXECUTION` | node → hub | 5 | One agent turn: `conversationId`, `turn`, and the results of the previous turn's tool calls. Nothing else: the Hub holds the conversation |
+| `PROMPT_RESULT` | hub → node | 5 | The model's visible text and tool calls for that turn, plus usage/cost; or an error marked retryable or not |
 | `PROTOCOL_ERROR` | hub → node | 1 | Why a message was rejected, with the offending message id |
 
 ### Validation pipeline (Hub)
@@ -207,7 +213,7 @@ Schema-level rules worth knowing:
 | `DEPENDENCY_REQUEST.name` / `version` | npm name grammar; semver range characters only | No git URLs, `file:` specs or shell metacharacters |
 | `STATUS_UPDATE` | `taskId` required unless `idle`; `commit` required for `completed` | Every completion is traceable to a commit |
 | `FEEDBACK_LOOP` (`fail`) | `failures` must be non-empty | Feedback is actionable |
-| `PROMPT_EXECUTION.messages[].role` | `user` or `assistant` only | Nodes cannot override the role's system prompt |
+| `PROMPT_EXECUTION` | only `toolResults` (id, content, isError) | Nodes can't send a system prompt or forge model messages |
 
 ## 5. Node lifecycle
 
@@ -385,7 +391,7 @@ sequenceDiagram
     W->>W: syncWithMain() (rebase onto latest main)
   end
   W->>H: STATUS in_progress
-  W->>W: executor.implement() — the agent edits files (Phase 5)
+  W->>W: executor.implement() — the LLM agent edits files via tools
   W->>R: completeTask → commit + push task/<id> (push policy checked)
   W->>H: STATUS completed {commit}
   H->>R: verify: commit = head of task/<id>, no protected files
@@ -562,16 +568,119 @@ to GitHub after QA-approved merges; a dependency commit goes out together with t
 - **QA installs them.** QA runs `npm ci` because the task commit now has a
   `package-lock.json`.
 
-## 10. LLM gateway (planned)
+## 10. LLM gateway and agent loop
 
-Workers send `PROMPT_EXECUTION`. The Hub queues it, adds the system prompt for the node's role,
-and passes it to a provider adapter behind a common interface. That interface supports
-rate-limit-aware queuing, retries, and swapping providers. The worker-side agent loop
-implements the `TaskExecutor` interface already used by `JobRunner`.
+Model inference happens at Anthropic. The **Hub** holds the API key, every conversation and
+the prompts. The **worker** runs the loop and executes the tools. Files never leave the
+worker; only what the model asks to see (file contents, command output) travels, as tool
+results.
 
-Driving the claude.ai consumer web UI through Playwright would break Anthropic's Consumer Terms,
-which prohibit automated access. The default adapter is therefore the official API; any
-web-bridge adapter stays optional and off by default.
+```mermaid
+sequenceDiagram
+  autonumber
+  participant X as LlmTaskExecutor (worker)
+  participant T as AgentTools (worker)
+  participant C as ConversationManager (Hub)
+  participant A as Anthropic API
+
+  X->>C: PROMPT_EXECUTION {conversationId, turn 0}
+  C->>C: owner? budget? build system prompt (role) + task prompt (spec, rework feedback)
+  C->>A: messages.stream (tools, cache_control, effort, fallbacks) via concurrency queue
+  A-->>C: assistant content (thinking + text + tool_use)
+  C->>C: append verbatim to history, record usage/cost on the task
+  C-->>X: PROMPT_RESULT {text, toolCalls, usage}
+  loop until the model calls finish
+    X->>T: execute each tool call (validated, confined to checkout)
+    T-->>X: results (FILE_OPERATION sent for edits)
+    X->>C: PROMPT_EXECUTION {turn n, toolResults}
+    C->>C: results must answer exactly the pending tool_use ids
+    C->>A: history + tool_result blocks
+    A-->>C: next assistant turn
+    C-->>X: PROMPT_RESULT
+  end
+  X->>X: completeTask(commit_message) → push → STATUS completed
+```
+
+### Why the Hub holds the conversation
+
+- **The model's messages can't be forged.** Workers send only tool results. They can't inject
+  a system prompt, rewrite earlier turns or fabricate assistant messages.
+- **History is append-only.** Current models bind thinking blocks to the exact conversation
+  that produced them, and editing earlier turns invalidates them. The Hub appends each
+  response verbatim and never edits.
+- **Caching works.** The prefix (tools, system prompt, earlier turns) is byte-stable, and a
+  top-level `cache_control` caches it, so each turn re-reads history at the cache rate
+  (Opus 5.5: $0.20 vs $4 per million input tokens).
+- **Frames stay small.** Only the new tool results travel each turn, not the whole history.
+- **Costs are counted centrally.** One place counts tokens and enforces per-task budgets.
+
+### Request settings (`AnthropicApiAdapter`)
+
+| Setting | Value | Why |
+|---|---|---|
+| Model | `claude-opus-5-5` (configurable) | Default current Opus |
+| Transport | `client.beta.messages.stream(...).finalMessage()` | Long agentic turns; streaming avoids HTTP timeouts |
+| `max_tokens` | 32,000 per turn | Room for large file writes in one tool call |
+| `output_config.effort` | `high` (configurable) | Agentic coding benefits from effort; `medium` is Opus 5.5's default |
+| Thinking | Not set (adaptive) | Opus 5.5 rejects disabling it; history keeps the blocks |
+| `cache_control` | `{type: "ephemeral"}` (automatic) | Caches the growing prefix |
+| `fallbacks` | `"default"` + `server-side-fallback-2026-07-01` | If the model declines for policy reasons, Anthropic retries on its recommended fallback model |
+| Tools | `eager_input_streaming: true`; inputs validated on the worker | Large file contents stream as generated |
+
+### Error handling
+
+| Situation | Hub answer | Worker reaction |
+|---|---|---|
+| No API key | error, not retryable | Task `failed` ("no LLM configured") |
+| Rate limit, 5xx, connection, unparseable stream | error, retryable; turn not committed | Retry the same turn after 2/5/15/30/60 s |
+| `stop_reason: max_tokens` | error, retryable; not committed | Retry |
+| `stop_reason: refusal` (after fallbacks) | error, not retryable | Task `failed` with the category |
+| Bad key, bad request, credits exhausted | error, not retryable | Task `failed` with the API's message |
+| Task over budget | error, not retryable | Task `failed`; raise `--task-budget` and resubmit |
+| Retry of an answered turn (same or new requestId) | Cached answer; the model is not called again | — |
+
+### Tools and their limits
+
+| Tool | Behaviour |
+|---|---|
+| `list_files` | `git ls-files` (tracked and untracked, honours `.gitignore`); up to 2,000 entries |
+| `read_file` | Numbered lines; `offset`/`limit` (default first 2,000 lines); refuses binaries |
+| `search` | `git grep -E` over tracked and untracked files; up to 300 matches |
+| `write_file` / `edit_file` / `delete_file` | Exact-match edits (unique unless `replace_all`); protected files refused; reported via `FILE_OPERATION` |
+| `run_command` | argv without a shell; `CI=1`; default 120 s timeout (max 900); `git`, shells, `sudo` and `npm install`-style commands refused |
+| `request_dependency` | Phase 4 flow; returns once installed and rebased |
+| `finish` | Ends the loop with a summary and commit message; refused if other calls in the same turn failed |
+
+**Limits and safety:**
+
+- **Output cap.** Each tool result is capped at 50,000 characters, and a turn's results at
+  about 1.2 MB, which keeps them under the 2 MB frame limit.
+- **Untrusted paths.** Every model-supplied path is checked twice. The schema forbids absolute
+  paths, `..` and `.git`. The worker then resolves the real path (following symlinks) and
+  rejects anything outside the checkout.
+- **Turn and budget limits.** A conversation is capped at 80 turns, and each task at its
+  budget (default $5, estimated).
+- **Idle conversations.** These are dropped after 30 minutes, and as soon as their task is no
+  longer being implemented by that node.
+
+### Cost accounting
+
+Each response's token usage (input, output, cache read, cache write) is priced from the Hub's
+table (`llm/pricing.ts`, standard API rates as of 2026-10). Cost is added to the task
+(`task.llm`) and the Hub totals (`/api/llm`). Refused turns are counted too, because they are
+billed.
+
+The figures are estimates: with fallbacks, the price used is that of the model that answered.
+Console billing is authoritative.
+
+### Credentials
+
+The Hub uses an Anthropic API key (`ANTHROPIC_API_KEY`). This is the documented route for
+applications built on Claude, and it can draw on the monthly API credits included with Max
+and Team plans. Consumer subscription logins (claude.ai and Claude Code OAuth) are not used:
+Anthropic's terms reserve them for ordinary use of Anthropic's own apps. Automated access to
+the claude.ai web UI (e.g. Playwright) is prohibited by the Consumer Terms. The `LlmAdapter`
+interface leaves room for other compliant providers (e.g. Claude on Bedrock or Vertex AI).
 
 ## 11. Agent roles (planned)
 

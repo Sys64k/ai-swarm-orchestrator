@@ -15,8 +15,6 @@ import {
 
 process.env.ASO_LOG_LEVEL ??= "error";
 
-let nextPort = 18_000 + Math.floor(Math.random() * 500) * 2;
-
 const GIT_ENV = {
   ...process.env,
   GIT_AUTHOR_NAME: "Test",
@@ -70,10 +68,11 @@ export async function withHub(
   fn: (ctx: HubContext) => Promise<void>,
   opts: Partial<HubOptions> & { files?: Record<string, string> } = {},
 ) {
-  const port = nextPort++;
   const { files, ...hubOpts } = opts;
   const repoDir = makeTargetRepo(files);
-  const hub = await startHub({ targetDir: repoDir, port, host: "127.0.0.1", ...hubOpts });
+  // Port 0: test files run in parallel processes, so let the OS pick free ports.
+  const hub = await startHub({ targetDir: repoDir, port: 0, host: "127.0.0.1", ...hubOpts });
+  const port = hub.port;
   try {
     await fn({ hub, port, repoDir, gitUrl: `http://127.0.0.1:${port}/git/project.git` });
   } finally {

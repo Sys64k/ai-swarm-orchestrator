@@ -6,6 +6,7 @@ import {
   type MessageOf,
   type PayloadInput,
   type TaskKind,
+  type LlmUsage,
   type TaskSpec,
 } from "@aso/shared";
 import type { HubRepository } from "./git/hub-repo.js";
@@ -54,6 +55,10 @@ export interface TaskRecord {
   /** Merge commit on main. */
   mainCommit?: string;
   qaSetup?: string[][];
+  /** Accumulated model usage for this task (estimated cost). */
+  llm: { calls: number } & LlmUsage;
+  /** Files the agent reported touching (FILE_OPERATION), most recent last. */
+  filesTouched: string[];
   createdAt: string;
   updatedAt: string;
   waitingReason?: string;
@@ -147,6 +152,8 @@ export class TaskManager {
       qaAttempts: 0,
       drops: 0,
       reworkRound: 0,
+      llm: { calls: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0 },
+      filesTouched: [],
       createdAt: now,
       updatedAt: now,
       history: [],
@@ -216,6 +223,32 @@ export class TaskManager {
       (task.state === "assigned" || task.state === "in_progress") &&
       task.detachedAt === undefined
     );
+  }
+
+  recordLlmUsage(taskId: string, usage: LlmUsage): void {
+    const task = this.tasks.get(taskId);
+    if (!task) return;
+    const l = task.llm;
+    l.calls++;
+    l.inputTokens += usage.inputTokens;
+    l.outputTokens += usage.outputTokens;
+    l.cacheReadTokens += usage.cacheReadTokens;
+    l.cacheWriteTokens += usage.cacheWriteTokens;
+    l.costUsd = Math.round((l.costUsd + usage.costUsd) * 1e6) / 1e6;
+  }
+
+  /** Track an agent's file edit. Returns an error string if the sender isn't implementing the task. */
+  recordFileOperation(nodeId: string, op: MessageOf<"FILE_OPERATION">["payload"]): string | undefined {
+    if (!this.isImplementing(nodeId, op.taskId)) return `task ${op.taskId} is not being implemented by ${nodeId}`;
+    const task = this.tasks.get(op.taskId)!;
+    for (const p of op.op === "rename" ? [op.path, op.newPath] : [op.path]) {
+      const i = task.filesTouched.indexOf(p);
+      if (i >= 0) task.filesTouched.splice(i, 1);
+      task.filesTouched.push(p);
+    }
+    if (task.filesTouched.length > 500) task.filesTouched.splice(0, task.filesTouched.length - 500);
+    this.touch(task);
+    return undefined;
   }
 
   /** Add an entry to a task's history (used by other Hub components). */

@@ -5,13 +5,14 @@ import { rmSync } from "node:fs";
 import { startHub, type HubHandle } from "@aso/hub";
 import { connect as connectTo, makeTargetRepo } from "./helpers.ts";
 
-const PORT = 17_900 + Math.floor(Math.random() * 90);
+let PORT: number;
 let hub: HubHandle;
 let repoDir: string;
 
 before(async () => {
   repoDir = makeTargetRepo();
-  hub = await startHub({ targetDir: repoDir, port: PORT, host: "127.0.0.1" });
+  hub = await startHub({ targetDir: repoDir, port: 0, host: "127.0.0.1" });
+  PORT = hub.port;
 });
 after(async () => {
   await hub.close();

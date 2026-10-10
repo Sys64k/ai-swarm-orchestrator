@@ -18,6 +18,12 @@ services:
       ASO_TEST_COMMAND: "${ASO_TEST_COMMAND:-npm test}"
       ASO_QA: "${ASO_QA:-1}"
       ASO_ALLOW_DEPS: "${ASO_ALLOW_DEPS:-}"
+      ASO_MODEL: "${ASO_MODEL:-claude-opus-5-5}"
+      ASO_EFFORT: "${ASO_EFFORT:-high}"
+      ASO_TASK_BUDGET: "${ASO_TASK_BUDGET:-5}"
+      ASO_LLM_CONCURRENCY: "${ASO_LLM_CONCURRENCY:-2}"
+      # Read from the environment of `aso start-hub --docker`; never baked into the image.
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
     restart: unless-stopped
 
 volumes:

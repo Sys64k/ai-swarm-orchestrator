@@ -1,5 +1,7 @@
 #!/usr/bin/env node
+import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import { Command, InvalidArgumentError } from "commander";
 import {
   DEFAULT_DASHBOARD_PORT,
@@ -8,11 +10,18 @@ import {
   WorkerRoleSchema,
   type WorkerRole,
 } from "@aso/shared";
+import type { Effort } from "@aso/hub";
+import { llmCheckCommand } from "./commands/llm-check.js";
 import { startHubCommand } from "./commands/start-hub.js";
 import { startWorkerCommand } from "./commands/start-worker.js";
 import { updateCommand } from "./commands/update.js";
 
 const pkg = createRequire(import.meta.url)("../package.json") as { name: string; version: string };
+
+// Settings such as ANTHROPIC_API_KEY can live in <aso>/.env (git-ignored). Variables already set
+// in the shell take precedence over the file.
+const envFile = fileURLToPath(new URL("../../../.env", import.meta.url));
+if (existsSync(envFile)) process.loadEnvFile(envFile);
 
 function parsePort(value: string): number {
   const n = Number(value);
@@ -30,6 +39,19 @@ function parseRoles(value: string): WorkerRole[] {
   }
   return [...new Set(roles)] as WorkerRole[];
 }
+
+function parseUsd(value: string): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) throw new InvalidArgumentError("must be a positive number of USD");
+  return n;
+}
+
+function parseEffort(value: string): Effort {
+  if (!EFFORTS.includes(value as Effort)) throw new InvalidArgumentError(`expected one of: ${EFFORTS.join(", ")}`);
+  return value as Effort;
+}
+
+const EFFORTS: Effort[] = ["low", "medium", "high", "xhigh", "max"];
 
 const program = new Command()
   .name("aso")
@@ -57,6 +79,10 @@ program
     "comma-separated npm packages agents may request (`@scope/*` allows a scope); default: any",
     process.env.ASO_ALLOW_DEPS || undefined,
   )
+  .option("--model <id>", "Claude model for agents", process.env.ASO_MODEL || "claude-opus-5-5")
+  .option("--effort <level>", `model effort: ${EFFORTS.join(", ")}`, parseEffort, (process.env.ASO_EFFORT as Effort) || "high")
+  .option("--task-budget <usd>", "estimated LLM spend cap per task", parseUsd, Number(process.env.ASO_TASK_BUDGET) || 5)
+  .option("--llm-concurrency <n>", "concurrent model requests", parsePort, Number(process.env.ASO_LLM_CONCURRENCY) || 2)
   .action(startHubCommand);
 
 program
@@ -67,6 +93,12 @@ program
   .option("-r, --roles <roles>", `roles to accept (default: ${WORKER_ROLES.join(",")})`, parseRoles)
   .option("-w, --work-dir <path>", "directory for task checkouts (default: ~/.aso/work)")
   .action(startWorkerCommand);
+
+program
+  .command("llm-check")
+  .description("Send one tiny request to verify ANTHROPIC_API_KEY and model access (costs a fraction of a cent)")
+  .option("--model <id>", "model to check", process.env.ASO_MODEL || "claude-opus-5-5")
+  .action(llmCheckCommand);
 
 program
   .command("update")

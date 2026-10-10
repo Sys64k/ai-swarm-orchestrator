@@ -17,7 +17,8 @@ import {
   type WorkerRole,
 } from "@aso/shared";
 import { profileHardware, sampleLoad } from "./hardware.js";
-import { JobRunner, unconfiguredExecutor, type TaskExecutor } from "./jobs.js";
+import { LlmTaskExecutor } from "./agent/executor.js";
+import { JobRunner, type TaskExecutor } from "./jobs.js";
 
 const log = createLogger("worker");
 
@@ -29,7 +30,7 @@ export interface WorkerOptions {
   roles?: WorkerRole[];
   /** Directory for task checkouts; also where the I/O benchmark runs. Default ~/.aso/work. */
   workDir?: string;
-  /** Does the implementation work. Defaults to one that fails until Phase 5 provides the LLM loop. */
+  /** Does the implementation work. Defaults to the LLM agent (model calls go through the Hub). */
   executor?: TaskExecutor;
   /** Skip the hardware scan and use this profile (tests). */
   hardware?: HardwareProfile;
@@ -86,7 +87,7 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
     workDir,
     gitUrl: hubGitUrl(url),
     nodeId,
-    executor: opts.executor ?? unconfiguredExecutor,
+    executor: opts.executor ?? new LlmTaskExecutor(),
     send,
   });
 
@@ -119,7 +120,7 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
           registered = true;
           log.info(`registered as ${msg.payload.nodeId} (roles: ${roles.join(", ")})`);
           for (const raw of outbox.splice(0)) socket.send(raw);
-          runner.resendPendingDependencies();
+          runner.resendPending();
           clearInterval(heartbeatTimer);
           heartbeatTimer = setInterval(() => {
             sampleLoad()
@@ -139,6 +140,9 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
           log.info(`QA run for ${msg.payload.taskId} @ ${msg.payload.commit.slice(0, 8)}`);
           send("STATUS_UPDATE", { state: "accepted", taskId: msg.payload.taskId });
           runner.enqueueTest(msg.payload);
+          break;
+        case "PROMPT_RESULT":
+          runner.handlePromptResult(msg.payload);
           break;
         case "DEPENDENCY_RESPONSE":
           runner.handleDependencyResponse(msg.payload);

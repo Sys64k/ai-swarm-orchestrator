@@ -4,3 +4,5 @@
 **/*.tsbuildinfo
 .git
 *.md
+.env*
+!.env.example

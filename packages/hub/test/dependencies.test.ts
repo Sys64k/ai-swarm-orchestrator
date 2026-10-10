@@ -286,10 +286,15 @@ describe("dependency requests (real worker)", () => {
           );
           assert.equal(record.state, "merged", record.history.map((h) => h.event).join("\n"));
           assert.deepEqual(observed, { dep: "^1.3.0", editKept: true, npmCiRan: true, mainCommit: observed.mainCommit });
-          assert.equal(
-            git(ctx.repoDir, "log", "--format=%s", "main"),
-            ["Merge task/pad: Use left-pad", "use left-pad", "chore(deps): add left-pad@^1.3.0", "init"].join("\n"),
-          );
+          // Commits made within the same second have no stable log order; check content and ancestry.
+          assert.deepEqual(git(ctx.repoDir, "log", "--format=%s", "main").split("\n").sort(), [
+            "Merge task/pad: Use left-pad",
+            "chore(deps): add left-pad@^1.3.0",
+            "init",
+            "use left-pad",
+          ]);
+          // The task commit was rebased onto the dependency commit.
+          assert.equal(git(ctx.repoDir, "log", "-1", "--format=%s", "main^2~1"), "chore(deps): add left-pad@^1.3.0");
           assert.ok(record.history.some((h) => /dependency request rejected: evil-pkg is not on the Hub's dependency allowlist/.test(h.event)));
         } finally {
           dev.stop();

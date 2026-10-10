@@ -20,3 +20,7 @@ export {
   type RoutingPolicy,
   type RoutingRequest,
 } from "./routing.js";
+export { AnthropicApiAdapter, LlmError, type Effort, type LlmAdapter, type LlmRequest, type LlmResponse } from "./llm/adapter.js";
+export { ConversationManager } from "./llm/conversations.js";
+export { priceUsage } from "./llm/pricing.js";
+export { systemPrompt, taskPrompt } from "./llm/prompts.js";

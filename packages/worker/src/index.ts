@@ -13,9 +13,13 @@ export {
   JobRunner,
   unconfiguredExecutor,
   type DependencyRequest,
+  type ModelReply,
+  type ModelTurn,
   type ExecutionContext,
   type TaskAssignment,
   type TaskExecutor,
   type TestExecution,
 } from "./jobs.js";
 export { runCommand, type CommandResult } from "./run-command.js";
+export { LlmTaskExecutor, ModelError } from "./agent/executor.js";
+export { AgentTools, TOOL_OUTPUT_LIMIT, type ToolCall, type ToolHost, type ToolResult } from "./agent/tools.js";

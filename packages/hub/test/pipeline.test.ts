@@ -240,7 +240,7 @@ console.log("greeting ok");
       { files: { "check.mjs": CHECK }, qa: { command: ["node", "check.mjs"] } },
     ));
 
-  it("reports a failed task when no executor is configured", () =>
+  it("fails the task with a clear reason when the Hub has no LLM configured", () =>
     withHub(async (ctx) => {
       const dir = tempDir("aso-w-");
       const dev = await startWorker({ hub: `127.0.0.1:${ctx.port}`, nodeId: "dev", roles: ["backend"], workDir: dir, hardware: hardware() });
@@ -248,7 +248,7 @@ console.log("greeting ok");
         await waitFor(() => ctx.hub.registry.has("dev"));
         await postTask(ctx.port, task("nobody-home"));
         const record = await waitFor(() => ctx.hub.tasks.get("nobody-home")?.state === "failed" && ctx.hub.tasks.get("nobody-home"));
-        assert.match(record.history.at(-1)!.event, /no agent executor configured/);
+        assert.match(record.history.at(-1)!.event, /no LLM configured on the Hub/);
       } finally {
         dev.stop();
         await dev.runner.idle();

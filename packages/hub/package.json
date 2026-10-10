@@ -13,10 +13,11 @@
     "build": "tsc -b"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0",
+    "@aso/shared": "*",
     "@hono/node-server": "^1.19.17",
     "@hono/node-ws": "^1.3.1",
     "hono": "^4.13.13",
-    "simple-git": "^4.0.2",
-    "@aso/shared": "*"
+    "simple-git": "^4.0.2"
   }
 }

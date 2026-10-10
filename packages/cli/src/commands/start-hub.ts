@@ -4,7 +4,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ARCHITECT_TMUX_SESSION, createLogger } from "@aso/shared";
-import { startHub } from "@aso/hub";
+import { startHub, type Effort } from "@aso/hub";
 
 const log = createLogger("cli");
 
@@ -19,6 +19,10 @@ export interface StartHubOptions {
   testCommand: string;
   qa: boolean;
   allowDeps?: string;
+  model: string;
+  effort: Effort;
+  taskBudget: number;
+  llmConcurrency: number;
 }
 
 export async function startHubCommand(opts: StartHubOptions): Promise<void> {
@@ -33,6 +37,12 @@ export async function startHubCommand(opts: StartHubOptions): Promise<void> {
     host: opts.host,
     qa: { enabled: qaEnabled, command: testCommand },
     allowDependencies: parseList(opts.allowDeps),
+    llm: {
+      model: opts.model,
+      effort: opts.effort,
+      taskBudgetUsd: opts.taskBudget,
+      concurrency: opts.llmConcurrency,
+    },
   });
   const dashboard = opts.dashboard ? launchDashboard(opts.dashboardPort, hub.port) : undefined;
   const architectStarted = opts.architect ? launchArchitect(hub.port) : false;
@@ -73,6 +83,10 @@ async function startHubInDocker(targetDir: string, opts: StartHubOptions): Promi
       ASO_TEST_COMMAND: parseTestCommand(opts.testCommand).join(" "),
       ASO_QA: opts.qa ? "1" : "0",
       ASO_ALLOW_DEPS: parseList(opts.allowDeps)?.join(",") ?? "",
+      ASO_MODEL: opts.model,
+      ASO_EFFORT: opts.effort,
+      ASO_TASK_BUDGET: String(opts.taskBudget),
+      ASO_LLM_CONCURRENCY: String(opts.llmConcurrency),
     },
   });
   const exited = new Promise<number>((resolve) => compose.on("exit", (code) => resolve(code ?? 1)));

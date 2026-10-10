@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { AddressInfo } from "node:net";
 import { Hono } from "hono";
 import { serve, type ServerType } from "@hono/node-server";
 import { createNodeWebSocket } from "@hono/node-ws";
@@ -16,6 +17,9 @@ import {
   type AgentMessage,
 } from "@aso/shared";
 import { DependencyManager } from "./dependencies.js";
+import { AnthropicApiAdapter, type Effort, type LlmAdapter } from "./llm/adapter.js";
+import { ConversationManager } from "./llm/conversations.js";
+import { hasPrice } from "./llm/pricing.js";
 import { gitHttpHandler } from "./git/http-backend.js";
 import { HubRepository, type DependencyInstaller } from "./git/hub-repo.js";
 import { NodeRegistry, type NodeTransport } from "./registry.js";
@@ -43,6 +47,16 @@ export interface HubOptions {
   allowDependencies?: readonly string[];
   /** Replaces the npm-based installer (tests). */
   dependencyInstaller?: DependencyInstaller;
+  llm?: {
+    /** Defaults to the Anthropic API adapter when ANTHROPIC_API_KEY is set; otherwise no LLM. */
+    adapter?: LlmAdapter;
+    model?: string;
+    effort?: Effort;
+    maxTokens?: number;
+    taskBudgetUsd?: number;
+    maxTurns?: number;
+    concurrency?: number;
+  };
 }
 
 export interface HubHandle {
@@ -72,6 +86,23 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     policies: opts.policies,
     reclaimGraceMs: opts.reclaimGraceMs,
     qa: opts.qa,
+  });
+  const llm = opts.llm ?? {};
+  const model = llm.model ?? "claude-opus-5-5";
+  const adapter =
+    llm.adapter ??
+    (process.env.ANTHROPIC_API_KEY
+      ? new AnthropicApiAdapter({ model, effort: llm.effort ?? "high", maxTokens: llm.maxTokens ?? 32_000 })
+      : undefined);
+  if (!adapter) log.warn("no LLM configured: set ANTHROPIC_API_KEY to let agents work");
+  else {
+    log.info(`LLM: ${adapter.name} ${adapter.model}`);
+    if (!hasPrice(adapter.model)) log.warn(`no price known for ${adapter.model}; cost estimates will read $0`);
+  }
+  const conversations = new ConversationManager(adapter, tasks, registry, {
+    taskBudgetUsd: llm.taskBudgetUsd,
+    maxTurns: llm.maxTurns,
+    concurrency: llm.concurrency,
   });
   const deps = new DependencyManager(repo, tasks, registry, {
     installer: opts.dependencyInstaller,
@@ -139,6 +170,16 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
         if (error) reject(conn, error, [], msg.id);
         return;
       }
+      case "PROMPT_EXECUTION": {
+        const error = conversations.handle(conn.nodeId, msg.payload);
+        if (error) reject(conn, error, [], msg.id);
+        return;
+      }
+      case "FILE_OPERATION": {
+        const error = tasks.recordFileOperation(conn.nodeId, msg.payload);
+        if (error) reject(conn, error, [], msg.id);
+        return;
+      }
       case "FEEDBACK_LOOP": {
         const error = tasks.handleFeedback(conn.nodeId, msg.payload);
         if (error) reject(conn, error, [], msg.id);
@@ -170,6 +211,8 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   );
 
   app.get("/api/nodes", (c) => c.json(registry.list()));
+
+  app.get("/api/llm", (c) => c.json(conversations.status()));
 
   app.get("/api/tasks", (c) => c.json(tasks.list()));
 
@@ -228,7 +271,9 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     s.once("error", reject);
   });
   injectWebSocket(server);
-  log.info(`listening on ${host}:${port} (ws ${WS_PATH}, git ${GIT_PATH}), target ${opts.targetDir}`);
+  // Port 0 asks the OS for a free port; report the one actually bound.
+  const boundPort = (server.address() as AddressInfo | null)?.port ?? port;
+  log.info(`listening on ${host}:${boundPort} (ws ${WS_PATH}, git ${GIT_PATH}), target ${opts.targetDir}`);
 
   // Half-open TCP connections (sleeping laptops, pulled cables) never fire onClose on their own.
   const sweep = setInterval(() => {
@@ -240,11 +285,12 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       setTimeout(() => node.transport.terminate(), 2000).unref();
     }
     tasks.sweepDetached();
+    conversations.sweep();
   }, Math.min(15_000, nodeTimeoutMs, opts.reclaimGraceMs ?? Infinity));
   sweep.unref();
 
   return {
-    port,
+    port: boundPort,
     registry,
     tasks,
     repo,

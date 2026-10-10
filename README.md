@@ -30,14 +30,14 @@ For the design, diagrams and protocol reference, see **[ARCHITECTURE.md](ARCHITE
 | 2 | Hardware profiling, node registry, hardware-aware task routing | ✅ Done |
 | 3 | Git flow: Hub-hosted repo over HTTP, task branches, push verification, QA pipeline, rework loop, auto-merge to `main` | ✅ Done |
 | 4 | Dependency requests: the Hub adds npm packages on `main`, workers rebase and `npm ci` | ✅ Done |
-| 5 | LLM gateway: prompt queue, provider adapters, **the agent loop that writes code** | ⏳ Planned |
+| 5 | LLM gateway on the Hub (Anthropic API), coding agent loop on workers, per-task cost tracking | ✅ Done |
 | 6 | Agent roles: per-role system prompts and tool scopes | ⏳ Planned |
 | 7 | GitHub sync (`git push origin main`), packaged global CLI, `aso update`, node authentication | ⏳ Planned. Until then nothing is pushed anywhere; all commits stay in the local target repo |
 
-The task pipeline runs end to end: routing, then checkout, push, Hub verification, QA, rework
-and merge. The only missing piece is the component that actually writes code. Until Phase 5
-adds the LLM agent loop, a worker started from the CLI reports implementation tasks as failed
-with "no agent executor configured". QA test runs work today.
+The whole loop runs end to end: a task is routed, and an agent on a worker explores and edits
+the code. The agent verifies its work, then the change is pushed, checked by the Hub, tested by
+QA, reworked if needed, and merged. Agents need an Anthropic API key on the Hub; see
+[Connecting Claude](#connecting-claude).
 
 ## What runs where
 
@@ -50,7 +50,53 @@ Workers stay out of containers because they need the real machine: accurate hard
 profiling, the host's Docker daemon for container builds, and local toolchains.
 
 Workers need no LLM credentials and no manual copy of the project. They clone it from the Hub
-automatically into `~/.aso/work/project`.
+automatically into `~/.aso/work/project`. Every model call goes through the Hub, which holds
+the only API key.
+
+## Connecting Claude
+
+Agents call Claude through the **Hub only**, using the official Anthropic API.
+
+1. **Get an API key.** Create an organization and key at [console.anthropic.com](https://console.anthropic.com).
+   - **On a Claude Max or Team plan:** link that Console organization to your plan under
+     **API credits**. The plan includes monthly API credits (e.g. $100/month on Max 5x)
+     that cover this usage.
+   - **When credits run out:** requests stop until next month, unless you buy credits or
+     turn on auto-reload. Nothing is charged to your plan.
+2. **Cap spending.** Give ASO its own workspace with a spend limit, and create the key there.
+3. **Put the key in `.env`** in the ASO folder, on the Hub machine:
+   ```bash
+   cp .env.example .env && chmod 600 .env   # then set ANTHROPIC_API_KEY=sk-ant-... in it
+   ```
+   The `aso` command loads it automatically.
+   - **Not shared:** `.env` is git-ignored and excluded from the Docker build context.
+   - **Overrides:** a variable already set in your shell takes precedence over the file.
+   - **Other settings:** the file can also hold defaults for the other options
+     (see `.env.example`).
+4. **Verify the key:**
+   ```bash
+   aso llm-check            # one tiny request; prints the reply and its cost
+   ```
+5. **Start the Hub.** With `--docker`, the key is passed into the container through the
+   environment rather than baked into the image.
+
+Only the Hub needs the key. Workers never see it, and never contact Anthropic directly.
+
+Your Claude subscription *login* (the one used by claude.ai and Claude Code) is not used.
+Anthropic's terms reserve it for their own apps. Automating claude.ai through a browser is
+prohibited outright.
+
+**Defaults** (all configurable on `start-hub`):
+
+| | Default | Flag |
+|---|---|---|
+| Model | `claude-opus-5-5` ($4 / $20 per million input/output tokens; cached input $0.20) | `--model` |
+| Effort | `high` | `--effort low…max` |
+| Spend cap per task (estimated) | $5 | `--task-budget` |
+| Concurrent model requests | 2 | `--llm-concurrency` |
+
+The dashboard and `GET /api/llm` show calls and estimated spend; each task shows its own
+turns and cost. Estimates use the Hub's price table. Your Console billing is authoritative.
 
 ## Quick start (from source)
 
@@ -118,8 +164,13 @@ rework rounds, and an event history.
 
 1. **Route.** The Hub picks the best idle worker for the task's role and hardware needs.
 2. **Implement.** The worker checks out `task/<id>` from the Hub. It starts from `main`, or
-   continues an existing branch when reworking. The agent edits files, then the worker commits
-   and pushes the branch back to the Hub.
+   continues an existing branch when reworking. The agent works through tools the worker
+   executes locally until it calls `finish`, and the worker commits and pushes the branch back
+   to the Hub. The tools are:
+   - `list_files`, `read_file`, `search`
+   - `write_file`, `edit_file`, `delete_file`
+   - `run_command` (no shell, no git)
+   - `request_dependency`
 3. **Verify.** The Hub checks that the reported commit is the head of `task/<id>` and doesn't
    touch `package.json` or lockfiles.
 4. **QA.** A QA worker checks out that exact commit, runs `npm ci` if the commit has a
@@ -178,6 +229,10 @@ Rules:
 | `--test-command <cmd>` | `npm test` | QA command, split on spaces, run without a shell |
 | `--no-qa` | | Merge verified work without a QA run |
 | `--allow-deps <list>` | any | npm packages agents may request; `@scope/*` allows a scope |
+| `--model <id>` | `claude-opus-5-5` | Claude model for agents |
+| `--effort <level>` | `high` | `low`, `medium`, `high`, `xhigh`, `max` |
+| `--task-budget <usd>` | `5` | Estimated LLM spend cap per task |
+| `--llm-concurrency <n>` | `2` | Concurrent model requests across all workers |
 | `--no-dashboard` | | Skip the dashboard (not supported with `--docker`) |
 | `--no-architect` | | Skip the Architect tmux session |
 
@@ -194,6 +249,12 @@ outgoing messages and sends them once it has registered again.
 | `-r, --roles <list>` | all | Comma-separated: `backend,frontend,qa,devops` |
 | `-w, --work-dir <path>` | `~/.aso/work` | Where the project checkout lives; the I/O benchmark runs here |
 
+### `aso llm-check`
+
+Sends one tiny request with `ANTHROPIC_API_KEY` to confirm the key, model access and credit
+balance. Prints the reply, the tokens used and the estimated cost (a fraction of a cent).
+`--model <id>` checks a different model.
+
 ### `aso update`
 
 Runs `npm install -g` on the latest CLI. Use `--spec <npm spec>` or the `ASO_UPDATE_SPEC`
@@ -205,6 +266,7 @@ finalised in Phase 7.
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/health` | Status, target directory, main branch, QA settings, connections, uptime |
+| `GET` | `/api/llm` | LLM status: model, queue, calls and estimated spend since start |
 | `GET` | `/api/nodes` | Registered nodes with hardware, latest heartbeat and current task |
 | `GET` | `/api/tasks` | All tasks with state, nodes, commits, rework round and history |
 | `GET` | `/api/tasks/:id` | A single task |
@@ -235,6 +297,9 @@ For the scoring formula, see [ARCHITECTURE.md](ARCHITECTURE.md#6-hardware-aware-
 | `ASO_TEST_COMMAND` | `npm test` | Default for `--test-command` (also passed into the container) |
 | `ASO_QA` | `1` | `0` disables QA (same as `--no-qa`) |
 | `ASO_ALLOW_DEPS` | *(any)* | Default for `--allow-deps` (also passed into the container) |
+| `ANTHROPIC_API_KEY` | *(none)* | Hub only. Without it, agents fail tasks with "no LLM configured" |
+| *(file)* `.env` | — | In the ASO folder: loaded by `aso` on start; shell variables override it. See `.env.example` |
+| `ASO_MODEL`, `ASO_EFFORT`, `ASO_TASK_BUDGET`, `ASO_LLM_CONCURRENCY` | see flags | Defaults for the LLM flags (also passed into the container) |
 | `ASO_UPDATE_SPEC` | `@aso/cli@latest` | Default source for `aso update` |
 
 ## Security notes
@@ -257,6 +322,17 @@ For the scoring formula, see [ARCHITECTURE.md](ARCHITECTURE.md#6-hardware-aware-
   - Nodes can't supply their own system prompts.
 - **Test commands.** QA commands come from the Hub's configuration, never from workers. They
   run without a shell, in their own process group, with a timeout.
+- **Agent tools are guardrails, not a sandbox.** They catch a cooperative model's mistakes:
+  - paths are confined to the checkout, including through symlinks
+  - protected files are refused
+  - `git`, shells, `sudo` and package installs are blocked in `run_command`
+
+  But the agent can run project code (tests, scripts) with the worker user's permissions.
+  What protects `main` is the Hub (push policy, protected-file verification, QA). Run workers
+  as a dedicated user on machines you're comfortable letting agents build on.
+- **API key.** It lives only on the Hub. With `--docker` it is passed into the container
+  through the environment, so anyone who can run `docker inspect` on the Hub machine can read
+  it.
 
 ## Development
 

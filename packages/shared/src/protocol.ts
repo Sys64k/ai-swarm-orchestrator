@@ -267,27 +267,51 @@ const DependencyResponsePayload = z.discriminatedUnion("outcome", [
   }),
 ]);
 
+/**
+ * One turn of an agent conversation. The Hub holds the conversation (system prompt, task,
+ * every model message including thinking blocks); the worker only sends the results of the
+ * tool calls the model made in the previous turn. Turn 0 starts the conversation.
+ */
 const PromptExecutionPayload = z.strictObject({
   requestId: z.uuid(),
-  taskId: TaskIdSchema.optional(),
-  /** The Hub selects the system prompt from the role; nodes cannot supply their own. */
-  role: AgentRoleSchema,
-  messages: z
+  taskId: TaskIdSchema,
+  conversationId: z.uuid(),
+  turn: z.number().int().min(0),
+  toolResults: z
     .array(
       z.strictObject({
-        role: z.enum(["user", "assistant"]),
-        content: z.string().min(1).max(500_000),
+        toolUseId: z.string().min(1).max(200),
+        content: z.string().max(200_000),
+        isError: z.boolean().default(false),
       }),
     )
-    .min(1),
+    .max(64)
+    .default([]),
 });
+
+export const LlmUsageSchema = z.strictObject({
+  inputTokens: z.number().int().nonnegative(),
+  outputTokens: z.number().int().nonnegative(),
+  cacheReadTokens: z.number().int().nonnegative(),
+  cacheWriteTokens: z.number().int().nonnegative(),
+  /** Estimate from the Hub's price table. */
+  costUsd: z.number().nonnegative(),
+});
+export type LlmUsage = z.infer<typeof LlmUsageSchema>;
 
 const PromptResultPayload = z.discriminatedUnion("outcome", [
   z.strictObject({
     requestId: z.uuid(),
     outcome: z.literal("ok"),
-    content: z.string(),
-    adapter: z.string(),
+    conversationId: z.uuid(),
+    turn: z.number().int().min(0),
+    /** Visible text the model wrote this turn. */
+    text: z.string(),
+    toolCalls: z.array(
+      z.strictObject({ id: z.string(), name: z.string(), input: z.record(z.string(), z.unknown()) }),
+    ),
+    stopReason: z.string(),
+    usage: LlmUsageSchema,
   }),
   z.strictObject({
     requestId: z.uuid(),
