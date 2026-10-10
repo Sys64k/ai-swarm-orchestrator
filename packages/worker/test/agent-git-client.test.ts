@@ -194,4 +194,50 @@ describe("AgentGitClient", () => {
     });
     assert.match(git(client.repoDir, "stash", "list"), /aso: syncWithMain/);
   });
+
+  it("reports whether startTask resumed an existing remote branch", async () => {
+    assert.equal((await client.startTask("feat-1")).resumed, false);
+    write(client.repoDir, "a.txt", "a\n");
+    await client.completeTask("a");
+    assert.equal((await client.startTask("feat-1")).resumed, true);
+  });
+
+  it("discardLocalChanges clears leftovers from a crashed job but keeps ignored files", async () => {
+    hubCommit(".gitignore", "node_modules/\n");
+    await client.startTask("feat-1");
+    write(client.repoDir, "README.md", "half-done edit\n");
+    write(client.repoDir, "stray/new.ts", "x\n");
+    write(client.repoDir, "node_modules/dep/index.js", "cached\n");
+
+    await client.discardLocalChanges();
+    assert.equal(git(client.repoDir, "status", "--porcelain"), "");
+    assert.equal(readFileSync(path.join(client.repoDir, "README.md"), "utf8"), "hello\n");
+    assert.ok(existsSync(path.join(client.repoDir, "node_modules/dep/index.js")));
+    assert.equal(client.currentTask, undefined);
+    await client.startTask("feat-2");
+  });
+
+  it("checkoutCommit checks out a commit on the task branch for QA", async () => {
+    await client.startTask("feat-1");
+    write(client.repoDir, "a.txt", "a\n");
+    const done = await client.completeTask("a");
+
+    const qaDir = path.join(root, "qa");
+    const qa = await AgentGitClient.cloneOrOpen(qaDir, origin);
+    await qa.checkoutCommit("feat-1", done.commit);
+    assert.equal(git(qaDir, "rev-parse", "HEAD"), done.commit);
+    assert.equal(readFileSync(path.join(qaDir, "a.txt"), "utf8"), "a\n");
+
+    const mainSha = git(origin, "rev-parse", "main");
+    await assert.rejects(qa.checkoutCommit("feat-1", "f".repeat(40)), /is not on task\/feat-1/);
+    await assert.rejects(qa.checkoutCommit("nope", mainSha), /does not exist on the Hub/);
+    await assert.rejects(qa.checkoutCommit("feat-1", "not-a-sha"));
+  });
+
+  it("cloneOrOpen repoints an existing checkout when the Hub address changes", async () => {
+    const moved = path.join(root, "moved.git");
+    git(root, "clone", "--quiet", "--bare", origin, moved);
+    const reopened = await AgentGitClient.cloneOrOpen(client.repoDir, moved);
+    assert.equal(git(reopened.repoDir, "remote", "get-url", "origin"), moved);
+  });
 });

@@ -32,9 +32,13 @@ interface TaskView {
   state: string;
   nodeId?: string;
   attempts: number;
+  reworkRound: number;
+  commit?: string;
+  mainCommit?: string;
+  detachedAt?: number;
   waitingReason?: string;
-  routing?: { reasons: string[] };
   detail?: string;
+  history: Array<{ at: string; event: string }>;
 }
 
 async function get<T>(path: string): Promise<T | null> {
@@ -112,7 +116,7 @@ export default async function Home() {
       <table style={{ borderCollapse: "collapse" }}>
         <thead>
           <tr>
-            {["Task", "Role / kind", "State", "Node", "Attempts", "Why"].map((h) => (
+            {["Task", "Role / kind", "State", "Node", "Rework", "Commit", "Latest"].map((h) => (
               <th key={h} style={cell}>{h}</th>
             ))}
           </tr>
@@ -125,11 +129,17 @@ export default async function Home() {
                 <div style={{ color: "#777", fontSize: "0.8em" }}>{t.spec.title}</div>
               </td>
               <td style={cell}>{t.spec.role} / {t.spec.kind}</td>
-              <td style={cell}>{t.state}</td>
+              <td style={cell}>
+                {t.state}
+                {t.detachedAt !== undefined && <div style={{ color: "#b45309", fontSize: "0.8em" }}>node offline, held</div>}
+              </td>
               <td style={cell}>{t.nodeId ?? "—"}</td>
-              <td style={cell}>{t.attempts}</td>
+              <td style={cell}>{t.reworkRound || "—"}</td>
+              <td style={cell}>
+                <code>{(t.mainCommit ?? t.commit)?.slice(0, 8) ?? "—"}</code>
+              </td>
               <td style={{ ...cell, fontSize: "0.85em" }}>
-                {t.state === "pending" ? t.waitingReason : (t.detail ?? t.routing?.reasons.join("; "))}
+                {t.state === "pending" && t.waitingReason ? t.waitingReason : t.history.at(-1)?.event}
               </td>
             </tr>
           ))}

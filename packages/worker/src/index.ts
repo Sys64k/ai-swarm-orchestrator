@@ -5,7 +5,15 @@ export {
   AgentGitError,
   ProtectedFileError,
   RebaseConflictError,
-  PROTECTED_FILENAMES,
   type AgentGitClientOptions,
   type CompletedTask,
 } from "./git/agent-git-client.js";
+export {
+  JobRunner,
+  unconfiguredExecutor,
+  type ExecutionContext,
+  type TaskAssignment,
+  type TaskExecutor,
+  type TestExecution,
+} from "./jobs.js";
+export { runCommand, type CommandResult } from "./run-command.js";

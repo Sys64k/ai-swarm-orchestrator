@@ -46,6 +46,12 @@ program
   .option("--no-dashboard", "do not launch the Next.js dashboard")
   .option("--no-architect", "do not launch the Architect tmux session")
   .option("--docker", "run the Hub and dashboard in Docker (Architect stays on the host)", false)
+  .option(
+    "--test-command <cmd>",
+    "QA test command, split on spaces, run without a shell",
+    process.env.ASO_TEST_COMMAND || "npm test",
+  )
+  .option("--no-qa", "merge verified work without a QA run")
   .action(startHubCommand);
 
 program

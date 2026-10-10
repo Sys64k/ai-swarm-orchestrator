@@ -23,10 +23,13 @@ and in most Markdown editors.
 - **Hub and spoke.** Every message goes through the Hub. Agents never talk to each other.
 - **Central control, local execution.** The Hub owns planning, routing, the canonical Git repo
   and LLM access. Workers own file edits, compilation and tests on their own hardware.
-- **Untrusted input everywhere.** Every WebSocket frame and API body is validated against strict
-  Zod schemas before use.
-- **No raw Git or package manager for agents.** Agents edit files. Branching, committing, pushing
-  and dependency changes go through narrow, typed wrappers.
+- **Pushed state is the truth.** Anything not pushed to the Hub can be thrown away. Workers
+  reset their checkout before every job, and reassigned tasks restart from the last pushed
+  branch.
+- **Untrusted input everywhere.** Every WebSocket frame, API body and Git push is validated
+  before use. The Hub also checks what workers already checked themselves.
+- **No raw Git or package manager for agents.** Agents edit files. Branching, committing,
+  pushing and dependency changes go through narrow, typed wrappers.
 - **The orchestrator is separate from the target project.** ASO runs from its own install and
   operates on the repository given by `--dir`.
 
@@ -36,58 +39,71 @@ and in most Markdown editors.
 flowchart TB
   subgraph HUBM["Hub machine (Ubuntu Server)"]
     direction TB
-    CLIH["aso start-hub --dir ~/project"]
-    HUB["Hub process<br/>Hono API + WebSocket :7420"]
-    DASH["Dashboard<br/>Next.js :7421"]
+    CLIH["aso start-hub --docker --dir ~/project"]
+    subgraph CTR["Docker container (runs as host uid)"]
+      HUB["Hub process<br/>API · WebSocket · Git HTTP :7420"]
+      DASH["Dashboard<br/>Next.js :7421"]
+      HUB --- DASH
+    end
     ARCH["Architect<br/>tmux session aso-architect"]
-    REPO[("Target project repo<br/>(canonical main)")]
-    LLM["LLM gateway<br/>(Phase 5)"]
-    CLIH --> HUB
-    CLIH --> DASH
-    CLIH --> ARCH
+    REPO[("Target project repo<br/>mounted at /project<br/>canonical main")]
+    CLIH -- "docker compose up" --> CTR
+    CLIH -- "tmux new-session" --> ARCH
     HUB --- REPO
-    HUB --- LLM
-    DASH -- "HTTP /api/*" --> HUB
-    ARCH -- "WebSocket" --> HUB
+    ARCH -- "WebSocket via published port" --> HUB
   end
 
-  subgraph W1["Worker: Pop!_OS"]
-    WA["aso start-worker"] --> WA_CO[("~/.aso/work<br/>checkout")]
+  subgraph W1["Worker: Pop!_OS (native)"]
+    WA["aso start-worker"] --> WA_CO[("~/.aso/work/project")]
   end
-  subgraph W2["Worker: CachyOS"]
-    WB["aso start-worker"] --> WB_CO[("~/.aso/work<br/>checkout")]
+  subgraph W2["Worker: CachyOS (native)"]
+    WB["aso start-worker"] --> WB_CO[("~/.aso/work/project")]
   end
-  subgraph W3["Worker: Ubuntu + Docker"]
-    WC["aso start-worker"] --> WC_CO[("~/.aso/work<br/>checkout")]
+  subgraph W3["Worker: Ubuntu + Docker (native)"]
+    WC["aso start-worker"] --> WC_CO[("~/.aso/work/project")]
   end
 
   WA -- "WebSocket /ws" --> HUB
   WB -- "WebSocket /ws" --> HUB
   WC -- "WebSocket /ws" --> HUB
-  WA_CO -. "git fetch / push (Phase 3)" .- REPO
-  WB_CO -. "git fetch / push (Phase 3)" .- REPO
-  WC_CO -. "git fetch / push (Phase 3)" .- REPO
-  LLM -. "Phase 5" .-> EXT(["LLM provider"])
+  WA_CO -- "git fetch / push task/*" --> HUB
+  WB_CO -- "git fetch / push task/*" --> HUB
+  WC_CO -- "git fetch / push task/*" --> HUB
+  HUB -. "Phase 5" .-> EXT(["LLM provider"])
+  REPO -. "Phase 7: push origin main" .-> GH(["GitHub"])
 ```
 
-Today all of this runs directly on the host. The Hub and dashboard are not containerized yet.
+### Two ways to run the Hub
 
-`aso start-hub` runs three processes:
+| | `aso start-hub --docker` | `aso start-hub` |
+|---|---|---|
+| Hub + dashboard | `docker compose up --build` (attached, logs stream to the terminal) | In-process, with the dashboard as a child process |
+| Architect | tmux on the host; connects after `/api/health` answers | tmux on the host |
+| Target repo | Bind-mounted at `/project` | Used in place |
+| Use for | Deployment | Development and tests |
 
-1. The **Hub** runs in-process: the API, the WebSocket server, the registry, the router and
-   the task queue.
-2. The **dashboard** is a child process. It runs `next start` if built, `next dev` otherwise.
-3. The **Architect** runs in a detached tmux session. It connects back to the Hub over
-   WebSocket like any other node. It survives terminal disconnects and can be watched with
-   `tmux attach -t aso-architect`.
+**Container details:**
+
+- **User.** The Hub runs as the invoking user's uid and gid (`ASO_UID`/`ASO_GID`), so files it
+  writes into the mounted project keep the right owner.
+- **`safe.directory`.** Git's `safe.directory` is set to `*` inside the image, so a mount owned
+  by a different uid still works.
+- **`HOME`.** `HOME=/data` is a named volume, for state and caches in later phases.
+- **Process handling.** `init: true` makes signals and child-process reaping work.
+- **Shutdown.** Ctrl+C reaches compose through the terminal's process group. The CLI only
+  forwards signals that came from elsewhere, such as SIGTERM, because a second SIGINT would
+  make compose force-kill the container.
+
+Workers are never containerized. They need direct access to their hardware (for profiling and
+the disk benchmark), the host Docker daemon (for `container_build`), and local toolchains.
 
 ## 3. Components and packages
 
 ```mermaid
 flowchart LR
   shared["@aso/shared<br/>protocol · constants · logger"]
-  hub["@aso/hub<br/>server · registry · router · tasks · architect"]
-  worker["@aso/worker<br/>client · hardware · AgentGitClient"]
+  hub["@aso/hub<br/>server · registry · router · tasks · git · architect"]
+  worker["@aso/worker<br/>client · jobs · hardware · AgentGitClient"]
   cli["@aso/cli<br/>aso command"]
   dash["@aso/dashboard<br/>Next.js"]
   hub --> shared
@@ -101,16 +117,21 @@ flowchart LR
 
 | Package | Key modules | Responsibility |
 |---|---|---|
-| `@aso/shared` | `protocol.ts` | `AgentMessageSchema`, task and hardware schemas, `createMessage`, `parseAgentMessage` |
-| `@aso/hub` | `server.ts` | HTTP API, WebSocket handling, validation pipeline, liveness sweep |
+| `@aso/shared` | `protocol.ts` | `AgentMessageSchema`, task and hardware schemas, `PROTECTED_FILENAMES`, `TASK_REF_PATTERN` |
+| | `hub-address.ts` | `resolveHubUrl` (ws URL), `hubGitUrl` (Git URL from the same host and port) |
+| `@aso/hub` | `server.ts` | HTTP API, WebSocket validation pipeline, Git route, liveness and reclaim sweep |
 | | `registry.ts` | `NodeRegistry`: connected nodes, heartbeats, busy state |
 | | `routing.ts` | `selectNode()`: a pure, deterministic routing function |
-| | `tasks.ts` | `TaskManager`: queue, dispatch, status handling, requeue |
+| | `tasks.ts` | `TaskManager`: queue, dispatch, verification, QA, rework, merge, node-loss handling |
+| | `git/http-backend.ts` | Git smart-HTTP via a `git http-backend` CGI bridge, with the push policy |
+| | `git/hub-repo.ts` | `HubRepository`: verify task commits, merge into main under a lock |
 | | `architect/main.ts` | Architect process (connect and register; planning comes in Phase 5/6) |
-| `@aso/worker` | `client.ts` | Connect, register, heartbeat, receive tasks |
+| `@aso/worker` | `client.ts` | Connect, register (with resume claim), heartbeat, offline outbox, dispatch jobs |
+| | `jobs.ts` | `JobRunner`: implementation jobs (via a `TaskExecutor`) and QA runs |
+| | `run-command.ts` | Shell-free command runner with process-group timeout |
 | | `hardware.ts` | `systeminformation` profile and disk write benchmark |
 | | `git/agent-git-client.ts` | The only Git interface agents get |
-| `@aso/cli` | `index.ts`, `commands/*` | Argument parsing and process orchestration |
+| `@aso/cli` | `index.ts`, `commands/*` | Argument parsing and process orchestration (native or Docker) |
 | `@aso/dashboard` | `app/page.tsx` | Read-only view of nodes and tasks |
 
 ## 4. Communication protocol
@@ -136,14 +157,14 @@ keys are rejected.
 
 | Type | Direction | Phase | Purpose |
 |---|---|---|---|
-| `NODE_REGISTRATION` | node → hub | 1 | First message. Workers send roles and hardware profile; the Architect sends only its kind |
+| `NODE_REGISTRATION` | node → hub | 1 | First message. Workers send roles, hardware profile and an optional `resume` claim (the job they are still running after a reconnect) |
 | `REGISTRATION_ACK` | hub → node | 1 | Registration accepted |
 | `NODE_HEARTBEAT` | node → hub | 2 | Every 15 s: free RAM, CPU load, Docker availability |
-| `TASK_ASSIGNMENT` | hub → node | 2 | A `TaskSpec` (role, kind, title, description, criteria, files) |
+| `TASK_ASSIGNMENT` | hub → node | 2 | A `TaskSpec`, plus `rework` (round, reason, failures, test output) when the task comes back |
 | `STATUS_UPDATE` | node → hub | 2 | `accepted`, `in_progress`, `waiting_*`, `completed` (with commit), `failed`, `idle` |
-| `FILE_OPERATION` | node → hub | 3 | Audit trail of create, update, delete and rename |
-| `TEST_EXECUTION` | hub → node | 3 | QA: test a specific commit with a given argv |
-| `FEEDBACK_LOOP` | node → hub | 3 | QA verdict: `pass`, or `fail` with at least one failure |
+| `TEST_EXECUTION` | hub → node | 3 | QA: test an exact commit with `setup` steps and a `command` argv |
+| `FEEDBACK_LOOP` | node → hub | 3 | QA verdict: `pass`, or `fail` with at least one failure and the output tail |
+| `FILE_OPERATION` | node → hub | 5 | Audit trail of agent file edits (sent by the agent loop) |
 | `DEPENDENCY_REQUEST` | node → hub | 4 | Ask the Hub to add an npm package |
 | `DEPENDENCY_RESPONSE` | hub → node | 4 | `installed` (with the main commit) or `rejected` |
 | `PROMPT_EXECUTION` | node → hub | 5 | LLM request. No system prompt: the Hub picks it by role |
@@ -165,12 +186,15 @@ flowchart TD
   D -- yes --> R{"NODE_REGISTRATION?"}
   R -- yes --> U{"node id unused?"}
   U -- no --> EC["PROTOCOL_ERROR + close 4009"]
-  U -- yes --> REG["register → REGISTRATION_ACK → dispatch"]
+  U -- yes --> REG["register → ACK → reattach held jobs → dispatch"]
   R -- no --> REGD{"connection<br/>registered?"}
   REGD -- no --> E
   REGD -- yes --> ID{"envelope from =<br/>registered id?"}
   ID -- no --> E
-  ID -- yes --> H["touch lastSeen → handler<br/>(heartbeat, status, ...)"]
+  ID -- yes --> H["touch lastSeen → handler"]
+  H --> OWN{"sender owns the task<br/>(status / feedback)?"}
+  OWN -- no --> E
+  OWN -- yes --> OK["apply"]
 ```
 
 Schema-level rules worth knowing:
@@ -195,32 +219,50 @@ sequenceDiagram
 
   Note over W: aso start-worker<br/>profile CPU, RAM, Docker,<br/>benchmark disk in work dir
   W->>H: WebSocket connect /ws
-  W->>H: NODE_REGISTRATION {roles, hardware}
+  W->>H: NODE_REGISTRATION {roles, hardware, resume?}
   H->>H: validate, check id unique
   H-->>W: REGISTRATION_ACK
-  H->>T: dispatch() (pending tasks may fit this node)
+  W->>H: flush outbox (messages queued while offline)
+  H->>T: nodeRegistered (reattach held job if resume matches)
+  H->>T: dispatch()
   loop every 15 s
     W->>H: NODE_HEARTBEAT {free RAM, CPU %, docker}
-    H->>H: update load and lastSeen
   end
-  alt clean disconnect
-    W-->>H: socket close
-    H->>T: handleNodeGone → requeue in-flight task
+  alt socket closes
+    H->>T: handleNodeGone
   else silent for 60 s (sleep, cable pulled)
-    H->>H: liveness sweep: unregister + requeue immediately
+    H->>T: liveness sweep → handleNodeGone immediately
     H-->>W: close 4008, hard terminate after 2 s
   end
-  Note over W: reconnect with exponential backoff (max 30 s)
+  Note over W: keeps running its current job,<br/>reconnects with backoff (max 30 s)
 ```
 
-Notes:
+### When a node drops off the network
 
-- **Node ids** are `<hostname>-<random>` for workers and `architect-<uuid>` for the Architect.
-  They are fixed for the life of the process, so a reconnect reuses the same id.
-- **Stale closes.** Unregistering is tied to the connection. A late `close` event from an old
-  socket cannot evict a node that has already reconnected under the same id.
-- **Architect keepalive.** The Architect has no load metrics, so it keeps itself alive by
-  sending `STATUS_UPDATE {state: "idle"}` every 15 s.
+```mermaid
+flowchart TD
+  G["Node lost<br/>(close or 60 s silence)"] --> S{"had it started the job?<br/>(in_progress / QA running)"}
+  S -- "no (assigned / accepted)" --> RQ["Requeue now<br/>(drops + 1)"]
+  S -- yes --> HOLD["Hold task for that node<br/>detachedAt = now"]
+  HOLD --> BACK{"node re-registers<br/>within 5 min?"}
+  BACK -- "yes, resume claim matches" --> RES["Reattach: node continues;<br/>outbox delivers its updates"]
+  BACK -- "yes, no claim (restarted)" --> RQ
+  BACK -- "no (grace expires)" --> RQ2["Requeue from last pushed state;<br/>old node is fenced:<br/>its updates get PROTOCOL_ERROR"]
+  RQ --> L{"drops ≥ 3?"}
+  RQ2 --> L
+  L -- yes --> FAIL["failed"]
+  L -- no --> DISP["dispatch to best node"]
+```
+
+Holding a started job is cheap. LLM access is centralized, so a disconnected worker can't make
+progress anyway; it is effectively paused. A short network blip therefore costs nothing.
+
+**Node ids** are `<hostname>-<random>` for workers and `architect-<uuid>` for the Architect.
+They are fixed for the life of the process, so a reconnect reuses the same id.
+
+**Stale closes.** Unregistering is tied to the connection, so a late `close` event from an old
+socket can't evict a node that has already reconnected. The Architect has no load metrics; it
+keeps itself alive by sending `STATUS_UPDATE {state: "idle"}` every 15 s.
 
 ## 6. Hardware-aware routing
 
@@ -233,12 +275,13 @@ Notes:
 | Free RAM, CPU load %, Docker daemon reachable | `systeminformation` | Every heartbeat (15 s) |
 
 The disk benchmark runs in the **work directory**, not `/tmp`. On CachyOS and similar
-distributions `/tmp` is tmpfs and would report RAM speed. The work directory is where checkouts,
-builds and test databases actually live.
+distributions `/tmp` is tmpfs and would report RAM speed.
 
 ### Algorithm
 
 `selectNode(request, nodes, policies)` in `packages/hub/src/routing.ts` is a pure function.
+QA runs use the same router with `role: "qa"` and the configured QA kind (default
+`unit_test`).
 
 ```mermaid
 flowchart TD
@@ -285,43 +328,124 @@ adding a faster machine changes which node is "best" without retuning anything.
 ```mermaid
 stateDiagram-v2
   [*] --> pending: submitted (API / Architect)
-  pending --> assigned: router picks node → TASK_ASSIGNMENT
-  assigned --> in_progress: STATUS_UPDATE in_progress / waiting_*
-  assigned --> pending: node lost (attempts < 3)
-  in_progress --> pending: node lost (attempts < 3)
-  assigned --> failed: node lost (attempts = 3)
-  in_progress --> failed: node lost (attempts = 3)
-  in_progress --> completed: STATUS_UPDATE completed + commit
-  in_progress --> failed: STATUS_UPDATE failed
-  completed --> [*]
+  pending --> assigned: TASK_ASSIGNMENT
+  assigned --> in_progress: worker started
+  assigned --> pending: node lost (not started)
+  in_progress --> in_progress: node lost → held, node resumes
+  in_progress --> pending: held too long / node lost the job
+  in_progress --> verifying: completed + commit
+  in_progress --> failed: worker reports failed
+  verifying --> awaiting_qa: commit is branch head, no protected files
+  verifying --> pending: rework (bad push)
+  verifying --> merging: QA disabled
+  awaiting_qa --> testing: TEST_EXECUTION
+  testing --> awaiting_qa: QA node could not run / lost
+  testing --> merging: FEEDBACK_LOOP pass
+  testing --> pending: rework (FEEDBACK_LOOP fail)
+  merging --> merged: merge commit on main
+  merging --> pending: rework (merge conflict)
+  merging --> failed: merge blocked (dirty Hub checkout)
+  merged --> [*]
   failed --> [*]
 ```
 
-- **Queue order.** The queue is FIFO. `dispatch()` runs whenever something could unblock a task:
-  a submission, a node registering, a task completing or failing, or a node leaving.
-- **One task per node.** The node is marked busy at assignment and released on `completed` or
-  `failed`.
-- **Ownership.** Status updates are accepted only from the node that owns the task. Any other
-  node gets a `PROTOCOL_ERROR`.
-- **Phase 3 additions.** The QA states `testing`, `merged` and `rejected` will be added here.
+| Limit | Default | When exceeded |
+|---|---|---|
+| Node losses per task (`maxDrops`) | 3 | `failed` |
+| Rework rounds (`maxReworkRounds`) | 3 | `failed` |
+| QA infrastructure failures (`maxQaAttempts`) | 3 | `failed` |
+| Grace period for started jobs (`reclaimGraceMs`) | 5 min | requeue |
+
+- **Queue order.** The queue is FIFO. `dispatch()` runs whenever something could unblock a task.
+- **One task per node.** The node is marked busy at assignment and released when its part
+  ends: implementation completed or failed, or QA verdict reported.
+- **Ownership.** Status updates and verdicts are accepted only from the node that currently
+  owns that stage of the task.
+- **History.** Every task keeps an event history (last 50 entries), shown by
+  `GET /api/tasks/:id` and the dashboard.
 
 ## 8. Git flow
 
-### Implemented: `AgentGitClient`
+### End to end
 
-Agents cannot run `git`. The worker wraps `simple-git` in four operations:
+```mermaid
+sequenceDiagram
+  autonumber
+  participant H as Hub (TaskManager)
+  participant R as Hub repo (/git/project.git)
+  participant W as Implementer worker
+  participant Q as QA worker
+
+  H->>W: TASK_ASSIGNMENT {spec, rework?}
+  W->>W: discardLocalChanges()
+  W->>R: clone / fetch
+  W->>W: startTask → task/<id> from origin/task/<id> or origin/main
+  opt resuming an existing branch
+    W->>W: syncWithMain() (rebase onto latest main)
+  end
+  W->>H: STATUS in_progress
+  W->>W: executor.implement() — the agent edits files (Phase 5)
+  W->>R: completeTask → commit + push task/<id> (push policy checked)
+  W->>H: STATUS completed {commit}
+  H->>R: verify: commit = head of task/<id>, no protected files
+  H->>Q: TEST_EXECUTION {commit, setup, command}
+  Q->>R: fetch, checkout --detach commit (must be on task/<id>)
+  Q->>Q: setup (npm ci if package-lock.json) then tests, no shell, timeout
+  alt tests pass
+    Q->>H: FEEDBACK_LOOP pass
+    H->>R: lock main → merge --no-ff → unlock
+  else tests fail
+    Q->>H: FEEDBACK_LOOP fail {failures, output}
+    H->>W: TASK_ASSIGNMENT {rework: round, reason, failures, output}
+  end
+```
+
+### The Hub's Git endpoint
+
+`/git/project.git` is Git smart-HTTP, implemented as a CGI bridge to `git http-backend`
+running against the target directory:
+
+1. Only `info/refs`, `HEAD`, `git-upload-pack` and `git-receive-pack` are routed. Everything
+   else returns 404, so the endpoint never serves arbitrary files.
+2. For pushes, the Hub parses the ref-update commands at the start of the `git-receive-pack`
+   request body and applies the **push policy** before git sees the request:
+
+| Allowed | Refused (HTTP 403) |
+|---|---|
+| Create or update `refs/heads/task/<id>` | `main` or any other branch, tags, deletions, signed pushes |
+
+Pushes land as branch refs in the Hub repo without touching its checked-out `main`.
+
+### Verification and merge (`HubRepository`)
+
+**Before QA** the Hub re-checks the worker's claim:
+
+- `task/<id>` exists and its head equals the reported commit.
+- There are changes relative to `main`.
+- No protected file changed. This is the same `PROTECTED_FILENAMES` list the worker enforces,
+  so a buggy or modified worker can't sneak lockfile changes past QA.
+
+**Merging** the tested commit, not whatever the branch points to now, runs under a `main` lock
+(Phase 4's dependency installs will share it):
+
+| Situation | Result |
+|---|---|
+| Clean checkout on `main` | `git merge --no-ff` as "ASO Hub" → `merged` |
+| Conflict with `main` | `merge --abort`, checkout left clean → rework round asking the worker to rebase |
+| Checkout dirty or on another branch | `failed: merge blocked` (an operator problem, not a code problem) |
+
+### Worker side: `AgentGitClient`
+
+Agents cannot run `git`. The worker wraps `simple-git`:
 
 | Method | Behaviour |
 |---|---|
-| `cloneOrOpen(dir, url)` | Use an existing checkout, or clone the Hub repo |
-| `startTask(id)` | Requires a clean tree. Fetches, then checks out `task/<id>` from `origin/task/<id>` if it exists (rework), otherwise from `origin/main` |
-| `completeTask(msg)` | Rejects changes to protected files. Stages everything, commits as the agent identity, pushes with `--force-with-lease` |
-| `syncWithMain()` | Stashes uncommitted edits, rebases onto `origin/main`, restores edits. Conflicts abort cleanly |
-
-**Protected files** may not change on task branches, anywhere in the tree: `package.json`,
-`package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lock` and
-`bun.lockb`. The check covers both uncommitted edits and commits already on the branch
-(`origin/main...HEAD`), so committing first can't get around it.
+| `cloneOrOpen(dir, url)` | Use an existing checkout (repointing `origin` if the Hub moved), or clone |
+| `discardLocalChanges()` | Abort any rebase or merge, `reset --hard`, `clean -fd` (keeps ignored files such as `node_modules`). Runs before every job |
+| `startTask(id)` | Requires a clean tree; checks out `task/<id>` from `origin/task/<id>` (`resumed: true`) or `origin/main` |
+| `completeTask(msg)` | Rejects protected files (uncommitted edits and commits since `origin/main`), stages, commits as the agent identity, pushes with `--force-with-lease` |
+| `syncWithMain()` | Stashes edits, rebases onto `origin/main`, restores edits; conflicts abort cleanly (see below) |
+| `checkoutCommit(id, sha)` | QA: fetch, ensure `sha` is on `origin/task/<id>`, detached checkout |
 
 ```mermaid
 flowchart TD
@@ -342,43 +466,26 @@ flowchart TD
 ```
 
 simple-git does not reject when git exits non-zero with an empty stderr. That happens, for
-example, with `rev-parse --verify --quiet` and with a conflicting `stash pop`. The client
-therefore checks command output and repository state directly instead of relying on exceptions.
+example, with `rev-parse --verify --quiet` and with a conflicting `stash pop`. The client and
+`HubRepository` therefore check command output and repository state directly instead of
+relying on exceptions.
 
-### Planned: end-to-end flow (Phase 3)
+### QA runs
 
-```mermaid
-sequenceDiagram
-  autonumber
-  participant A as Architect
-  participant H as Hub
-  participant W as Feature worker
-  participant Q as QA worker
-  participant G as GitHub (origin)
+The worker runs `setup` steps, then `command`, each through `runCommand`:
 
-  A->>H: task specs
-  H->>W: TASK_ASSIGNMENT
-  W->>H: git fetch (Hub repo)
-  W->>W: startTask → edit files (LLM loop)
-  W->>H: completeTask → push task/<id>
-  W->>H: STATUS_UPDATE completed {commit}
-  H->>Q: TEST_EXECUTION {taskId, commit}
-  Q->>H: git fetch task/<id>
-  Q->>Q: run tests locally
-  alt pass
-    Q->>H: FEEDBACK_LOOP pass
-    H->>H: merge task/<id> → main
-    H->>G: git push origin main
-  else fail
-    Q->>H: FEEDBACK_LOOP fail {failures}
-    H->>W: TASK_ASSIGNMENT (rework, same task id)
-    Note over W: startTask resumes origin/task/<id>
-  end
-```
+- **No shell.** Commands come straight from the Hub's argv.
+- **Isolation.** Each command runs in its own process group, so a timeout kills the whole tree
+  (npm, then vitest, then its workers).
+- **Non-interactive.** `CI=1` keeps test runners out of watch mode.
+- **Output.** The last 50 KB of output is attached to a failing `FEEDBACK_LOOP`.
 
-Open decision for Phase 3: how workers reach the Hub repo. The options are git over SSH, or a
-Git smart-HTTP endpoint served by the Hub, which needs no per-worker SSH keys and lets the Hub
-reject pushes outside `task/*`.
+The QA worker distinguishes two kinds of failure:
+
+- **Infrastructure problems** (checkout failed, program not found): `STATUS_UPDATE failed`.
+  The Hub retries QA, possibly on another node.
+- **Code problems** (non-zero exit, timeout): `FEEDBACK_LOOP fail`, which starts a rework
+  round.
 
 ## 9. Dependency RPC (planned)
 
@@ -393,9 +500,8 @@ sequenceDiagram
   Ag->>W: requestDependency({ name: "zod" })
   W->>W: pause agent loop, STATUS waiting_dependency
   W->>H: DEPENDENCY_REQUEST {requestId, name, version?, dev}
-  H->>M: lock main
+  H->>M: withMainLock
   H->>M: npm install name@version → commit manifest + lockfile
-  H->>M: unlock main
   H-->>W: DEPENDENCY_RESPONSE installed {mainCommit}
   W->>W: AgentGitClient.syncWithMain()
   W->>Ag: resume
@@ -408,7 +514,8 @@ constrained by the schema.
 
 Workers send `PROMPT_EXECUTION`. The Hub queues it, adds the system prompt for the node's role,
 and passes it to a provider adapter behind a common interface. That interface supports
-rate-limit-aware queuing, retries, and swapping providers.
+rate-limit-aware queuing, retries, and swapping providers. The worker-side agent loop
+implements the `TaskExecutor` interface already used by `JobRunner`.
 
 Driving the claude.ai consumer web UI through Playwright would break Anthropic's Consumer Terms,
 which prohibit automated access. The default adapter is therefore the official API; any

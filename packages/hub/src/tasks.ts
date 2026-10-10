@@ -4,28 +4,62 @@ import {
   TaskSpecSchema,
   createLogger,
   type MessageOf,
+  type PayloadInput,
+  type TaskKind,
   type TaskSpec,
 } from "@aso/shared";
+import type { HubRepository } from "./git/hub-repo.js";
 import type { NodeRegistry } from "./registry.js";
 import { DEFAULT_ROUTING_POLICIES, selectNode, type RoutingPolicies } from "./routing.js";
 
 const log = createLogger("tasks");
 
-export type TaskState = "pending" | "assigned" | "in_progress" | "completed" | "failed";
+/**
+ * pending → assigned → in_progress → verifying → awaiting_qa → testing → merging → merged
+ * Verification, QA or merge problems send the task back to pending as a rework round.
+ */
+export type TaskState =
+  | "pending"
+  | "assigned"
+  | "in_progress"
+  | "verifying"
+  | "awaiting_qa"
+  | "testing"
+  | "merging"
+  | "merged"
+  | "failed";
+
+type Rework = NonNullable<PayloadInput<"TASK_ASSIGNMENT">["rework"]>;
+type Feedback = MessageOf<"FEEDBACK_LOOP">["payload"];
 
 export interface TaskRecord {
   spec: TaskSpec;
   state: TaskState;
+  /** Implementing node (while assigned / in_progress). */
   nodeId?: string;
-  /** Number of times the task was handed to a node. */
+  /** QA node (while testing). */
+  qaNodeId?: string;
+  /** True once the QA node reported in_progress (tests actually started). */
+  qaStarted?: boolean;
+  /** Epoch ms when the owning node disconnected mid-job; the task is held for it until the grace period ends. */
+  detachedAt?: number;
   attempts: number;
+  qaAttempts: number;
+  /** Times the task was taken away from a node that dropped off the network. */
+  drops: number;
+  reworkRound: number;
+  rework?: Rework;
+  /** Head of task/<id> reported by the implementer. */
+  commit?: string;
+  /** Merge commit on main. */
+  mainCommit?: string;
+  qaSetup?: string[][];
   createdAt: string;
   updatedAt: string;
-  /** Why the task is still pending (no eligible node, etc.). */
   waitingReason?: string;
   routing?: { nodeId: string; score: number; reasons: string[] };
   detail?: string;
-  commit?: string;
+  history: Array<{ at: string; event: string }>;
 }
 
 export class TaskError extends Error {
@@ -37,24 +71,55 @@ export class TaskError extends Error {
   }
 }
 
-export interface TaskManagerOptions {
-  policies?: RoutingPolicies;
-  /** Requeue limit when nodes drop mid-task. */
-  maxAttempts?: number;
+export interface QaOptions {
+  /** When false, verified work is merged without a QA run. */
+  enabled: boolean;
+  command: string[];
+  kind: TaskKind;
+  timeoutSec: number;
+  /** Setup steps before tests. Default: `npm ci` when the commit has a package-lock.json. */
+  setup?: string[][];
 }
 
-/** FIFO task queue that routes work to workers via the hardware-aware router. */
+export const DEFAULT_QA: QaOptions = { enabled: true, command: ["npm", "test"], kind: "unit_test", timeoutSec: 900 };
+
+export interface TaskManagerOptions {
+  policies?: RoutingPolicies;
+  /** Node drops tolerated per task before it is failed. */
+  maxDrops?: number;
+  /** QA infrastructure failures tolerated per task. */
+  maxQaAttempts?: number;
+  /** Rework rounds (failed QA / verification / merge conflict) before the task is failed. */
+  maxReworkRounds?: number;
+  /** How long a started job is held for a disconnected node before it is reassigned. */
+  reclaimGraceMs?: number;
+  qa?: Partial<QaOptions>;
+}
+
+const HISTORY_LIMIT = 50;
+const ACTIVE: ReadonlySet<TaskState> = new Set(["assigned", "in_progress", "testing"]);
+
+/** Task queue and pipeline: routes work to workers, verifies pushes, runs QA, merges. */
 export class TaskManager {
   private readonly tasks = new Map<string, TaskRecord>();
   private readonly policies: RoutingPolicies;
-  private readonly maxAttempts: number;
+  private readonly maxDrops: number;
+  private readonly maxQaAttempts: number;
+  private readonly maxReworkRounds: number;
+  private readonly reclaimGraceMs: number;
+  readonly qa: QaOptions;
 
   constructor(
     private readonly registry: NodeRegistry,
+    private readonly repo: HubRepository,
     opts: TaskManagerOptions = {},
   ) {
     this.policies = opts.policies ?? DEFAULT_ROUTING_POLICIES;
-    this.maxAttempts = opts.maxAttempts ?? 3;
+    this.maxDrops = opts.maxDrops ?? 3;
+    this.maxQaAttempts = opts.maxQaAttempts ?? 3;
+    this.maxReworkRounds = opts.maxReworkRounds ?? 3;
+    this.reclaimGraceMs = opts.reclaimGraceMs ?? 5 * 60_000;
+    this.qa = { ...DEFAULT_QA, ...opts.qa };
   }
 
   list(): TaskRecord[] {
@@ -75,98 +140,310 @@ export class TaskManager {
     if (this.tasks.has(spec.taskId)) throw new TaskError(`task ${spec.taskId} already exists`, "duplicate");
 
     const now = new Date().toISOString();
-    const record: TaskRecord = { spec, state: "pending", attempts: 0, createdAt: now, updatedAt: now };
-    this.tasks.set(spec.taskId, record);
-    log.info(`queued ${spec.role}/${spec.kind} task ${spec.taskId}: ${spec.title}`);
+    const task: TaskRecord = {
+      spec,
+      state: "pending",
+      attempts: 0,
+      qaAttempts: 0,
+      drops: 0,
+      reworkRound: 0,
+      createdAt: now,
+      updatedAt: now,
+      history: [],
+    };
+    this.tasks.set(spec.taskId, task);
+    this.note(task, `queued (${spec.role}/${spec.kind})`);
     this.dispatch();
-    return record;
+    return task;
   }
 
-  /** Assign pending tasks (oldest first) to the best available nodes. */
+  /** Hand out pending implementation work and pending QA runs, oldest task first. */
   dispatch(): void {
     for (const task of this.tasks.values()) {
-      if (task.state !== "pending") continue;
-      const decision = selectNode(
-        { role: task.spec.role, kind: task.spec.kind },
-        this.registry.workerSnapshots(),
-        this.policies,
-      );
-      if (!decision.ok) {
-        const reason = [decision.reason, ...decision.rejected.map((r) => `${r.nodeId}: ${r.reason}`)].join("; ");
-        if (reason !== task.waitingReason) {
-          task.waitingReason = reason;
-          log.debug(`task ${task.spec.taskId} waiting: ${reason}`);
-        }
-        continue;
-      }
-
-      this.registry.assign(decision.nodeId, task.spec.taskId);
-      Object.assign(task, {
-        state: "assigned",
-        nodeId: decision.nodeId,
-        attempts: task.attempts + 1,
-        waitingReason: undefined,
-        routing: { nodeId: decision.nodeId, score: decision.score, reasons: decision.reasons },
-        updatedAt: new Date().toISOString(),
-      } satisfies Partial<TaskRecord>);
-      log.info(`assigned ${task.spec.taskId} -> ${decision.nodeId} (${decision.reasons.join(", ")})`);
-      this.registry.send(decision.nodeId, "TASK_ASSIGNMENT", task.spec);
+      if (task.state === "pending") this.dispatchImplementation(task);
+      else if (task.state === "awaiting_qa") this.dispatchQa(task);
     }
   }
 
-  /** Apply a STATUS_UPDATE from a node. Returns an error string if the update is not allowed. */
+  private dispatchImplementation(task: TaskRecord): void {
+    const decision = selectNode({ role: task.spec.role, kind: task.spec.kind }, this.registry.workerSnapshots(), this.policies);
+    if (!decision.ok) return this.wait(task, decision);
+
+    this.registry.assign(decision.nodeId, task.spec.taskId);
+    task.state = "assigned";
+    task.nodeId = decision.nodeId;
+    task.attempts++;
+    task.waitingReason = undefined;
+    task.routing = { nodeId: decision.nodeId, score: decision.score, reasons: decision.reasons };
+    this.note(task, `assigned to ${decision.nodeId} (${decision.reasons.join(", ")})`);
+    this.registry.send(decision.nodeId, "TASK_ASSIGNMENT", { ...task.spec, rework: task.rework });
+  }
+
+  private dispatchQa(task: TaskRecord): void {
+    const decision = selectNode({ role: "qa", kind: this.qa.kind }, this.registry.workerSnapshots(), this.policies);
+    if (!decision.ok) return this.wait(task, decision);
+
+    this.registry.assign(decision.nodeId, task.spec.taskId);
+    task.state = "testing";
+    task.qaNodeId = decision.nodeId;
+    task.qaStarted = false;
+    task.qaAttempts++;
+    task.waitingReason = undefined;
+    this.note(task, `QA run on ${decision.nodeId} for ${task.commit!.slice(0, 8)}`);
+    this.registry.send(decision.nodeId, "TEST_EXECUTION", {
+      taskId: task.spec.taskId,
+      commit: task.commit!,
+      command: this.qa.command,
+      setup: task.qaSetup ?? [],
+      timeoutSec: this.qa.timeoutSec,
+    });
+  }
+
+  private wait(task: TaskRecord, decision: Extract<ReturnType<typeof selectNode>, { ok: false }>): void {
+    const reason = [decision.reason, ...decision.rejected.map((r) => `${r.nodeId}: ${r.reason}`)].join("; ");
+    if (reason !== task.waitingReason) {
+      task.waitingReason = reason;
+      log.debug(`task ${task.spec.taskId} waiting: ${reason}`);
+    }
+  }
+
+  /** Apply a STATUS_UPDATE. Returns an error string if the sender does not own the task. */
   handleStatus(nodeId: string, update: MessageOf<"STATUS_UPDATE">["payload"]): string | undefined {
-    if (update.taskId === undefined) return undefined; // idle ping
+    if (update.taskId === undefined) return undefined; // idle keepalive
     const task = this.tasks.get(update.taskId);
     if (!task) return `unknown task ${update.taskId}`;
-    if (task.nodeId !== nodeId || (task.state !== "assigned" && task.state !== "in_progress")) {
-      return `task ${update.taskId} is not assigned to ${nodeId}`;
-    }
+    if (update.state === "idle") return "idle status must not carry a taskId";
 
-    task.updatedAt = new Date().toISOString();
-    task.detail = update.detail ?? task.detail;
+    if (task.state === "testing" && task.qaNodeId === nodeId) return this.handleQaStatus(task, nodeId, update);
+    if ((task.state === "assigned" || task.state === "in_progress") && task.nodeId === nodeId) {
+      return this.handleImplementerStatus(task, nodeId, update);
+    }
+    return `task ${update.taskId} is not assigned to ${nodeId}`;
+  }
+
+  private handleImplementerStatus(
+    task: TaskRecord,
+    nodeId: string,
+    update: MessageOf<"STATUS_UPDATE">["payload"],
+  ): string | undefined {
+    if (update.detail) task.detail = update.detail;
     switch (update.state) {
       case "accepted":
-        break;
+        this.touch(task);
+        return undefined;
       case "in_progress":
       case "waiting_dependency":
       case "waiting_llm":
+        if (task.state !== "in_progress") this.note(task, `started on ${nodeId}`);
         task.state = "in_progress";
-        break;
+        this.touch(task);
+        return undefined;
       case "completed":
-        task.state = "completed";
+        this.registry.release(nodeId, task.spec.taskId);
+        task.state = "verifying";
         task.commit = update.commit;
-        this.registry.release(nodeId, task.spec.taskId);
-        break;
+        this.note(task, `pushed ${update.commit!.slice(0, 8)}`);
+        void this.verify(task, update.commit!);
+        this.dispatch();
+        return undefined;
       case "failed":
-        task.state = "failed";
         this.registry.release(nodeId, task.spec.taskId);
-        break;
-      case "idle":
-        return "idle status must not carry a taskId";
+        task.state = "failed";
+        this.note(task, `failed on ${nodeId}: ${update.detail ?? "no detail"}`);
+        this.dispatch();
+        return undefined;
     }
-    log.info(`task ${task.spec.taskId} ${update.state} on ${nodeId}${update.detail ? `: ${update.detail}` : ""}`);
-    if (task.state === "completed" || task.state === "failed") this.dispatch();
     return undefined;
   }
 
-  /** A node disconnected: requeue its in-flight task (up to maxAttempts). */
-  handleNodeGone(nodeId: string): void {
+  private handleQaStatus(
+    task: TaskRecord,
+    nodeId: string,
+    update: MessageOf<"STATUS_UPDATE">["payload"],
+  ): string | undefined {
+    switch (update.state) {
+      case "accepted":
+        this.touch(task);
+        return undefined;
+      case "in_progress":
+        task.qaStarted = true;
+        this.touch(task);
+        return undefined;
+      case "failed":
+        // The QA node could not run the tests at all (checkout, missing toolchain...).
+        this.registry.release(nodeId, task.spec.taskId);
+        task.qaNodeId = undefined;
+        this.note(task, `QA node ${nodeId} could not run tests: ${update.detail ?? "no detail"}`);
+        if (task.qaAttempts >= this.maxQaAttempts) this.fail(task, `QA could not run after ${task.qaAttempts} attempts`);
+        else task.state = "awaiting_qa";
+        this.dispatch();
+        return undefined;
+      default:
+        return `QA nodes report results with FEEDBACK_LOOP, not STATUS_UPDATE ${update.state}`;
+    }
+  }
+
+  /** Apply a QA verdict. Returns an error string if the sender is not running QA for the task. */
+  handleFeedback(nodeId: string, feedback: Feedback): string | undefined {
+    const task = this.tasks.get(feedback.taskId);
+    if (!task || task.state !== "testing" || task.qaNodeId !== nodeId) {
+      return `no QA run of ${feedback.taskId} is assigned to ${nodeId}`;
+    }
+    if (feedback.commit !== task.commit) return `QA result is for ${feedback.commit.slice(0, 8)}, expected ${task.commit!.slice(0, 8)}`;
+
+    this.registry.release(nodeId, task.spec.taskId);
+    task.qaNodeId = undefined;
+    if (feedback.outcome === "pass") {
+      this.note(task, `QA passed on ${nodeId}: ${feedback.summary}`);
+      void this.merge(task);
+    } else {
+      this.note(task, `QA failed on ${nodeId}: ${feedback.summary}`);
+      this.rework(task, `QA failed: ${feedback.summary}`, feedback.failures, feedback.output);
+    }
+    this.dispatch();
+    return undefined;
+  }
+
+  /**
+   * A node disconnected. Work it had not started yet is reassigned immediately; started work
+   * is held for the node to reclaim (see nodeRegistered) until the grace period ends.
+   */
+  handleNodeGone(nodeId: string, now = Date.now()): void {
     for (const task of this.tasks.values()) {
-      if (task.nodeId !== nodeId || (task.state !== "assigned" && task.state !== "in_progress")) continue;
-      task.updatedAt = new Date().toISOString();
-      task.nodeId = undefined;
-      if (task.attempts >= this.maxAttempts) {
-        task.state = "failed";
-        task.detail = `node ${nodeId} disconnected; gave up after ${task.attempts} attempts`;
-        log.warn(`task ${task.spec.taskId} failed: ${task.detail}`);
+      if (!ACTIVE.has(task.state) || task.detachedAt !== undefined) continue;
+      const isImplementer = task.nodeId === nodeId && task.state !== "testing";
+      const isQa = task.qaNodeId === nodeId && task.state === "testing";
+      if (!isImplementer && !isQa) continue;
+
+      const started = isQa ? task.qaStarted : task.state === "in_progress";
+      if (started) {
+        task.detachedAt = now;
+        this.note(task, `${nodeId} disconnected mid-job; holding for ${Math.round(this.reclaimGraceMs / 1000)}s`);
       } else {
-        task.state = "pending";
-        task.detail = `requeued after node ${nodeId} disconnected`;
-        log.warn(`task ${task.spec.taskId} ${task.detail}`);
+        this.requeue(task, `${nodeId} disconnected before starting`);
       }
     }
     this.dispatch();
+  }
+
+  /** A node (re)registered. Give back a held job it is still running; requeue ones it lost. */
+  nodeRegistered(nodeId: string, resume?: { taskId: string; job: "implement" | "test" }): void {
+    for (const task of this.tasks.values()) {
+      if (task.detachedAt === undefined) continue;
+      const owner = task.state === "testing" ? task.qaNodeId : task.nodeId;
+      if (owner !== nodeId) continue;
+
+      const job = task.state === "testing" ? "test" : "implement";
+      if (resume?.taskId === task.spec.taskId && resume.job === job) {
+        task.detachedAt = undefined;
+        this.registry.assign(nodeId, task.spec.taskId);
+        this.note(task, `${nodeId} reconnected and resumed`);
+      } else {
+        this.requeue(task, `${nodeId} reconnected without the job`);
+      }
+    }
+  }
+
+  /** Reassign held jobs whose node did not come back in time. */
+  sweepDetached(now = Date.now()): void {
+    let changed = false;
+    for (const task of this.tasks.values()) {
+      if (task.detachedAt !== undefined && now - task.detachedAt >= this.reclaimGraceMs) {
+        const owner = task.state === "testing" ? task.qaNodeId : task.nodeId;
+        this.requeue(task, `${owner} did not return within the grace period`);
+        changed = true;
+      }
+    }
+    if (changed) this.dispatch();
+  }
+
+  private requeue(task: TaskRecord, reason: string): void {
+    task.detachedAt = undefined;
+    task.drops++;
+    if (task.drops >= this.maxDrops) return this.fail(task, `${reason}; gave up after ${task.drops} node losses`);
+    if (task.state === "testing") {
+      task.qaNodeId = undefined;
+      task.state = "awaiting_qa";
+    } else {
+      task.nodeId = undefined;
+      task.state = "pending";
+    }
+    this.note(task, `requeued: ${reason}`);
+  }
+
+  private async verify(task: TaskRecord, commit: string): Promise<void> {
+    let problem: string | undefined;
+    try {
+      problem = await this.repo.verifyTaskCommit(task.spec.taskId, commit);
+    } catch (err) {
+      problem = `verification error: ${(err as Error).message}`;
+    }
+    if (task.state !== "verifying") return;
+    if (problem) return this.rework(task, `push verification failed: ${problem}`);
+
+    if (!this.qa.enabled) {
+      this.note(task, "verified; QA disabled");
+      return void this.merge(task);
+    }
+    task.qaSetup = this.qa.setup ?? ((await this.repo.fileExists(commit, "package-lock.json")) ? [["npm", "ci"]] : []);
+    task.qaAttempts = 0;
+    task.state = "awaiting_qa";
+    this.note(task, "verified; awaiting QA");
+    this.dispatch();
+  }
+
+  private async merge(task: TaskRecord): Promise<void> {
+    task.state = "merging";
+    this.touch(task);
+    const result = await this.repo.merge(
+      task.spec.taskId,
+      task.commit!,
+      `Merge task/${task.spec.taskId}: ${task.spec.title}`,
+    );
+    if (result.ok) {
+      task.state = "merged";
+      task.mainCommit = result.mainCommit;
+      this.note(task, `merged into main @ ${result.mainCommit.slice(0, 8)}`);
+    } else if (result.conflict) {
+      this.rework(task, `merge conflict with main in ${result.files.join(", ")}; rebase onto main and resolve`);
+    } else {
+      // Operator problem on the Hub (dirty checkout, wrong branch): no point reworking the code.
+      this.fail(task, `merge blocked: ${result.reason}`);
+    }
+    this.dispatch();
+  }
+
+  private rework(task: TaskRecord, reason: string, failures: Rework["failures"] = [], output?: string): void {
+    if (task.reworkRound >= this.maxReworkRounds) {
+      return this.fail(task, `${reason} (gave up after ${task.reworkRound} rework rounds)`);
+    }
+    task.reworkRound++;
+    task.rework = { round: task.reworkRound, reason, failures, output };
+    task.state = "pending";
+    task.nodeId = undefined;
+    task.qaNodeId = undefined;
+    task.commit = undefined;
+    this.note(task, `rework round ${task.reworkRound}: ${reason}`);
+    this.dispatch();
+  }
+
+  private fail(task: TaskRecord, reason: string): void {
+    task.state = "failed";
+    task.detail = reason;
+    this.note(task, `failed: ${reason}`);
+    log.warn(`task ${task.spec.taskId} failed: ${reason}`);
+  }
+
+  private note(task: TaskRecord, event: string): void {
+    const at = new Date().toISOString();
+    task.updatedAt = at;
+    task.history.push({ at, event });
+    if (task.history.length > HISTORY_LIMIT) task.history.splice(0, task.history.length - HISTORY_LIMIT);
+    log.info(`task ${task.spec.taskId}: ${event}`);
+  }
+
+  private touch(task: TaskRecord): void {
+    task.updatedAt = new Date().toISOString();
   }
 
   private generateId(title: string): string {

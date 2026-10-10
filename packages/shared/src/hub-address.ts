@@ -1,4 +1,4 @@
-import { DEFAULT_HUB_PORT, WS_PATH } from "./constants.js";
+import { DEFAULT_HUB_PORT, GIT_PATH, WS_PATH } from "./constants.js";
 
 /**
  * Normalise a user-supplied hub address into a WebSocket URL.
@@ -18,4 +18,13 @@ export function resolveHubUrl(input: string, defaultPort = DEFAULT_HUB_PORT): UR
   if (!url.port) url.port = String(defaultPort);
   if (url.pathname === "/" || url.pathname === "") url.pathname = WS_PATH;
   return url;
+}
+
+/** The Hub's Git endpoint, derived from its WebSocket URL (same host and port). */
+export function hubGitUrl(wsUrl: URL): string {
+  const url = new URL(wsUrl);
+  url.protocol = url.protocol === "wss:" ? "https:" : "http:";
+  url.pathname = GIT_PATH;
+  url.search = "";
+  return url.href;
 }

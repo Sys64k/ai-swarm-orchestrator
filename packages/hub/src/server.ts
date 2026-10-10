@@ -5,6 +5,7 @@ import { createNodeWebSocket } from "@hono/node-ws";
 import type { WSContext } from "hono/ws";
 import {
   DEFAULT_HUB_PORT,
+  GIT_PATH,
   HUB_NODE_ID,
   NODE_TIMEOUT_MS,
   NODE_TO_HUB_TYPES,
@@ -14,9 +15,11 @@ import {
   parseAgentMessage,
   type AgentMessage,
 } from "@aso/shared";
+import { gitHttpHandler } from "./git/http-backend.js";
+import { HubRepository } from "./git/hub-repo.js";
 import { NodeRegistry, type NodeTransport } from "./registry.js";
 import type { RoutingPolicies } from "./routing.js";
-import { TaskError, TaskManager } from "./tasks.js";
+import { TaskError, TaskManager, type QaOptions } from "./tasks.js";
 
 const log = createLogger("hub");
 
@@ -31,12 +34,17 @@ export interface HubOptions {
   policies?: RoutingPolicies;
   /** Drop nodes silent for longer than this. */
   nodeTimeoutMs?: number;
+  /** How long a started job waits for its disconnected node before being reassigned. */
+  reclaimGraceMs?: number;
+  qa?: Partial<QaOptions>;
+  mainBranch?: string;
 }
 
 export interface HubHandle {
   port: number;
   registry: NodeRegistry;
   tasks: TaskManager;
+  repo: HubRepository;
   close(): Promise<void>;
 }
 
@@ -53,8 +61,13 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   const host = opts.host ?? "0.0.0.0";
   const nodeTimeoutMs = opts.nodeTimeoutMs ?? NODE_TIMEOUT_MS;
   const connections = new Map<string, Connection>();
+  const repo = await HubRepository.open(opts.targetDir, opts.mainBranch);
   const registry = new NodeRegistry();
-  const tasks = new TaskManager(registry, { policies: opts.policies });
+  const tasks = new TaskManager(registry, repo, {
+    policies: opts.policies,
+    reclaimGraceMs: opts.reclaimGraceMs,
+    qa: opts.qa,
+  });
 
   /** Idempotent: safe to call from both the timeout sweep and the socket close event. */
   const dropNode = (nodeId: string, transport: NodeTransport) => {
@@ -93,6 +106,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
           : `architect ${msg.from} registered`,
       );
       registry.send(msg.from, "REGISTRATION_ACK", { nodeId: msg.from });
+      tasks.nodeRegistered(msg.from, p.nodeKind === "worker" ? p.resume : undefined);
       return tasks.dispatch();
     }
 
@@ -111,6 +125,11 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
         if (error) reject(conn, error, [], msg.id);
         return;
       }
+      case "FEEDBACK_LOOP": {
+        const error = tasks.handleFeedback(conn.nodeId, msg.payload);
+        if (error) reject(conn, error, [], msg.id);
+        return;
+      }
       default:
         // Git flow, dependency and prompt handling land in later phases.
         log.debug(`${msg.type} from ${conn.nodeId}`, msg.payload);
@@ -120,10 +139,16 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   const app = new Hono();
   const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
 
+  // Workers clone, fetch and push the target project here; pushes are limited to task/* refs.
+  const git = gitHttpHandler(repo.dir);
+  app.on(["GET", "POST"], [GIT_PATH, `${GIT_PATH}/*`], (c) => git(c));
+
   app.get("/api/health", (c) =>
     c.json({
       status: "ok",
       targetDir: opts.targetDir,
+      mainBranch: repo.mainBranch,
+      qa: tasks.qa,
       connections: connections.size,
       uptimeSec: Math.round(process.uptime()),
     }),
@@ -188,7 +213,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     s.once("error", reject);
   });
   injectWebSocket(server);
-  log.info(`listening on ${host}:${port} (ws path ${WS_PATH}), target ${opts.targetDir}`);
+  log.info(`listening on ${host}:${port} (ws ${WS_PATH}, git ${GIT_PATH}), target ${opts.targetDir}`);
 
   // Half-open TCP connections (sleeping laptops, pulled cables) never fire onClose on their own.
   const sweep = setInterval(() => {
@@ -199,13 +224,15 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       // Live-but-slow peers get the close frame; dead peers are cut off after a grace period.
       setTimeout(() => node.transport.terminate(), 2000).unref();
     }
-  }, Math.min(15_000, nodeTimeoutMs));
+    tasks.sweepDetached();
+  }, Math.min(15_000, nodeTimeoutMs, opts.reclaimGraceMs ?? Infinity));
   sweep.unref();
 
   return {
     port,
     registry,
     tasks,
+    repo,
     close: () =>
       new Promise<void>((resolve) => {
         clearInterval(sweep);

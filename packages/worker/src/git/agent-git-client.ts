@@ -1,23 +1,16 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { simpleGit, type SimpleGit } from "simple-git";
-import { TaskIdSchema, createLogger, taskBranchName, type TaskId } from "@aso/shared";
+import {
+  CommitShaSchema,
+  TaskIdSchema,
+  createLogger,
+  isProtectedPath,
+  taskBranchName,
+  type TaskId,
+} from "@aso/shared";
 
 const log = createLogger("git");
-
-/**
- * Dependency manifests and lockfiles. Only the Hub may change these (on main, via the
- * DEPENDENCY_REQUEST flow); a task branch touching them anywhere in the tree is rejected.
- */
-export const PROTECTED_FILENAMES: ReadonlySet<string> = new Set([
-  "package.json",
-  "package-lock.json",
-  "npm-shrinkwrap.json",
-  "yarn.lock",
-  "pnpm-lock.yaml",
-  "bun.lock",
-  "bun.lockb",
-]);
 
 export class AgentGitError extends Error {
   override name = "AgentGitError";
@@ -91,9 +84,15 @@ export class AgentGitClient {
     opts: AgentGitClientOptions = {},
   ): Promise<AgentGitClient> {
     const dir = path.resolve(repoDir);
+    const remote = opts.remote ?? "origin";
     if (!existsSync(path.join(dir, ".git"))) {
       log.info(`cloning ${remoteUrl} into ${dir}`);
-      await simpleGit().clone(remoteUrl, dir, ["--origin", opts.remote ?? "origin"]);
+      await simpleGit().clone(remoteUrl, dir, ["--origin", remote]);
+    } else {
+      // The Hub may have moved (new IP/port) since the checkout was created.
+      const git = simpleGit({ baseDir: dir });
+      const current = (await git.remote(["get-url", remote]).catch(() => ""))?.toString().trim();
+      if (current !== remoteUrl) await git.remote(["set-url", remote, remoteUrl]);
     }
     return new AgentGitClient(dir, opts);
   }
@@ -106,7 +105,7 @@ export class AgentGitClient {
    * Check out `task/<id>`. Resumes the remote task branch if it exists (e.g. rework after
    * QA feedback), otherwise branches from the latest remote main.
    */
-  async startTask(taskId: TaskId): Promise<{ branch: string; base: string }> {
+  async startTask(taskId: TaskId): Promise<{ branch: string; base: string; resumed: boolean }> {
     const id = TaskIdSchema.parse(taskId);
     const branch = taskBranchName(id);
 
@@ -119,15 +118,14 @@ export class AgentGitClient {
 
     await this.git.fetch([this.remote, "--prune"]);
     const remoteBranch = `${this.remote}/${branch}`;
-    const start = (await this.refExists(`refs/remotes/${remoteBranch}`))
-      ? remoteBranch
-      : `${this.remote}/${this.mainBranch}`;
+    const resumed = await this.refExists(`refs/remotes/${remoteBranch}`);
+    const start = resumed ? remoteBranch : `${this.remote}/${this.mainBranch}`;
 
     await this.git.raw(["checkout", "-B", branch, start]);
     this.activeTask = id;
     const base = await this.head();
     log.info(`started ${branch} from ${start} (${base.slice(0, 8)})`);
-    return { branch, base };
+    return { branch, base, resumed };
   }
 
   /** Stage all changes, commit, and push `task/<id>` to the Hub. */
@@ -143,7 +141,7 @@ export class AgentGitClient {
     const committed = await this.changedSinceMain();
 
     const touched = [...new Set([...working, ...committed])].sort();
-    const blocked = touched.filter((f) => PROTECTED_FILENAMES.has(path.posix.basename(f)));
+    const blocked = touched.filter(isProtectedPath);
     if (blocked.length) throw new ProtectedFileError(blocked);
     if (touched.length === 0) throw new AgentGitError(`nothing to commit on ${branch}`);
 
@@ -199,6 +197,35 @@ export class AgentGitClient {
     const head = await this.head();
     log.info(`rebased onto ${target} (${head.slice(0, 8)})`);
     return { head };
+  }
+
+  /**
+   * Throw away local state left by a previous job (crash, failed task, aborted rebase).
+   * Safe because pushed branches on the Hub are the source of truth. Ignored files such as
+   * node_modules are kept.
+   */
+  async discardLocalChanges(): Promise<void> {
+    await this.git.raw(["rebase", "--abort"]).catch(() => undefined);
+    await this.git.raw(["merge", "--abort"]).catch(() => undefined);
+    await this.git.raw(["reset", "--hard", "--quiet"]);
+    await this.git.raw(["clean", "-fd", "--quiet"]);
+    this.activeTask = undefined;
+  }
+
+  /** Detached checkout of a commit on `task/<id>`, for QA runs. */
+  async checkoutCommit(taskId: TaskId, commit: string): Promise<void> {
+    const branch = taskBranchName(TaskIdSchema.parse(taskId));
+    const sha = CommitShaSchema.parse(commit);
+    await this.git.fetch([this.remote, "--prune"]);
+    const remoteBranch = `${this.remote}/${branch}`;
+    if (!(await this.refExists(`refs/remotes/${remoteBranch}`))) {
+      throw new AgentGitError(`${branch} does not exist on the Hub`);
+    }
+    const base = (await this.git.raw(["merge-base", sha, remoteBranch]).catch(() => "")).trim();
+    if (base !== sha) throw new AgentGitError(`${sha.slice(0, 8)} is not on ${branch}`);
+    await this.git.raw(["checkout", "--quiet", "--detach", sha]);
+    this.activeTask = undefined;
+    log.info(`checked out ${branch} @ ${sha.slice(0, 8)} for testing`);
   }
 
   private async requireTaskBranch(): Promise<TaskId> {

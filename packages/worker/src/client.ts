@@ -8,6 +8,7 @@ import {
   WORKER_ROLES,
   createLogger,
   createMessage,
+  hubGitUrl,
   parseAgentMessage,
   resolveHubUrl,
   type AgentMessageType,
@@ -16,6 +17,7 @@ import {
   type WorkerRole,
 } from "@aso/shared";
 import { profileHardware, sampleLoad } from "./hardware.js";
+import { JobRunner, unconfiguredExecutor, type TaskExecutor } from "./jobs.js";
 
 const log = createLogger("worker");
 
@@ -27,25 +29,36 @@ export interface WorkerOptions {
   roles?: WorkerRole[];
   /** Directory for task checkouts; also where the I/O benchmark runs. Default ~/.aso/work. */
   workDir?: string;
+  /** Does the implementation work. Defaults to one that fails until Phase 5 provides the LLM loop. */
+  executor?: TaskExecutor;
+  /** Skip the hardware scan and use this profile (tests). */
+  hardware?: HardwareProfile;
+  nodeId?: string;
 }
 
 export const DEFAULT_WORK_DIR = path.join(os.homedir(), ".aso", "work");
 
+/** Messages produced while disconnected are held (bounded) and sent after re-registration. */
+const OUTBOX_LIMIT = 200;
+
 export interface WorkerHandle {
   nodeId: string;
   profile: HardwareProfile;
+  runner: JobRunner;
   stop(): void;
 }
 
 export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
   const url = resolveHubUrl(opts.hub, opts.port);
   const roles = opts.roles?.length ? opts.roles : [...WORKER_ROLES];
-
   const workDir = path.resolve(opts.workDir ?? DEFAULT_WORK_DIR);
 
-  log.info("scanning hardware...");
-  const profile = await profileHardware(workDir);
-  const nodeId = `${profile.hostname}-${randomUUID().slice(0, 8)}`;
+  let profile = opts.hardware;
+  if (!profile) {
+    log.info("scanning hardware...");
+    profile = await profileHardware(workDir);
+  }
+  const nodeId = opts.nodeId ?? `${profile.hostname}-${randomUUID().slice(0, 8)}`;
   log.info(
     `${profile.hostname}: ${profile.cpu.logicalCores} threads, ` +
       `${(profile.memory.totalBytes / 1024 ** 3).toFixed(1)} GiB RAM, ` +
@@ -54,27 +67,47 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
   );
 
   let ws: WebSocket | undefined;
+  let registered = false;
   let attempt = 0;
   let stopped = false;
   let retryTimer: NodeJS.Timeout | undefined;
   let heartbeatTimer: NodeJS.Timeout | undefined;
+  const outbox: string[] = [];
 
-  const send = <T extends AgentMessageType>(socket: WebSocket, type: T, payload: PayloadInput<T>) => {
-    socket.send(JSON.stringify(createMessage(type, nodeId, payload)));
+  const transmit = (raw: string) => {
+    if (ws && registered && ws.readyState === WebSocket.OPEN) return ws.send(raw);
+    if (outbox.length >= OUTBOX_LIMIT) outbox.shift();
+    outbox.push(raw);
   };
+  const send = <T extends AgentMessageType>(type: T, payload: PayloadInput<T>) =>
+    transmit(JSON.stringify(createMessage(type, nodeId, payload)));
+
+  const runner = new JobRunner({
+    workDir,
+    gitUrl: hubGitUrl(url),
+    nodeId,
+    executor: opts.executor ?? unconfiguredExecutor,
+    send,
+  });
 
   const connect = () => {
     const socket = new WebSocket(url);
     ws = socket;
+    registered = false;
     socket.on("open", () => {
       attempt = 0;
       log.info(`connected to hub ${url.href}`);
-      send(socket, "NODE_REGISTRATION", {
-        nodeKind: "worker",
-        version: "0.1.0",
-        roles,
-        hardware: profile,
-      });
+      socket.send(
+        JSON.stringify(
+          createMessage("NODE_REGISTRATION", nodeId, {
+            nodeKind: "worker",
+            version: "0.1.0",
+            roles,
+            hardware: profile,
+            resume: runner.current,
+          }),
+        ),
+      );
     });
     socket.on("message", (data) => {
       const parsed = parseAgentMessage(data.toString());
@@ -83,28 +116,38 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
       if (!HUB_TO_NODE_TYPES.has(msg.type)) return log.warn(`unexpected ${msg.type} from hub`);
       switch (msg.type) {
         case "REGISTRATION_ACK":
+          registered = true;
           log.info(`registered as ${msg.payload.nodeId} (roles: ${roles.join(", ")})`);
+          for (const raw of outbox.splice(0)) socket.send(raw);
           clearInterval(heartbeatTimer);
           heartbeatTimer = setInterval(() => {
             sampleLoad()
-              .then((load) => socket.readyState === WebSocket.OPEN && send(socket, "NODE_HEARTBEAT", load))
+              .then((load) => send("NODE_HEARTBEAT", load))
               .catch((err: Error) => log.warn(`heartbeat failed: ${err.message}`));
           }, HEARTBEAT_INTERVAL_MS);
           break;
         case "TASK_ASSIGNMENT":
-          log.info(`assigned ${msg.payload.kind} task ${msg.payload.taskId}: ${msg.payload.title}`);
-          send(socket, "STATUS_UPDATE", { state: "accepted", taskId: msg.payload.taskId });
-          // The execution engine (Git flow + LLM loop) is wired in with Phases 3 and 5.
+          log.info(
+            `assigned ${msg.payload.kind} task ${msg.payload.taskId}: ${msg.payload.title}` +
+              (msg.payload.rework ? ` (rework round ${msg.payload.rework.round})` : ""),
+          );
+          send("STATUS_UPDATE", { state: "accepted", taskId: msg.payload.taskId });
+          runner.enqueueTask(msg.payload);
+          break;
+        case "TEST_EXECUTION":
+          log.info(`QA run for ${msg.payload.taskId} @ ${msg.payload.commit.slice(0, 8)}`);
+          send("STATUS_UPDATE", { state: "accepted", taskId: msg.payload.taskId });
+          runner.enqueueTest(msg.payload);
           break;
         case "PROTOCOL_ERROR":
           log.error(`hub rejected message: ${msg.payload.reason}`, msg.payload.issues);
           break;
         default:
-          // Task execution is wired up with routing and the Git flow in later phases.
           log.debug(`${msg.type} received`, msg.payload);
       }
     });
     socket.on("close", () => {
+      registered = false;
       clearInterval(heartbeatTimer);
       if (stopped) return;
       const delay = Math.min(30_000, 1000 * 2 ** attempt++);
@@ -119,6 +162,7 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
   return {
     nodeId,
     profile,
+    runner,
     stop() {
       stopped = true;
       clearTimeout(retryTimer);

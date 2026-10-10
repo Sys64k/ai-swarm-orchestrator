@@ -7,6 +7,9 @@ export const DEFAULT_DASHBOARD_PORT = 7421;
 /** Path on the Hub that accepts agent WebSocket connections. */
 export const WS_PATH = "/ws";
 
+/** Git smart-HTTP endpoint for the target project, served by the Hub. */
+export const GIT_PATH = "/git/project.git";
+
 /** tmux session name used for the Architect agent. */
 export const ARCHITECT_TMUX_SESSION = "aso-architect";
 

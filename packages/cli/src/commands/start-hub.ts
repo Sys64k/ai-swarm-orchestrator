@@ -16,13 +16,22 @@ export interface StartHubOptions {
   dashboard: boolean;
   architect: boolean;
   docker: boolean;
+  testCommand: string;
+  qa: boolean;
 }
 
 export async function startHubCommand(opts: StartHubOptions): Promise<void> {
   const targetDir = resolveTargetDir(opts.dir);
   if (opts.docker) return startHubInDocker(targetDir, opts);
 
-  const hub = await startHub({ targetDir, port: opts.port, host: opts.host });
+  const testCommand = parseTestCommand(opts.testCommand);
+  const qaEnabled = opts.qa && process.env.ASO_QA !== "0";
+  const hub = await startHub({
+    targetDir,
+    port: opts.port,
+    host: opts.host,
+    qa: { enabled: qaEnabled, command: testCommand },
+  });
   const dashboard = opts.dashboard ? launchDashboard(opts.dashboardPort, hub.port) : undefined;
   const architectStarted = opts.architect ? launchArchitect(hub.port) : false;
 
@@ -59,6 +68,8 @@ async function startHubInDocker(targetDir: string, opts: StartHubOptions): Promi
       ASO_BIND: opts.host,
       ASO_HUB_PORT: String(opts.port),
       ASO_DASHBOARD_PORT: String(opts.dashboardPort),
+      ASO_TEST_COMMAND: parseTestCommand(opts.testCommand).join(" "),
+      ASO_QA: opts.qa ? "1" : "0",
     },
   });
   const exited = new Promise<number>((resolve) => compose.on("exit", (code) => resolve(code ?? 1)));
@@ -106,6 +117,12 @@ function onShutdown(handler: (signal: NodeJS.Signals) => Promise<void>): void {
       void handler(signal);
     });
   }
+}
+
+function parseTestCommand(cmd: string): string[] {
+  const argv = cmd.trim().split(/\s+/).filter(Boolean);
+  if (argv.length === 0) throw new Error("--test-command must not be empty");
+  return argv;
 }
 
 function resolveTargetDir(dir: string): string {

@@ -1,16 +1,22 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import { createMessage } from "@aso/shared";
+import { rmSync } from "node:fs";
 import { startHub, type HubHandle } from "@aso/hub";
-import { connect as connectTo } from "./helpers.ts";
+import { connect as connectTo, makeTargetRepo } from "./helpers.ts";
 
 const PORT = 17_900 + Math.floor(Math.random() * 90);
 let hub: HubHandle;
+let repoDir: string;
 
 before(async () => {
-  hub = await startHub({ targetDir: "/tmp/target", port: PORT, host: "127.0.0.1" });
+  repoDir = makeTargetRepo();
+  hub = await startHub({ targetDir: repoDir, port: PORT, host: "127.0.0.1" });
 });
-after(() => hub.close());
+after(async () => {
+  await hub.close();
+  rmSync(repoDir, { recursive: true, force: true });
+});
 
 const connect = () => connectTo(PORT);
 

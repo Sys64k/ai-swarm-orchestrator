@@ -61,6 +61,28 @@ export function taskBranchName(taskId: TaskId): string {
   return `task/${TaskIdSchema.parse(taskId)}`;
 }
 
+/** Full ref name for a task branch; the only refs workers may push. */
+export const TASK_REF_PATTERN = /^refs\/heads\/task\/[a-z0-9][a-z0-9-]{0,63}$/;
+
+/**
+ * Dependency manifests and lockfiles. Only the Hub may change these (on main, via the
+ * DEPENDENCY_REQUEST flow); a task branch touching them anywhere in the tree is rejected,
+ * by the worker's AgentGitClient and again by the Hub before QA.
+ */
+export const PROTECTED_FILENAMES: ReadonlySet<string> = new Set([
+  "package.json",
+  "package-lock.json",
+  "npm-shrinkwrap.json",
+  "yarn.lock",
+  "pnpm-lock.yaml",
+  "bun.lock",
+  "bun.lockb",
+]);
+
+export function isProtectedPath(repoPath: string): boolean {
+  return PROTECTED_FILENAMES.has(repoPath.split("/").pop() ?? "");
+}
+
 // ---------------------------------------------------------------------------
 // Hardware profile (sent in NODE_REGISTRATION, used for routing)
 // ---------------------------------------------------------------------------
@@ -97,6 +119,10 @@ const NodeRegistrationPayload = z.discriminatedUnion("nodeKind", [
     version: z.string(),
     roles: z.array(WorkerRoleSchema).min(1),
     hardware: HardwareProfileSchema,
+    /** Job the worker is still running after a reconnect; lets the Hub hand it back. */
+    resume: z
+      .strictObject({ taskId: TaskIdSchema, job: z.enum(["implement", "test"]) })
+      .optional(),
   }),
   z.strictObject({
     nodeKind: z.literal("architect"),
@@ -132,7 +158,23 @@ export type TaskSpec = z.infer<typeof TaskSpecSchema>;
 export const TaskSpecInputSchema = TaskSpecSchema.extend({ taskId: TaskIdSchema.optional() });
 export type TaskSpecInput = z.input<typeof TaskSpecInputSchema>;
 
-const TaskAssignmentPayload = TaskSpecSchema;
+const TestFailure = z.strictObject({
+  test: z.string().optional(),
+  file: RepoPathSchema.optional(),
+  message: z.string().min(1).max(10_000),
+});
+
+const TaskAssignmentPayload = TaskSpecSchema.extend({
+  /** Present when the task comes back after a failed QA run, verification or merge. */
+  rework: z
+    .strictObject({
+      round: z.number().int().positive(),
+      reason: z.string().min(1).max(5000),
+      failures: z.array(TestFailure).default([]),
+      output: z.string().max(100_000).optional(),
+    })
+    .optional(),
+});
 
 const TestExecutionPayload = z.strictObject({
   taskId: TaskIdSchema,
@@ -140,6 +182,8 @@ const TestExecutionPayload = z.strictObject({
   commit: CommitShaSchema,
   /** argv for the test runner; executed without a shell. */
   command: z.array(z.string().min(1)).min(1).default(["npm", "test"]),
+  /** argv lists run before the tests (e.g. `npm ci`); a failing step fails the run. */
+  setup: z.array(z.array(z.string().min(1)).min(1)).default([]),
   timeoutSec: z.number().int().positive().max(3600).default(900),
 });
 
@@ -182,11 +226,6 @@ const StatusUpdatePayload = z
     path: ["commit"],
   });
 
-const TestFailure = z.strictObject({
-  test: z.string().optional(),
-  file: RepoPathSchema.optional(),
-  message: z.string().min(1).max(10_000),
-});
 
 const FeedbackLoopPayload = z.discriminatedUnion("outcome", [
   z.strictObject({
