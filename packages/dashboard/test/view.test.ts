@@ -1,9 +1,24 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { formatUsd, homeView, isLive, isQuiet, planProgress, previewBody, taskActions, taskBadge, terminalLines, timeAgo, workerViews } from "../lib/view.ts";
-import type { HubNode, Plan, Task, TranscriptEntry } from "../lib/types.ts";
+import {
+  formatUsd,
+  homeView,
+  isLive,
+  isQuiet,
+  planProgress,
+  previewBody,
+  projectNameProblem,
+  projectSummary,
+  taskActions,
+  taskBadge,
+  terminalLines,
+  timeAgo,
+  workerViews,
+} from "../lib/view.ts";
+import type { HubNode, Plan, Project, Task, TranscriptEntry } from "../lib/types.ts";
 
 const task = (id: string, state: Task["state"], extra: Partial<Task> = {}): Task => ({
+  project: "shop",
   spec: { taskId: id, role: "backend", kind: "feature", title: `Task ${id}`, description: "", acceptanceCriteria: [], dependsOn: [] },
   state,
   reworkRound: 0,
@@ -17,6 +32,7 @@ const task = (id: string, state: Task["state"], extra: Partial<Task> = {}): Task
 
 const plan = (id: string, state: Plan["state"], extra: Partial<Plan> = {}): Plan => ({
   planId: id,
+  project: "blog",
   requirement: `Build ${id}\nmore detail`,
   state,
   llm: { calls: 0, costUsd: 0 },
@@ -39,8 +55,8 @@ describe("home view", () => {
     const plans = [plan("p1", "proposed"), plan("p2", "failed", { error: "Architect crashed" }), plan("p3", "planning"), plan("p4", "rejected")];
     const v = homeView(tasks, plans);
     assert.deepEqual(
-      v.attention.map((a) => [a.kind, a.id, a.badge.label]),
-      [["plan", "p1", "Approve?"], ["task", "b", "Failed"], ["plan", "p2", "Failed"]],
+      v.attention.map((a) => [a.kind, a.id, a.project, a.badge.label]),
+      [["plan", "p1", "blog", "Approve?"], ["task", "b", "shop", "Failed"], ["plan", "p2", "blog", "Failed"]],
     );
     assert.equal(v.attention[0].title, "Build p1", "first line of the requirement");
     assert.equal(v.attention[1].reason, "QA failed 3 times");
@@ -176,5 +192,33 @@ describe("formatting", () => {
       },
     ];
     assert.deepEqual(workerViews(nodes), [{ nodeId: "avalon-1", name: "avalon", busy: true, taskId: "api", detail: "backend, qa · CPU 37%" }]);
+  });
+});
+
+describe("projects", () => {
+  it("checks a new project's name like the Hub does", () => {
+    assert.equal(projectNameProblem("my-app"), undefined);
+    assert.equal(projectNameProblem("app_2"), undefined);
+    assert.match(projectNameProblem("")!, /name/);
+    assert.match(projectNameProblem("-app")!, /Start with/);
+    assert.match(projectNameProblem("My App")!, /lowercase/);
+    assert.match(projectNameProblem("../x")!, /Start with/);
+    assert.match(projectNameProblem("a.b")!, /lowercase letters, digits/);
+    assert.match(projectNameProblem("x".repeat(65))!, /64/);
+  });
+
+  it("sums a project up in one line, flagging what needs you", () => {
+    const p = (tasks: Partial<Project["tasks"]>, approve = 0): Project => ({
+      id: "shop",
+      dir: "/p/shop",
+      tasks: { total: 0, running: 0, queued: 0, failed: 0, merged: 0, ...tasks },
+      plansAwaitingApproval: approve,
+    });
+    assert.deepEqual(projectSummary(p({})), { text: "No tasks yet", needsYou: false });
+    assert.deepEqual(projectSummary(p({ total: 3, merged: 3 })), { text: "3 of 3 tasks merged", needsYou: false });
+    assert.deepEqual(projectSummary(p({ total: 4, running: 1, queued: 2, failed: 1 }, 1)), {
+      text: "1 to approve · 1 failed · 1 running · 2 queued",
+      needsYou: true,
+    });
   });
 });

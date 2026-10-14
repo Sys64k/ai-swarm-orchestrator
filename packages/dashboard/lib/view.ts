@@ -1,4 +1,4 @@
-import type { HubNode, Plan, Task, TaskState, TranscriptEntry } from "./types.ts";
+import type { HubNode, Plan, Project, Task, TaskState, TranscriptEntry } from "./types.ts";
 
 /** Colour family of a state badge. */
 export type Tone = "active" | "waiting" | "good" | "bad" | "muted";
@@ -72,6 +72,7 @@ export function taskActions(task: Pick<Task, "state">): { retry: boolean; cancel
 export interface AttentionItem {
   kind: "plan" | "task";
   id: string;
+  project: string;
   title: string;
   reason: string;
   href: string;
@@ -93,13 +94,13 @@ export function homeView(tasks: readonly Task[], plans: readonly Plan[]): HomeVi
   const attention: AttentionItem[] = [
     ...plans
       .filter((p) => p.state === "proposed")
-      .map((p) => ({ kind: "plan" as const, id: p.planId, title: firstLine(p.requirement), reason: "Plan ready for your approval", href: `/plans/${p.planId}`, badge: { label: "Approve?", tone: "waiting" as Tone } })),
+      .map((p) => ({ kind: "plan" as const, id: p.planId, project: p.project, title: firstLine(p.requirement), reason: "Plan ready for your approval", href: `/plans/${p.planId}`, badge: { label: "Approve?", tone: "waiting" as Tone } })),
     ...tasks
       .filter((t) => t.state === "failed")
-      .map((t) => ({ kind: "task" as const, id: t.spec.taskId, title: t.spec.title, reason: t.detail ?? "Failed", href: `/tasks/${t.spec.taskId}`, badge: { label: "Failed", tone: "bad" as Tone } })),
+      .map((t) => ({ kind: "task" as const, id: t.spec.taskId, project: t.project, title: t.spec.title, reason: t.detail ?? "Failed", href: `/tasks/${t.spec.taskId}`, badge: { label: "Failed", tone: "bad" as Tone } })),
     ...plans
       .filter((p) => p.state === "failed")
-      .map((p) => ({ kind: "plan" as const, id: p.planId, title: firstLine(p.requirement), reason: p.error ?? "Planning failed", href: `/plans/${p.planId}`, badge: { label: "Failed", tone: "bad" as Tone } })),
+      .map((p) => ({ kind: "plan" as const, id: p.planId, project: p.project, title: firstLine(p.requirement), reason: p.error ?? "Planning failed", href: `/plans/${p.planId}`, badge: { label: "Failed", tone: "bad" as Tone } })),
   ];
   const byUpdate = (a: Task, b: Task) => b.updatedAt.localeCompare(a.updatedAt);
   return {
@@ -237,6 +238,27 @@ export function previewBody(body: string | undefined, expanded: boolean, maxLine
   const lines = body.split("\n");
   const truncated = !expanded && lines.length > maxLines;
   return { text: truncated ? lines.slice(-maxLines).join("\n") : body, lines: lines.length, truncated };
+}
+
+/** Same rule as the Hub: the name becomes a folder, a URL segment and a Git path. */
+export function projectNameProblem(name: string): string | undefined {
+  if (!name) return "Give the project a name.";
+  if (name.length > 64) return "At most 64 characters.";
+  if (!/^[a-z0-9]/.test(name)) return "Start with a lowercase letter or a digit.";
+  if (!/^[a-z0-9][a-z0-9_-]*$/.test(name)) return "Use lowercase letters, digits, - and _ only.";
+  return undefined;
+}
+
+/** A project's one-line status, for lists. */
+export function projectSummary(p: Project): { text: string; needsYou: boolean } {
+  const parts = [
+    p.plansAwaitingApproval ? `${p.plansAwaitingApproval} to approve` : "",
+    p.tasks.failed ? `${p.tasks.failed} failed` : "",
+    p.tasks.running ? `${p.tasks.running} running` : "",
+    p.tasks.queued ? `${p.tasks.queued} queued` : "",
+  ].filter(Boolean);
+  const idle = p.tasks.total ? `${p.tasks.merged} of ${p.tasks.total} tasks merged` : "No tasks yet";
+  return { text: parts.join(" · ") || idle, needsYou: p.plansAwaitingApproval > 0 || p.tasks.failed > 0 };
 }
 
 export function formatUsd(usd: number): string {
