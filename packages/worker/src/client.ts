@@ -98,7 +98,7 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
 
   const runner = new JobRunner({
     workDir,
-    gitUrl: hubGitUrl(url),
+    gitUrl: (project) => hubGitUrl(url, project),
     nodeId,
     executor: opts.executor ?? new LlmTaskExecutor(),
     send,

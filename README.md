@@ -113,18 +113,18 @@ npm run package            # builds everything + release/aso.tgz (the package wo
 npm link -w @aso/cli       # puts `aso` on your PATH (or use: npm run aso -- <command>)
 ```
 
-The target project must be a git repository with at least one commit on `main`:
-
-```bash
-git -C ~/projects/my-app init -b main && git -C ~/projects/my-app commit --allow-empty -m "Initial commit"
-```
-
 Start the Hub, in Docker (recommended) or directly:
 
 ```bash
-aso start-hub --docker --dir ~/projects/my-app   # first run builds the image (a few minutes)
-aso start-hub --dir ~/projects/my-app            # without Docker
+aso start-hub --docker    # first run builds the image (a few minutes)
+aso start-hub             # without Docker
 ```
+
+The Hub works on **projects** in `~/aso-projects` (change it with `--root`). Each git
+repository directly inside that folder is a project, named after its folder. Create new
+projects from the console or with `POST /api/projects`. To bring in an existing repository,
+move or clone it into the folder; it needs at least one commit on `main`. See
+[Projects](#projects).
 
 The first start generates the **ASO token** (`~/.config/aso/token`, readable only by you).
 Every worker, the CLI and the dashboard need it. Show it with:
@@ -272,9 +272,10 @@ A task is failed after 3 node losses.
 one. A retry gets fresh limits and budget, and the agent is told why it's running again. See
 [Hub endpoints](#hub-endpoints).
 
-**If the Hub restarts** (redeploy, crash, reboot), it picks up where it left off. Tasks, plans
-and agent conversations are saved in the project's `.git/aso/` directory, so they stay with
-the project and never end up in a commit or a worker's clone. On restart:
+**If the Hub restarts** (redeploy, crash, reboot), it picks up where it left off. Each
+project's tasks, plans and transcripts are saved in its `.git/aso/` directory, so they stay
+with the project and never end up in a commit or a worker's clone. Agent conversations are
+saved in `~/aso-projects/.aso/`. On restart:
 
 - **Started jobs** are held for 5 minutes, as if their worker had dropped off. The worker
   reconnects on its own, and its agent continues the same conversation.
@@ -283,8 +284,33 @@ the project and never end up in a commit or a worker's clone. On restart:
 - **Plans** the Architect was working on are planned again; proposed plans still wait for
   approval.
 
-Delete `.git/aso/` while the Hub is stopped to start with an empty task list. A state file the
+Delete a project's `.git/aso/` while the Hub is stopped to start that project with an empty
+task list. A state file the
 Hub can't read is renamed to `state.json.unreadable-<time>` and the Hub starts empty.
+
+## Projects
+
+One Hub runs several projects at the same time. They share the workers and the Architect.
+
+- **Where.** Every git repository directly in the projects folder (`~/aso-projects`, or
+  `--root`) is a project, named after its folder.
+  - Names are lowercase letters, digits, `-` and `_`.
+  - Folders that aren't git repositories or have other names are skipped, with a log line.
+- **New projects.** `POST /api/projects {"name": "my-app"}`, or the console, creates
+  `~/aso-projects/my-app` as a git repository with an empty first commit on `main`. An
+  existing folder is never taken over.
+- **Separate state.** Each project has its own plans, tasks, transcripts and push-to-origin
+  settings (its own `origin` remote), kept in its `.git/aso/`.
+- **Ids are global.** Task and plan ids are unique across projects, so `/api/tasks/<id>` and
+  `/api/plans/<id>` work without naming the project. Creating a plan or task takes a
+  `project` field, which can be left out when there's only one project. Lists take
+  `?project=` to filter.
+- **Shared workers.** Workers take work from every project. Each worker keeps one checkout
+  per project (`~/.aso/work/<project>`), cloned from `/git/<project>.git`. When a node frees
+  up, the Hub dispatches across all projects, starting with a different project each time so
+  none is starved.
+- **CLI.** `aso plan --project my-app "…"` and `aso sync --project my-app`. The project can
+  be left out when there's only one.
 
 ## Package changes: dependencies and scripts
 
@@ -361,7 +387,7 @@ failure), and so do the dashboard and `aso sync`.
 
 | Option | Default | Description |
 |---|---|---|
-| `-d, --dir <path>` | *required* | Target project repository (repo root, with a `main` branch) |
+| `-r, --root <dir>` | `~/aso-projects` (`ASO_PROJECTS_ROOT`) | Folder of projects; each git repository in it is a project, and new ones are created there. Created if missing |
 | `--docker` | off | Run the Hub and dashboard in Docker; the Architect stays on the host |
 | `-p, --port <port>` | `7420` | Hub API, WebSocket and Git port |
 | `--host <host>` | `0.0.0.0` | Interface to bind (in Docker mode: the published-port bind address) |
@@ -465,7 +491,7 @@ Options:
 | `POST` | `/api/plans/:id/approve` / `reject` | Decide on a proposed plan; approve returns the created task ids |
 | `POST` | `/api/tasks` | Submit a task: `role`, `title`, `description`, optional `kind`, `taskId`, `acceptanceCriteria`, `files`, `dependsOn` (existing task ids). Returns `201`, `400` (validation) or `409` (duplicate id) |
 | `GET` (WS) | `/ws` | Agent WebSocket endpoint (see [protocol](ARCHITECTURE.md#4-communication-protocol)) |
-| Git | `/git/project.git` | Clone and fetch the target project. Pushes are limited to creating or updating `task/<id>` branches |
+| Git | `/git/<project>.git` | Clone and fetch a project. Pushes are limited to creating or updating `task/<id>` branches |
 
 ## Agent roles
 

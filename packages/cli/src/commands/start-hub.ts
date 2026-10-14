@@ -1,5 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { ARCHITECT_TMUX_SESSION, createLogger, resolveToken } from "@aso/shared";
 import { startHub, type Effort } from "@aso/hub";
@@ -8,7 +8,8 @@ import { layout } from "../layout.js";
 const log = createLogger("cli");
 
 export interface StartHubOptions {
-  dir: string;
+  /** Folder of projects (each git repository in it is a project). */
+  root: string;
   port: number;
   host: string;
   dashboardPort: number;
@@ -26,19 +27,19 @@ export interface StartHubOptions {
 }
 
 export async function startHubCommand(opts: StartHubOptions): Promise<void> {
-  const targetDir = resolveTargetDir(opts.dir);
+  const root = resolveProjectsRoot(opts.root);
   const auth = resolveToken({ create: true })!;
   if (auth.created) {
     log.info(`generated an ASO token in ${auth.source}; workers need it: run \`aso token\` to show it`);
   } else {
     log.info(`using the ASO token from ${auth.source}`);
   }
-  if (opts.docker) return startHubInDocker(targetDir, opts, auth.token);
+  if (opts.docker) return startHubInDocker(root, opts, auth.token);
 
   const testCommand = parseTestCommand(opts.testCommand);
   const qaEnabled = opts.qa && process.env.ASO_QA !== "0";
   const hub = await startHub({
-    targetDir,
+    projectsRoot: root,
     port: opts.port,
     host: opts.host,
     token: auth.token,
@@ -68,7 +69,7 @@ export async function startHubCommand(opts: StartHubOptions): Promise<void> {
  * Runs the Hub + dashboard via docker compose and the Architect in tmux on the host (it
  * reaches the Hub through the published port). Compose runs attached so logs stream here.
  */
-async function startHubInDocker(targetDir: string, opts: StartHubOptions, token: string): Promise<void> {
+async function startHubInDocker(root: string, opts: StartHubOptions, token: string): Promise<void> {
   if (!opts.dashboard) throw new Error("--no-dashboard is not supported with --docker");
   try {
     execFileSync("docker", ["compose", "version"], { stdio: "ignore" });
@@ -83,7 +84,7 @@ async function startHubInDocker(targetDir: string, opts: StartHubOptions, token:
     stdio: "inherit",
     env: {
       ...process.env,
-      ASO_TARGET_DIR: targetDir,
+      ASO_PROJECTS_ROOT: root,
       ASO_TOKEN: token,
       // The image has no .git; label the package it builds with the host's commit.
       ASO_BUILD: gitBuildId(),
@@ -171,10 +172,16 @@ function parseList(value: string | undefined): string[] | undefined {
   return items?.length ? items : undefined;
 }
 
-function resolveTargetDir(dir: string): string {
+/** The projects folder, created on first start. */
+function resolveProjectsRoot(dir: string): string {
   const abs = path.resolve(dir);
-  if (!existsSync(abs) || !statSync(abs).isDirectory()) {
-    throw new Error(`target directory does not exist: ${abs}`);
+  if (existsSync(abs) && !statSync(abs).isDirectory()) throw new Error(`${abs} is not a directory`);
+  if (!existsSync(abs)) {
+    mkdirSync(abs, { recursive: true });
+    log.info(`created the projects folder ${abs}`);
+  }
+  if (existsSync(path.join(abs, ".git"))) {
+    throw new Error(`${abs} is a git repository; --root takes the folder that contains your projects (e.g. ~/aso-projects)`);
   }
   return abs;
 }

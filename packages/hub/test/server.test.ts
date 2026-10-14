@@ -72,6 +72,7 @@ describe("hub WebSocket protocol", () => {
     c.send(
       createMessage("TASK_ASSIGNMENT", "arch-2", {
         taskId: "t1",
+        project: "project",
         role: "backend",
         title: "x",
         description: "y",

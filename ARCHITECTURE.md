@@ -32,8 +32,9 @@ and in most Markdown editors.
   before use. The Hub also checks what workers already checked themselves.
 - **No raw Git or package manager for agents.** Agents edit files. Branching, committing,
   pushing and dependency changes go through narrow, typed wrappers.
-- **The orchestrator is separate from the target project.** ASO runs from its own install and
-  operates on the repository given by `--dir`.
+- **The orchestrator is separate from the projects.** ASO runs from its own install and
+  operates on the git repositories in its projects folder (`--root`, default `~/aso-projects`).
+  It serves several projects at once with one shared pool of workers.
 
 ## 2. Deployment topology
 
@@ -41,7 +42,7 @@ and in most Markdown editors.
 flowchart TB
   subgraph HUBM["Hub machine (Ubuntu Server)"]
     direction TB
-    CLIH["aso start-hub --docker --dir ~/project"]
+    CLIH["aso start-hub --docker (projects in ~/aso-projects)"]
     subgraph CTR["Docker container (runs as host uid)"]
       HUB["Hub process<br/>API · WebSocket · Git HTTP :7420"]
       DASH["Dashboard<br/>Next.js :7421"]
@@ -91,8 +92,9 @@ flowchart TB
 - **`safe.directory`.** Git's `safe.directory` is set to `*` inside the image, so a mount owned
   by a different uid still works.
 - **`HOME`.** `HOME=/data` is a named volume, used for the npm cache.
-- **State.** Tasks, plans and conversations live in the mounted project's `.git/aso/`, so they
-  survive the container being removed or rebuilt.
+- **Projects.** The projects folder is mounted at `/projects`. Each project's tasks, plans and
+  transcripts live in its `.git/aso/`, and agent conversations in `/projects/.aso/`, so all
+  of them survive the container being removed or rebuilt.
 - **Process handling.** `init: true` makes signals and child-process reaping work.
 - **Shutdown.** Ctrl+C reaches compose through the terminal's process group. The CLI only
   forwards signals that came from elsewhere, such as SIGTERM, because a second SIGINT would
@@ -141,7 +143,8 @@ flowchart LR
 | | `llm/conversations.ts` | `ConversationManager`: Hub-held conversations, turn checks, budget, concurrency queue |
 | | `llm/prompts.ts`, `llm/pricing.ts` | Role system prompts, task prompt (with rework feedback), price table |
 | | `plans.ts` | `PlanManager`: plan queue, Architect assignment, validation, approval → tasks |
-| | `state-store.ts` | `StateStore`: saves tasks, plans and conversations to `.git/aso/` and loads them on start |
+| | `projects.ts` | `ProjectSet`: finds and creates projects; each has its own repo, tasks, plans, dependencies, push sync, state and transcripts. Hub-wide dispatch and lookup by task/plan id |
+| | `state-store.ts` | `StateStore`: saves tasks and plans (per project, `.git/aso/`) and conversations (Hub-wide) and loads them on start |
 | `@aso/architect` | `client.ts`, `planner.ts` | Architect node: registers, plans each `PLAN_REQUEST` with read-only tools via the Hub, submits `PLAN_RESULT`. Run by the CLI's hidden `aso architect` command in tmux |
 | `@aso/worker` | `client.ts` | Connect, register (with resume claim), heartbeat, offline outbox, dispatch jobs |
 | | `jobs.ts` | `JobRunner`: implementation jobs (via a `TaskExecutor`, with `requestDependencies` / `callModel`) and QA runs |
@@ -182,16 +185,16 @@ keys are rejected.
 | `NODE_REGISTRATION` | node → hub | 1 | First message. Workers send roles, hardware profile and an optional `resume` claim (the job they are still running after a reconnect) |
 | `REGISTRATION_ACK` | hub → node | 1 | Registration accepted |
 | `NODE_HEARTBEAT` | node → hub | 2 | Every 15 s: free RAM, CPU load, Docker availability |
-| `TASK_ASSIGNMENT` | hub → node | 2 | A `TaskSpec`, plus `rework` (round, reason, failures, test output) when the task comes back |
+| `TASK_ASSIGNMENT` | hub → node | 2 | A `TaskSpec` with its `project` (the worker checks out `/git/<project>.git`), plus `rework` (round, reason, failures, test output) when the task comes back |
 | `STATUS_UPDATE` | node → hub | 2 | `accepted`, `in_progress`, `waiting_*`, `completed` (with commit), `failed`, `idle` |
-| `TEST_EXECUTION` | hub → node | 3 | QA: test an exact commit with `setup` steps and a `command` argv |
+| `TEST_EXECUTION` | hub → node | 3 | QA: test an exact commit with `setup` steps and a `command` argv; carries the `project` |
 | `FEEDBACK_LOOP` | node → hub | 3 | QA verdict: `pass`, or `fail` with at least one failure and the output tail |
 | `FILE_OPERATION` | node → hub | 5 | Audit trail of agent file edits (sent by the agent loop) |
 | `DEPENDENCY_REQUEST` | node → hub | 4 | Ask the Hub for a package.json change: `add_dependencies` or `set_scripts` (idempotent by `requestId`) |
 | `DEPENDENCY_RESPONSE` | hub → node | 4 | `installed` (with the main commit) or `rejected` |
 | `PROMPT_EXECUTION` | node → hub | 5 | One agent turn for a `taskId` (worker) or `planId` (Architect): `conversationId`, `turn`, and the results of the previous turn's tool calls. Nothing else: the Hub holds the conversation |
 | `PROMPT_RESULT` | hub → node | 5 | The model's visible text and tool calls for that turn, plus usage/cost; or an error marked retryable or not |
-| `PLAN_REQUEST` | hub → architect | 6 | Plan this requirement (`planId`, `requirement`) |
+| `PLAN_REQUEST` | hub → architect | 6 | Plan this requirement (`planId`, `requirement`); carries the `project` |
 | `PLAN_RESULT` | architect → hub | 6 | `proposed` (summary + planned tasks with plan-local keys and `dependsOn`) or `failed` |
 | `PROTOCOL_ERROR` | hub → node | 1 | Why a message was rejected, with the offending message id |
 
@@ -286,10 +289,14 @@ progress anyway; it is effectively paused. A short network blip therefore costs 
 Tasks, plans and agent conversations are saved to disk, so a Hub restart looks to the swarm
 like every node dropping off at once and coming back.
 
-**Where.** `<project>/.git/aso/` by default (`HubOptions.stateDir`; `null` keeps everything in
-memory). Inside `.git` the state stays with the project it describes, is covered by the Docker
-bind mount, and is never committed or served: the Git endpoint only answers smart-HTTP paths,
-so clones don't include it.
+**Where.**
+- **Per project:** tasks, plans and transcripts go in `<project>/.git/aso/`. Inside `.git` the
+  state stays with the project it describes, is covered by the Docker bind mount, and is never
+  committed or served. The Git endpoint only answers smart-HTTP paths, so clones don't include
+  it.
+- **Hub-wide:** agent conversations go in `<projects root>/.aso/`. That folder starts with a
+  dot, so it is never taken for a project.
+- **In memory only:** `HubOptions.stateDir: null`.
 
 | File | Content | Written |
 |---|---|---|
@@ -498,11 +505,11 @@ flowchart LR
 sequenceDiagram
   autonumber
   participant H as Hub (TaskManager)
-  participant R as Hub repo (/git/project.git)
+  participant R as Hub repo (/git/<project>.git)
   participant W as Implementer worker
   participant Q as QA worker
 
-  H->>W: TASK_ASSIGNMENT {spec, rework?}
+  H->>W: TASK_ASSIGNMENT {spec, project, rework?}
   W->>W: discardLocalChanges()
   W->>R: clone / fetch
   W->>W: startTask → task/<id> from origin/task/<id> or origin/main
@@ -528,8 +535,9 @@ sequenceDiagram
 
 ### The Hub's Git endpoint
 
-`/git/project.git` is Git smart-HTTP, implemented as a CGI bridge to `git http-backend`
-running against the target directory:
+`/git/<project>.git` is Git smart-HTTP, implemented as a CGI bridge to `git http-backend`
+running against that project's directory. An unknown project returns 404, and the project
+name is restricted to `[a-z0-9_-]`, so it can't address anything else:
 
 1. Only `info/refs`, `HEAD`, `git-upload-pack` and `git-receive-pack` are routed. Everything
    else returns 404, so the endpoint never serves arbitrary files.
@@ -993,7 +1001,7 @@ flowchart LR
 |---|---|---|
 | WebSocket `/ws` | `Authorization: Bearer` on the upgrade request | `401` before upgrade; the worker logs "check ASO_TOKEN" |
 | API `/api/*` | `Bearer`, or Basic with the token as password | `401` with `WWW-Authenticate: Basic` |
-| Git `/git/project.git/*` | `http.extraHeader` per git command (never in `.git/config`) | `401` (git fails without prompting) |
+| Git `/git/<project>.git/*` | `http.extraHeader` per git command (never in `.git/config`) | `401` (git fails without prompting) |
 | Console | Sign-in page sets an `httpOnly`, `SameSite=Lax` session cookie (`Secure` behind HTTPS); Basic auth also accepted. Its proxy to the Hub adds `Bearer` server-side and allows only the console's endpoints | Pages redirect to `/login`; `/api/*` returns `401` |
 | `/api/health`, `/api/version`, `/dist/aso.tgz` | none | Health shows only `{status, auth}` |
 

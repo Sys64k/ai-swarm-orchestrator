@@ -8,11 +8,15 @@ import {
   type MessageOf,
   type PayloadInput,
 } from "@aso/shared";
-import type { PlanManager } from "../plans.js";
+import type { ProjectSet } from "../projects.js";
 import type { NodeRegistry } from "../registry.js";
 import type { StateStore } from "../state-store.js";
 import type { Transcripts } from "../transcripts.js";
-import type { AgentTurn, TaskManager } from "../tasks.js";
+
+/** Tasks and plans of every project, looked up by their Hub-wide ids. */
+type TaskDirectory = ProjectSet["tasks"];
+type PlanDirectory = ProjectSet["plans"];
+import type { AgentTurn } from "../tasks.js";
 import { LlmError, type LlmAdapter } from "./adapter.js";
 import { priceUsage } from "./pricing.js";
 import { architectSystemPrompt, CONTINUE_PROMPT, planPrompt, systemPrompt, taskPrompt } from "./prompts.js";
@@ -37,7 +41,7 @@ export interface ConversationOptions {
   /** Saves conversations after every turn so agents can carry on after a Hub restart. */
   store?: StateStore;
   /** Records the agent's text, tool calls and tool results for the console. */
-  transcripts?: Transcripts;
+  transcripts?: Pick<Transcripts, "append">;
 }
 
 /** What a conversation works on: a task (worker agent) or a plan (Architect). */
@@ -98,14 +102,14 @@ export class ConversationManager {
   private readonly idleTimeoutMs: number;
   private readonly slots: Semaphore;
   private readonly store?: StateStore;
-  private readonly transcripts?: Transcripts;
+  private readonly transcripts?: Pick<Transcripts, "append">;
   private totals = { calls: 0, costUsd: 0 };
 
   constructor(
     private readonly adapter: LlmAdapter | undefined,
-    private readonly tasks: TaskManager,
+    private readonly tasks: TaskDirectory,
     private readonly registry: NodeRegistry,
-    private readonly plans: PlanManager,
+    private readonly plans: PlanDirectory,
     opts: ConversationOptions = {},
   ) {
     this.taskBudgetUsd = opts.taskBudgetUsd ?? 5;

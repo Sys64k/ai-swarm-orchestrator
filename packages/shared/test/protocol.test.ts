@@ -72,13 +72,14 @@ describe("AgentMessageSchema", () => {
   it("applies defaults for TASK_ASSIGNMENT and TEST_EXECUTION", () => {
     const task = createMessage("TASK_ASSIGNMENT", "hub", {
       taskId: "add-login",
+      project: "shop",
       role: "frontend",
       title: "Login page",
       description: "Build it",
     });
     assert.deepEqual(task.payload.files, []);
     assert.equal(task.payload.kind, "feature");
-    const test = createMessage("TEST_EXECUTION", "hub", { taskId: "add-login", commit: SHA });
+    const test = createMessage("TEST_EXECUTION", "hub", { taskId: "add-login", project: "shop", commit: SHA });
     assert.deepEqual(test.payload.command, ["npm", "test"]);
     assert.equal(test.payload.timeoutSec, 900);
   });

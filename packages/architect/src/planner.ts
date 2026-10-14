@@ -29,10 +29,11 @@ export class Planner {
     },
   ) {}
 
-  async plan(planId: string): Promise<PlanOutcome> {
+  async plan(planId: string, project: string): Promise<PlanOutcome> {
     try {
-      const repoDir = path.join(this.opts.workDir, "project");
-      const git = await AgentGitClient.cloneOrOpen(repoDir, hubGitUrl(this.opts.hubUrl), { token: this.opts.token });
+      // One read-only checkout per project, reused across that project's plans.
+      const repoDir = path.join(this.opts.workDir, project);
+      const git = await AgentGitClient.cloneOrOpen(repoDir, hubGitUrl(this.opts.hubUrl, project), { token: this.opts.token });
       await git.discardLocalChanges();
       const head = await git.checkoutMain();
       log.info(`${planId}: exploring main @ ${head.slice(0, 8)}`);

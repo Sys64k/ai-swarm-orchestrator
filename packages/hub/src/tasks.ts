@@ -38,6 +38,8 @@ type Feedback = MessageOf<"FEEDBACK_LOOP">["payload"];
 
 export interface TaskRecord {
   spec: TaskSpec;
+  /** The project (folder in the Hub's projects root) the task works on. */
+  project: string;
   state: TaskState;
   /** Implementing node (while assigned / in_progress). */
   nodeId?: string;
@@ -109,6 +111,15 @@ export interface QaOptions {
 export const DEFAULT_QA: QaOptions = { enabled: true, command: ["npm", "test"], kind: "unit_test", timeoutSec: 900 };
 
 export interface TaskManagerOptions {
+  /** The project these tasks belong to; sent to workers so they check out the right repository. */
+  project?: string;
+  /**
+   * Called when work may have become dispatchable (a node freed up, a task requeued). With
+   * several projects sharing the workers, this dispatches all of them; default: this one.
+   */
+  onDispatchNeeded?: () => void;
+  /** Whether a task id is taken in any project: ids are unique across the Hub. */
+  isIdTaken?: (taskId: string) => boolean;
   policies?: RoutingPolicies;
   /** Node drops tolerated per task before it is failed. */
   maxDrops?: number;
@@ -141,6 +152,9 @@ export class TaskManager {
   readonly qa: QaOptions;
   private readonly onMerged?: (task: TaskRecord) => void;
   private readonly onChange?: () => void;
+  readonly project: string;
+  private readonly onDispatchNeeded?: () => void;
+  private readonly isIdTaken: (taskId: string) => boolean;
   private readonly onTranscript?: (taskId: string, entry: TranscriptInput) => void;
 
   constructor(
@@ -157,6 +171,14 @@ export class TaskManager {
     this.onMerged = opts.onMerged;
     this.onChange = opts.onChange;
     this.onTranscript = opts.onTranscript;
+    this.project = opts.project ?? "project";
+    this.onDispatchNeeded = opts.onDispatchNeeded;
+    this.isIdTaken = opts.isIdTaken ?? ((id) => this.tasks.has(id));
+  }
+
+  private kick(): void {
+    if (this.onDispatchNeeded) this.onDispatchNeeded();
+    else this.dispatch();
   }
 
   /**
@@ -175,7 +197,7 @@ export class TaskManager {
     task.qaNodeId = undefined;
     task.waitingReason = undefined;
     this.note(task, "cancelled by a person");
-    this.dispatch();
+    this.kick();
     return task;
   }
 
@@ -201,7 +223,7 @@ export class TaskManager {
     task.rework = { round: 1, reason: `Retried by a person; ${why}. Your branch may already contain that attempt.` };
     task.state = "pending";
     this.note(task, `retry ${task.retries} requested by a person`);
-    this.dispatch();
+    this.kick();
     return task;
   }
 
@@ -224,7 +246,10 @@ export class TaskManager {
    * Not counted as a node drop: the Hub went away, not the node.
    */
   restore(records: readonly TaskRecord[], now = Date.now()): void {
-    for (const record of records) this.tasks.set(record.spec.taskId, record);
+    for (const record of records) {
+      record.project ??= this.project; // saved before projects existed
+      this.tasks.set(record.spec.taskId, record);
+    }
     for (const task of records) {
       task.detachedAt = undefined;
       switch (task.state) {
@@ -276,7 +301,7 @@ export class TaskManager {
       throw new TaskError(parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "), "invalid");
     }
     const spec = TaskSpecSchema.parse({ ...parsed.data, taskId: parsed.data.taskId ?? this.generateId(origin.idHint ?? parsed.data.title) });
-    if (this.tasks.has(spec.taskId)) throw new TaskError(`task ${spec.taskId} already exists`, "duplicate");
+    if (this.isIdTaken(spec.taskId)) throw new TaskError(`task ${spec.taskId} already exists`, "duplicate");
     for (const dep of spec.dependsOn) {
       if (dep === spec.taskId) throw new TaskError("a task cannot depend on itself", "invalid");
       if (!this.tasks.has(dep)) throw new TaskError(`dependency ${dep} does not exist (submit it first)`, "invalid");
@@ -285,6 +310,7 @@ export class TaskManager {
     const now = new Date().toISOString();
     const task: TaskRecord = {
       spec,
+      project: this.project,
       state: "pending",
       attempts: 0,
       qaAttempts: 0,
@@ -300,7 +326,7 @@ export class TaskManager {
     };
     this.tasks.set(spec.taskId, task);
     this.note(task, `queued (${spec.role}/${spec.kind})`);
-    this.dispatch();
+    this.kick();
     return task;
   }
 
@@ -331,7 +357,7 @@ export class TaskManager {
     task.waitingReason = undefined;
     task.routing = { nodeId: decision.nodeId, score: decision.score, reasons: decision.reasons };
     this.note(task, `assigned to ${decision.nodeId} (${decision.reasons.join(", ")})`);
-    this.registry.send(decision.nodeId, "TASK_ASSIGNMENT", { ...task.spec, rework: task.rework });
+    this.registry.send(decision.nodeId, "TASK_ASSIGNMENT", { ...task.spec, project: this.project, rework: task.rework });
   }
 
   private dispatchQa(task: TaskRecord): void {
@@ -347,6 +373,7 @@ export class TaskManager {
     this.note(task, `QA run on ${decision.nodeId} for ${task.commit!.slice(0, 8)}`);
     this.registry.send(decision.nodeId, "TEST_EXECUTION", {
       taskId: task.spec.taskId,
+      project: this.project,
       commit: task.commit!,
       command: this.qa.command,
       setup: task.qaSetup ?? [],
@@ -457,13 +484,13 @@ export class TaskManager {
         task.commit = update.commit;
         this.note(task, `pushed ${update.commit!.slice(0, 8)}${update.detail ? `: ${update.detail}` : ""}`);
         void this.verify(task, update.commit!);
-        this.dispatch();
+        this.kick();
         return undefined;
       case "failed":
         this.registry.release(nodeId, task.spec.taskId);
         task.state = "failed";
         this.note(task, `failed on ${nodeId}: ${update.detail ?? "no detail"}`);
-        this.dispatch();
+        this.kick();
         return undefined;
     }
     return undefined;
@@ -489,7 +516,7 @@ export class TaskManager {
         this.note(task, `QA node ${nodeId} could not run tests: ${update.detail ?? "no detail"}`);
         if (task.qaAttempts >= this.maxQaAttempts) this.fail(task, `QA could not run after ${task.qaAttempts} attempts`);
         else task.state = "awaiting_qa";
-        this.dispatch();
+        this.kick();
         return undefined;
       default:
         return `QA nodes report results with FEEDBACK_LOOP, not STATUS_UPDATE ${update.state}`;
@@ -519,7 +546,7 @@ export class TaskManager {
       this.note(task, `QA failed on ${nodeId}: ${feedback.summary}`);
       this.rework(task, `QA failed: ${feedback.summary}`, feedback.failures, feedback.output);
     }
-    this.dispatch();
+    this.kick();
     return undefined;
   }
 
@@ -542,7 +569,7 @@ export class TaskManager {
         this.requeue(task, `${nodeId} disconnected before starting`);
       }
     }
-    this.dispatch();
+    this.kick();
   }
 
   /** A node (re)registered. Give back a held job it is still running; requeue ones it lost. */
@@ -573,7 +600,7 @@ export class TaskManager {
         changed = true;
       }
     }
-    if (changed) this.dispatch();
+    if (changed) this.kick();
   }
 
   private requeue(task: TaskRecord, reason: string): void {
@@ -608,7 +635,7 @@ export class TaskManager {
     task.qaAttempts = 0;
     task.state = "awaiting_qa";
     this.note(task, "verified; awaiting QA");
-    this.dispatch();
+    this.kick();
   }
 
   private async merge(task: TaskRecord): Promise<void> {
@@ -630,7 +657,7 @@ export class TaskManager {
       // Operator problem on the Hub (dirty checkout, wrong branch): no point reworking the code.
       this.fail(task, `merge blocked: ${result.reason}`);
     }
-    this.dispatch();
+    this.kick();
   }
 
   private rework(task: TaskRecord, reason: string, failures: Rework["failures"] = [], output?: string): void {
@@ -644,7 +671,7 @@ export class TaskManager {
     task.qaNodeId = undefined;
     task.commit = undefined;
     this.note(task, `rework round ${task.reworkRound}: ${reason}`);
-    this.dispatch();
+    this.kick();
   }
 
   private fail(task: TaskRecord, reason: string): void {
@@ -678,7 +705,7 @@ export class TaskManager {
       .replace(/-+$/, "");
     let id: string;
     do id = `${slug || "task"}-${randomBytes(3).toString("hex")}`;
-    while (this.tasks.has(id));
+    while (this.isIdTaken(id));
     return id;
   }
 }

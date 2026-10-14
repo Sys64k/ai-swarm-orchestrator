@@ -4,6 +4,7 @@ import { authorizationHeader, resolveHubUrl, resolveToken } from "@aso/shared";
 
 interface PlanView {
   planId: string;
+  project: string;
   state: string;
   summary?: string;
   error?: string;
@@ -35,13 +36,13 @@ async function api<T>(base: string, path: string, init?: RequestInit): Promise<T
   return body;
 }
 
-export async function planCommand(words: string[], opts: { hub: string; file?: string; yes: boolean }): Promise<void> {
+export async function planCommand(words: string[], opts: { hub: string; file?: string; yes: boolean; project?: string }): Promise<void> {
   const requirement = opts.file ? await readFile(opts.file, "utf8") : words.join(" ");
   if (!requirement.trim()) throw new Error('give the requirement as text (aso plan "...") or with --file <path>');
   const base = apiBase(opts.hub);
 
-  let plan = await api<PlanView>(base, "/api/plans", { method: "POST", body: JSON.stringify({ requirement }) });
-  console.log(`${plan.planId}: waiting for the Architect...`);
+  let plan = await api<PlanView>(base, "/api/plans", { method: "POST", body: JSON.stringify({ requirement, project: opts.project }) });
+  console.log(`${plan.planId} (${plan.project}): waiting for the Architect...`);
   let shown = 0;
   const deadline = Date.now() + 30 * 60_000;
   while (plan.state === "pending" || plan.state === "planning") {

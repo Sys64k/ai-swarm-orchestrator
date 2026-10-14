@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 import { existsSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { Command, InvalidArgumentError } from "commander";
 import {
   resolveToken,
   tokenFile,
   DEFAULT_DASHBOARD_PORT,
   DEFAULT_HUB_PORT,
+  DEFAULT_PROJECTS_DIR,
   WORKER_ROLES,
   WorkerRoleSchema,
   type WorkerRole,
@@ -68,7 +71,11 @@ const program = new Command()
 program
   .command("start-hub")
   .description("Start the Hub: API/WebSocket server, dashboard and Architect tmux session")
-  .requiredOption("-d, --dir <target_project_path>", "path to the target project repository")
+  .option(
+    "-r, --root <dir>",
+    "folder of projects: each git repository in it is a project, and new ones are created there",
+    process.env.ASO_PROJECTS_ROOT || path.join(os.homedir(), DEFAULT_PROJECTS_DIR),
+  )
   .option("-p, --port <port>", "Hub API/WebSocket port", parsePort, DEFAULT_HUB_PORT)
   .option("--host <host>", "interface to bind", "0.0.0.0")
   .option("--dashboard-port <port>", "dashboard port", parsePort, DEFAULT_DASHBOARD_PORT)
@@ -116,6 +123,7 @@ program
   .description("Ask the Architect to plan a requirement, review the proposed tasks, and approve them")
   .argument("[requirement...]", "what to build (or use --file)")
   .option("-f, --file <path>", "read the requirement from a file")
+  .option("-P, --project <name>", "project to plan for (needed when the Hub has more than one)", process.env.ASO_PROJECT || undefined)
   .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
   .option("-y, --yes", "approve the proposed plan without asking", false)
   .action((words: string[], opts) => planCommand(words, opts));
@@ -146,8 +154,9 @@ program
 
 program
   .command("sync")
-  .description("Show the Hub's push status to the target repo's remote, and retry a failed push")
+  .description("Show a project's push status to its remote, and retry a failed push")
   .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
+  .option("-P, --project <name>", "project (needed when the Hub has more than one)", process.env.ASO_PROJECT || undefined)
   .action(syncCommand);
 
 program
