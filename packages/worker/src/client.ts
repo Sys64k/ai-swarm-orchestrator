@@ -20,6 +20,7 @@ import {
 import { profileHardware, sampleLoad } from "./hardware.js";
 import { LlmTaskExecutor } from "./agent/executor.js";
 import { JobRunner, type TaskExecutor } from "./jobs.js";
+import { DockerSandbox, hostRunner, type CommandRunner, type DockerSandboxOptions } from "./sandbox.js";
 
 const log = createLogger("worker");
 
@@ -38,6 +39,14 @@ export interface WorkerOptions {
   nodeId?: string;
   /** Shared ASO token (required unless the Hub runs without authentication). */
   token?: string;
+  /**
+   * Where job commands run. `docker` (default): a throwaway container per command that sees
+   * only the task checkout. `none`: directly on this machine, as this user. A ready-made
+   * CommandRunner can be passed instead (tests).
+   */
+  sandbox?: "docker" | "none" | CommandRunner;
+  /** Options for the Docker sandbox (image, network, cache). */
+  sandboxOptions?: Omit<DockerSandboxOptions, "workDir">;
 }
 
 export const DEFAULT_WORK_DIR = path.join(os.homedir(), ".aso", "work");
@@ -62,6 +71,7 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
     log.info("scanning hardware...");
     profile = await profileHardware(workDir);
   }
+  const commands = await createCommandRunner(opts.sandbox ?? "docker", workDir, opts.sandboxOptions);
   const nodeId = opts.nodeId ?? `${profile.hostname}-${randomUUID().slice(0, 8)}`;
   log.info(
     `${profile.hostname}: ${profile.cpu.logicalCores} threads, ` +
@@ -93,6 +103,7 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
     executor: opts.executor ?? new LlmTaskExecutor(),
     send,
     token: opts.token,
+    commands,
   });
 
   const connect = () => {
@@ -187,4 +198,19 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
       ws?.close(1000, "worker stopping");
     },
   };
+}
+
+async function createCommandRunner(
+  sandbox: NonNullable<WorkerOptions["sandbox"]>,
+  workDir: string,
+  options: WorkerOptions["sandboxOptions"],
+): Promise<CommandRunner> {
+  if (typeof sandbox === "object") return sandbox;
+  if (sandbox === "none") {
+    log.warn("sandbox disabled: agent commands, npm install scripts and tests run directly on this machine as this user");
+    return hostRunner;
+  }
+  const docker = new DockerSandbox({ ...options, workDir });
+  await docker.prepare();
+  return docker;
 }

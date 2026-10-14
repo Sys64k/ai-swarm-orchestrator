@@ -53,6 +53,11 @@ function parseEffort(value: string): Effort {
   return value as Effort;
 }
 
+function parseSandbox(value: string): "docker" | "none" {
+  if (value !== "docker" && value !== "none") throw new InvalidArgumentError("expected docker or none");
+  return value;
+}
+
 const EFFORTS: Effort[] = ["low", "medium", "high", "xhigh", "max"];
 
 const program = new Command()
@@ -96,6 +101,14 @@ program
   .option("-r, --roles <roles>", `roles to accept (default: ${WORKER_ROLES.join(",")})`, parseRoles)
   .option("-w, --work-dir <path>", "directory for task checkouts (default: ~/.aso/work)")
   .option("--token <token>", "ASO token from the Hub (default: ASO_TOKEN or the local token file)")
+  .option(
+    "--sandbox <mode>",
+    "where job commands run: docker (a container per command that sees only the checkout) or none (directly on this machine)",
+    parseSandbox,
+    "docker",
+  )
+  .option("--sandbox-image <image>", "Docker image for job commands (default: built on first start)")
+  .option("--sandbox-network <name>", "docker network for job commands (default: bridge; `none` blocks network access)")
   .action(startWorkerCommand);
 
 program

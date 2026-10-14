@@ -12,7 +12,7 @@ import {
 } from "@aso/shared";
 import { AgentGitClient } from "./git/agent-git-client.js";
 import { ModelChannel, type ModelReply, type ModelTurn } from "./model-channel.js";
-import { runCommand } from "./run-command.js";
+import { hostRunner, type CommandRunner } from "./sandbox.js";
 
 const log = createLogger("jobs");
 
@@ -46,6 +46,8 @@ export interface ExecutionContext {
   callModel(turn: ModelTurn): Promise<ModelReply>;
   /** Report an agent file edit to the Hub (audit trail / dashboard). */
   fileOperation(op: Omit<MessageOf<"FILE_OPERATION">["payload"], "taskId">): void;
+  /** Where the agent's commands run (the job sandbox, or directly on this machine). */
+  commands: CommandRunner;
 }
 
 export type { ModelReply, ModelTurn } from "./model-channel.js";
@@ -81,6 +83,8 @@ export interface JobRunnerOptions {
   dependencyTimeoutMs?: number;
   /** How long to wait for one model turn. Default 20 min. */
   modelTimeoutMs?: number;
+  /** Runs every command of a job (agent commands, npm ci, QA). Default: directly on this machine. */
+  commands?: CommandRunner;
 }
 
 type DependencyResponse = MessageOf<"DEPENDENCY_RESPONSE">["payload"];
@@ -105,6 +109,10 @@ export class JobRunner {
 
   constructor(private readonly opts: JobRunnerOptions) {
     this.model = new ModelChannel(opts.send, opts.modelTimeoutMs);
+  }
+
+  private get commands(): CommandRunner {
+    return this.opts.commands ?? hostRunner;
   }
 
   /** The job in progress, reported to the Hub on re-registration. */
@@ -185,6 +193,7 @@ export class JobRunner {
         setPackageScripts: (scripts) => this.requestPackageChange(task, git, { type: "set_scripts", scripts }),
         callModel: (turn) => this.model.call({ taskId: task.taskId }, turn),
         fileOperation: (op) => send("FILE_OPERATION", { ...op, taskId: task.taskId } as PayloadInput<"FILE_OPERATION">),
+        commands: this.commands,
       });
       const done = await git.completeTask(result?.commitMessage ?? `${task.taskId}: ${task.title}`);
       send("STATUS_UPDATE", {
@@ -236,7 +245,8 @@ export class JobRunner {
     await git.syncWithMain();
     // Only a new dependency needs installing; script changes don't touch node_modules.
     if (change.type === "add_dependencies" && existsSync(path.join(this.repoDir, "package-lock.json"))) {
-      const result = await runCommand(["npm", "ci", "--no-audit", "--no-fund"], {
+      // Install scripts are code from the registry: they run where agent commands run.
+      const result = await this.commands.run(["npm", "ci", "--no-audit", "--no-fund"], {
         cwd: this.repoDir,
         timeoutMs: 10 * 60_000,
       });
@@ -262,14 +272,14 @@ export class JobRunner {
 
     const deadline = Date.now() + job.timeoutSec * 1000;
     // CI=1 keeps runners like Vitest and Jest out of watch/interactive mode.
-    const env = { ...process.env, CI: "1" };
+    const env = { CI: "1" };
     const steps = [...job.setup.map((argv) => ({ argv, setup: true })), { argv: job.command, setup: false }];
 
     for (const { argv, setup } of steps) {
       const label = argv.join(" ");
       let result;
       try {
-        result = await runCommand(argv, { cwd: this.repoDir, env, timeoutMs: Math.max(1000, deadline - Date.now()) });
+        result = await this.commands.run(argv, { cwd: this.repoDir, env, timeoutMs: Math.max(1000, deadline - Date.now()) });
       } catch (err) {
         // The program could not start at all: a problem with this node, not with the code.
         return send("STATUS_UPDATE", { state: "failed", taskId: job.taskId, detail: `cannot run ${label}: ${(err as Error).message}` });

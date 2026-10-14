@@ -14,7 +14,7 @@ import {
   type MessageOf,
 } from "@aso/shared";
 import { DependencyRejectedError, type DependencyRequest } from "../jobs.js";
-import { runCommand } from "../run-command.js";
+import type { CommandRunner } from "../sandbox.js";
 
 const exec = promisify(execFile);
 
@@ -50,6 +50,8 @@ export interface ToolHost {
   requestDependencies(packages: DependencyRequest[]): Promise<{ mainCommit: string }>;
   setPackageScripts(scripts: Record<string, string>): Promise<{ mainCommit: string }>;
   fileOperation(op: Omit<MessageOf<"FILE_OPERATION">["payload"], "taskId">): void;
+  /** Where run_command executes: the job sandbox, or directly on this machine. */
+  commands: CommandRunner;
 }
 
 class ToolError extends Error {}
@@ -57,8 +59,9 @@ class ToolError extends Error {}
 /**
  * Executes the agent's tool calls inside the task checkout. Inputs come from the model and
  * are untrusted: every call is schema-validated and every path is confined to the checkout.
- * These are guardrails for a cooperative agent, not a sandbox against a hostile one; the
- * Hub's checks (push policy, protected files, QA) are what actually protect main.
+ * The file tools and the program blocklist are guardrails for a cooperative agent. What
+ * contains a misbehaving one is the job sandbox `run_command` executes in (when the worker
+ * runs with Docker) and the Hub's checks (push policy, protected files, QA), which protect main.
  */
 export class AgentTools {
   private rootReal?: string;
@@ -223,7 +226,7 @@ export class AgentTools {
     }
     let result;
     try {
-      result = await runCommand(argv, { cwd: this.host.repoDir, timeoutMs: timeout_sec * 1000, env: { ...process.env, CI: "1" } });
+      result = await this.host.commands.run(argv, { cwd: this.host.repoDir, timeoutMs: timeout_sec * 1000, env: { CI: "1" } });
     } catch (err) {
       return done(`cannot run ${argv[0]}: ${(err as Error).message}`, true);
     }

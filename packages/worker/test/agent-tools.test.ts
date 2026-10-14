@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { agentToolDefinitions } from "@aso/shared";
-import { AgentTools, DependencyRejectedError, type ToolResult } from "@aso/worker";
+import { AgentTools, DependencyRejectedError, hostRunner, type ToolResult } from "@aso/worker";
 
 process.env.ASO_LOG_LEVEL ??= "warn";
 
@@ -35,6 +35,7 @@ beforeEach(() => {
   tools = new AgentTools({
     repoDir: repo,
     role: "backend",
+    commands: hostRunner,
     fileOperation: (op) => ops.push(`${op.op} ${op.path}`),
     requestDependencies: async (packages) => {
       if (packages.some((p) => p.name === "evil")) throw new DependencyRejectedError("not on allowlist");
@@ -159,6 +160,7 @@ describe("agent tools", () => {
       new AgentTools({
         repoDir: repo,
         role,
+        commands: hostRunner,
         fileOperation: (op) => ops.push(`${op.op} ${op.path}`),
         requestDependencies: async () => ({ mainCommit: "a".repeat(40) }),
         setPackageScripts: async () => ({ mainCommit: "b".repeat(40) }),

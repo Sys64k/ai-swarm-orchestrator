@@ -153,6 +153,13 @@ chmod 600 ~/.config/aso/.env
 aso start-worker --hub 192.168.1.10 --roles backend,qa
 ```
 
+Workers need **Docker**, usable by the worker's user (in the `docker` group). Every command a
+job runs goes into a throwaway container: agent commands, `npm ci` with its install scripts,
+and QA tests. That container sees only the task checkout. The first start builds the sandbox
+image, which is about 2 GB: Node plus the libraries headless Chromium needs. See
+[Security notes](#security-notes). Without Docker, `--sandbox none` runs those commands
+directly on the machine instead.
+
 ### Updating
 
 Run `aso update` on any machine:
@@ -351,6 +358,9 @@ outgoing messages and sends them once it has registered again.
 | `-r, --roles <list>` | all | Comma-separated: `backend,frontend,qa,devops` |
 | `-w, --work-dir <path>` | `~/.aso/work` | Where the project checkout lives; the I/O benchmark runs here |
 | `--token <token>` | `ASO_TOKEN` / token file | The Hub's ASO token |
+| `--sandbox <mode>` | `docker` | `docker`: each job command runs in a throwaway container that sees only the checkout. `none`: directly on this machine as this user. The worker refuses to start if `docker` is chosen but Docker isn't usable |
+| `--sandbox-image <image>` | built on first start | Image for job commands. The default is `node:<worker's Node major>-bookworm` plus Playwright's Chromium libraries |
+| `--sandbox-network <name>` | `bridge` | Docker network for job commands. `none` blocks all network access, but then `npm ci` and browser downloads fail |
 
 ### `aso plan`
 
@@ -500,14 +510,28 @@ For the scoring formula, see [ARCHITECTURE.md](ARCHITECTURE.md#6-hardware-aware-
   - Nodes can't supply their own system prompts.
 - **Test commands.** QA commands come from the Hub's configuration, never from workers. They
   run without a shell, in their own process group, with a timeout.
-- **Agent tools are guardrails, not a sandbox.** They catch a cooperative model's mistakes:
+- **Job sandbox.** Every command a job runs gets a throwaway Docker container. This covers
+  agent `run_command`, `npm ci` and its install scripts, and QA setup and tests. The container:
+  - sees only the task checkout, with `.git` read-only, so it can't plant hooks or config that
+    the worker's own git would run on the host
+  - sees a shared npm/browser cache, but not the home directory, SSH keys or the ASO token
+  - gets none of the worker's environment variables
+  - runs as the worker's user, with no capabilities, no privilege escalation, a read-only
+    root filesystem and a process limit
+
+  It does have network access by default (`bridge`), which npm and browser downloads need.
+  That means it can reach your LAN, though not the Hub's API or Git without the token. It
+  also can't use Docker, so DevOps agents can write Dockerfiles but can't build them on a
+  worker. `--sandbox none` turns all of this off.
+- **Agent tools are guardrails.** On top of the sandbox, the worker's tools catch a
+  cooperative model's mistakes:
   - paths are confined to the checkout, including through symlinks
   - protected files are refused
   - `git`, shells, `sudo` and package installs are blocked in `run_command`
 
-  But the agent can run project code (tests, scripts) with the worker user's permissions.
-  What protects `main` is the Hub (push policy, protected-file verification, QA). Run workers
-  as a dedicated user on machines you're comfortable letting agents build on.
+  These checks go by program name, so they aren't a boundary on their own: `node -e` can start
+  anything. What contains a misbehaving agent is the sandbox. What protects `main` is the Hub
+  (push policy, protected-file verification, QA).
 - **GitHub token.** `ASO_GIT_TOKEN` should be a fine-grained token limited to the one
   repository. Remote URLs are shown with credentials stripped.
 - **API key.** It lives only on the Hub. With `--docker` it is passed into the container

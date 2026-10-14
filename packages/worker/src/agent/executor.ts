@@ -34,6 +34,7 @@ export class LlmTaskExecutor implements TaskExecutor {
       requestDependencies: (packages) => ctx.requestDependencies(packages),
       setPackageScripts: (scripts) => ctx.setPackageScripts(scripts),
       fileOperation: (op) => ctx.fileOperation(op),
+      commands: ctx.commands,
     });
     const conversationId = randomUUID();
     let turn = 0;
