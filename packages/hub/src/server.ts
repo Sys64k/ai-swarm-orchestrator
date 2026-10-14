@@ -29,6 +29,7 @@ import { PlanError, type PlanRecord } from "./plans.js";
 import { ProjectError, ProjectSet, type Project } from "./projects.js";
 import { NodeRegistry, type NodeTransport } from "./registry.js";
 import type { RoutingPolicies } from "./routing.js";
+import { SignInCodes } from "./sign-in-codes.js";
 import { StateStore } from "./state-store.js";
 import { TaskError, type QaOptions, type TaskRecord } from "./tasks.js";
 
@@ -338,6 +339,14 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   });
 
   app.get("/api/nodes", (c) => c.json(registry.list()));
+
+  // One-time console sign-in links (the console redeems them for a session; both need the token).
+  const signInCodes = new SignInCodes();
+  app.post("/api/sign-in-codes", (c) => c.json(signInCodes.create(), 201));
+  app.post("/api/sign-in-codes/redeem", async (c) => {
+    const data = (await c.req.json().catch(() => null)) as { code?: unknown } | null;
+    return signInCodes.redeem(data?.code) ? c.json({ ok: true }) : c.json({ error: "this sign-in link is used up or expired" }, 410);
+  });
 
   app.get("/api/llm", (c) => c.json(conversations.status()));
 

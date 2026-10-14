@@ -238,11 +238,43 @@ and it works on a laptop too. On a phone, use **Add to Home Screen** to open it 
   Architect proposes a plan for you to approve.
 
 **Sign-in.**
+- **Sign-in link (easiest on a phone):** run `aso console-link` on the Hub machine, or tap
+  **Sign in another device** in a console that's already signed in. You get a link and a QR
+  code. Opening it signs that device in.
+  - The link works **once, within 10 minutes**, and doesn't contain the token, so a link left
+    in a chat or in browser history is useless afterwards.
+  - The code is used from the page, not by opening the link itself, so chat apps that
+    preview links can't use it up.
 - **Session:** sign in once with the ASO token. It's kept in an `httpOnly` cookie, so page
   scripts never see it.
 - **Scripts:** HTTP Basic auth (any user name, the token as password) still works for scripts.
 - **Proxy:** the browser reaches the Hub only through the console's server, which adds the
   token itself and allows only the endpoints the console uses.
+
+## Remote access with Tailscale
+
+The Hub's ports are only on your LAN. To use the console from anywhere, without exposing it
+publicly, put the Hub machine and your phone on the same
+[Tailscale](https://tailscale.com) tailnet and serve the console over HTTPS inside it:
+
+```bash
+curl -fsSL https://tailscale.com/install.sh | sh   # on the Hub machine
+sudo tailscale up --operator=$USER                 # log in once; lets your user manage serve
+tailscale serve --bg 7421                          # https://<machine>.<tailnet>.ts.net → console
+```
+
+Approve the "enable Serve" link Tailscale prints the first time. It also turns on HTTPS
+certificates for the tailnet. Then install the Tailscale app on your phone and sign in with
+the same account. The console works from anywhere at `https://<machine>.<tailnet>.ts.net`:
+
+- **Only your tailnet** can reach it.
+- **The sign-in cookie is `Secure`.**
+- **Redirects keep the HTTPS address,** because the console honours `X-Forwarded-Proto` and
+  `X-Forwarded-Host`.
+- **Links follow it:** `aso console-link` uses this address automatically while it's being
+  served.
+
+`tailscale serve --bg` survives reboots. `tailscale serve --https=443 off` stops it.
 
 ## How a task flows
 
@@ -453,6 +485,18 @@ balance. Prints the reply, the tokens used and the estimated cost (a fraction of
 
 Prints the Hub's ASO token (from `ASO_TOKEN` or `~/.config/aso/token`). Give it to workers.
 
+### `aso console-link`
+
+Prints a one-time sign-in link for the console, and its QR code, to open on a phone or another
+browser. The link works once, within 10 minutes.
+
+| Option | Default | Description |
+|---|---|---|
+| `--url <base>` | Tailscale HTTPS address if `tailscale serve` proxies to the console, else the LAN address | Console address to put in the link |
+| `--dashboard-port <port>` | `7421` | Console port, used to find the address |
+| `--no-qr` | | Print only the link |
+| `--hub <address>` | `127.0.0.1` | Hub that issues the code |
+
 ### `aso sync`
 
 Shows the push status for the target repository's remote, and retries a failed push. Run it
@@ -493,6 +537,7 @@ Options:
 | `GET` | `/api/tasks/:id/transcript`, `/api/plans/:id/transcript` | What the agent said and did: text, tool calls, command output, events, QA verdicts. `?after=<seq>` returns only newer entries |
 | `POST` | `/api/tasks/:id/cancel` | Stop a task that isn't finished; a worker still on it is cut off at its next model turn |
 | `POST` | `/api/tasks/:id/retry` | Queue a failed or cancelled task again with fresh limits and budget |
+| `POST` | `/api/sign-in-codes`, `/api/sign-in-codes/redeem` | Create a one-time console sign-in code (10 minutes, single use) / use one up. The console redeems codes server-side |
 | `POST` | `/api/plans` | Start a plan: `{ "requirement": "..." }` → `201` with `planId` |
 | `GET` | `/api/plans`, `/api/plans/:id` | Plans with state, summary, proposed tasks, cost |
 | `POST` | `/api/plans/:id/approve` / `reject` | Decide on a proposed plan; approve returns the created task ids |

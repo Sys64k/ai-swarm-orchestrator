@@ -71,6 +71,10 @@ export function Home() {
           )}
           {nodes.data && !architect && <p className="muted small">The Architect is not connected, so new plans will wait.</p>}
         </Section>
+
+        <p className="footer-links">
+          <Link href="/devices">Sign in another device</Link>
+        </p>
       </main>
       {projects.data?.length ? (
         <Link href={projects.data.length === 1 ? `/plans/new?project=${projects.data[0].id}` : "/plans/new"} className="fab">

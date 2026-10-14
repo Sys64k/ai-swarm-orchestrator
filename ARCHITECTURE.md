@@ -1002,6 +1002,7 @@ flowchart LR
 | WebSocket `/ws` | `Authorization: Bearer` on the upgrade request | `401` before upgrade; the worker logs "check ASO_TOKEN" |
 | API `/api/*` | `Bearer`, or Basic with the token as password | `401` with `WWW-Authenticate: Basic` |
 | Git `/git/<project>.git/*` | `http.extraHeader` per git command (never in `.git/config`) | `401` (git fails without prompting) |
+| Console sign-in link | `aso console-link` or a signed-in console asks the Hub for a one-time code (`SignInCodes`: 18 random bytes, 10 min, single use, at most 20 outstanding, in memory). `/login?code=` posts it from the page, so link previews can't use it up; the console server redeems it at the Hub and sets the session cookie | Used or expired: `/login?error=link` |
 | Console | Sign-in page sets an `httpOnly`, `SameSite=Lax` session cookie (`Secure` behind HTTPS); Basic auth also accepted. Its proxy to the Hub adds `Bearer` server-side and allows only the console's endpoints | Pages redirect to `/login`; `/api/*` returns `401` |
 | `/api/health`, `/api/version`, `/dist/aso.tgz` | none | Health shows only `{status, auth}` |
 

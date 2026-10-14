@@ -1,8 +1,7 @@
 import type { NextRequest } from "next/server";
 import { isSameOrigin } from "../../../../lib/auth.ts";
 import { hubPath } from "../../../../lib/hub-routes.ts";
-
-const HUB = `http://127.0.0.1:${process.env.ASO_HUB_PORT ?? "7420"}`;
+import { HUB_URL as HUB, hubHeaders } from "../../../../lib/hub-server.ts";
 
 /**
  * The browser's only way to the Hub: allowlisted endpoints, with the ASO token added here on
@@ -13,8 +12,7 @@ async function forward(request: NextRequest, ctx: { params: Promise<{ path: stri
   const target = hubPath(request.method, path);
   if (!target) return Response.json({ error: "not available from the console" }, { status: 404 });
 
-  const token = process.env.ASO_TOKEN;
-  const headers: Record<string, string> = token ? { authorization: `Bearer ${token}` } : {};
+  const headers = hubHeaders();
   let body: string | undefined;
   if (request.method === "POST") {
     // Browsers attach Basic-auth credentials even to cross-site requests; only accept our own pages.

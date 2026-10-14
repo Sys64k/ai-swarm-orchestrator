@@ -83,6 +83,13 @@ export function redirectTo(path: string, headers: Headers, fallbackOrigin: strin
   return new Response(null, { status, headers: { location: new URL(path, browserOrigin(headers, fallbackOrigin)).href } });
 }
 
+/** The link that signs a device in with a one-time code (the code is URL-safe base64). */
+export function signInLink(origin: string, code: string): string {
+  const url = new URL("/login", origin);
+  url.searchParams.set("code", code);
+  return url.href;
+}
+
 /** Routes that work without signing in. */
 export function isPublicPath(pathname: string): boolean {
   return (

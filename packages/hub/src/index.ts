@@ -28,3 +28,4 @@ export { PlanError, PlanManager, type PlanRecord, type PlanState } from "./plans
 export { GitSync, sanitizeUrl, type SyncStatus } from "./git/sync.js";
 export { StateStore, type Snapshot } from "./state-store.js";
 export { Transcripts, type TranscriptEntry, type TranscriptInput, type TranscriptSubject } from "./transcripts.js";
+export { SignInCodes, SIGN_IN_CODE_TTL_MS } from "./sign-in-codes.js";
