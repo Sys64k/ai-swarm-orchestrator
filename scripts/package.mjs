@@ -90,6 +90,7 @@ const compose = composeSource
 writeFileSync(path.join(stage, "docker/docker-compose.yml"), compose);
 cpSync(path.join(root, ".env.example"), path.join(stage, ".env.example"));
 if (existsSync(path.join(root, "README.md"))) cpSync(path.join(root, "README.md"), path.join(stage, "README.md"));
+cpSync(path.join(root, "LICENSE"), path.join(stage, "LICENSE"));
 
 writeFileSync(
   path.join(stage, "package.json"),
@@ -99,10 +100,11 @@ writeFileSync(
       version: cliPkg.version,
       asoBuild,
       description: "AI Swarm Orchestrator: Hub, worker and Architect in one CLI",
+      license: "MIT",
       type: "module",
       bin: { aso: "dist/aso.mjs" },
       engines: { node: ">=20" },
-      files: ["dist", "dashboard.tar.gz", "docker", ".env.example", "README.md"],
+      files: ["dist", "dashboard.tar.gz", "docker", ".env.example", "README.md", "LICENSE"],
     },
     null,
     2,

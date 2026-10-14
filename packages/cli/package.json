@@ -2,6 +2,7 @@
   "name": "@aso/cli",
   "version": "0.1.0",
   "description": "AI Swarm Orchestrator - hub, worker and management CLI",
+  "license": "MIT",
   "type": "module",
   "bin": {
     "aso": "./dist/index.js"
