@@ -20,11 +20,16 @@ export function resolveHubUrl(input: string, defaultPort = DEFAULT_HUB_PORT): UR
   return url;
 }
 
-/** The Hub's Git endpoint, derived from its WebSocket URL (same host and port). */
-export function hubGitUrl(wsUrl: URL): string {
+/** Path of a project's repository on the Hub's Git endpoint. */
+export function gitRepoPath(project: string): string {
+  return `${GIT_PATH}/${project}.git`;
+}
+
+/** A project's Git URL on the Hub, derived from its WebSocket URL (same host and port). */
+export function hubGitUrl(wsUrl: URL, project: string): string {
   const url = new URL(wsUrl);
   url.protocol = url.protocol === "wss:" ? "https:" : "http:";
-  url.pathname = GIT_PATH;
+  url.pathname = gitRepoPath(project);
   url.search = "";
   return url.href;
 }

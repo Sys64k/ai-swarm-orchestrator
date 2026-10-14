@@ -49,14 +49,23 @@ export function checkPushPolicy(updates: RefUpdate[]): string | undefined {
   return undefined;
 }
 
+/** `/git/<project>.git/<rest>` → the project id and the path for git http-backend. */
+export function parseGitPath(path: string): { project: string; pathInfo: string } | undefined {
+  const match = /^\/([a-z0-9][a-z0-9_-]{0,63})\.git(\/.*)$/.exec(path.slice(GIT_PATH.length));
+  return match ? { project: match[1], pathInfo: match[2] } : undefined;
+}
+
 /**
- * Git smart-HTTP for the Hub repository, implemented as a CGI bridge to `git http-backend`.
- * Mounted at GIT_PATH; workers clone/fetch/push `http://<hub>:<port>/git/project.git`.
+ * Git smart-HTTP for the Hub's project repositories, implemented as a CGI bridge to
+ * `git http-backend`. Mounted under GIT_PATH; workers clone/fetch/push
+ * `http://<hub>:<port>/git/<project>.git`. `repoDirOf` maps a project id to its repository.
  */
-export function gitHttpHandler(repoDir: string) {
+export function gitHttpHandler(repoDirOf: (project: string) => string | undefined) {
   return async (c: Context): Promise<Response> => {
-    const pathInfo = c.req.path.slice(GIT_PATH.length);
-    if (!ALLOWED_PATHS.test(pathInfo)) return c.text("not found", 404);
+    const parsed = parseGitPath(c.req.path);
+    const repoDir = parsed && repoDirOf(parsed.project);
+    if (!parsed || !repoDir || !ALLOWED_PATHS.test(parsed.pathInfo)) return c.text("not found", 404);
+    const { pathInfo } = parsed;
 
     const declared = Number(c.req.header("content-length") ?? 0);
     if (declared > MAX_BODY_BYTES) return c.text("request too large", 413);

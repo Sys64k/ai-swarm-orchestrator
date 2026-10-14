@@ -88,10 +88,10 @@ export function startArchitect(opts: ArchitectOptions): ArchitectHandle {
           keepalive = setInterval(() => send("STATUS_UPDATE", { state: "idle" }), HEARTBEAT_INTERVAL_MS);
           break;
         case "PLAN_REQUEST": {
-          const { planId } = msg.payload;
-          log.info(`planning ${planId}`);
+          const { planId, project } = msg.payload;
+          log.info(`planning ${planId} for ${project}`);
           queue = queue.then(async () => {
-            const result = answered.get(planId) ?? (await planner.plan(planId));
+            const result = answered.get(planId) ?? (await planner.plan(planId, project));
             answered.set(planId, result);
             send("PLAN_RESULT", result);
           });

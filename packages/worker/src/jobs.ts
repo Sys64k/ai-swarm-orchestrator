@@ -73,7 +73,8 @@ export type Send = <T extends AgentMessageType>(type: T, payload: PayloadInput<T
 
 export interface JobRunnerOptions {
   workDir: string;
-  gitUrl: string;
+  /** The Hub's Git URL for a project. */
+  gitUrl: (project: string) => string;
   nodeId: string;
   executor: TaskExecutor;
   send: Send;
@@ -120,8 +121,9 @@ export class JobRunner {
     return this.active;
   }
 
-  get repoDir(): string {
-    return path.join(this.opts.workDir, "project");
+  /** This worker's checkout of a project: one per project, reused across that project's jobs. */
+  repoDir(project: string): string {
+    return path.join(this.opts.workDir, project);
   }
 
   enqueueTask(task: TaskAssignment): void {
@@ -167,8 +169,8 @@ export class JobRunner {
     });
   }
 
-  private async openRepo(role: string): Promise<AgentGitClient> {
-    const git = await AgentGitClient.cloneOrOpen(this.repoDir, this.opts.gitUrl, {
+  private async openRepo(project: string, role: string): Promise<AgentGitClient> {
+    const git = await AgentGitClient.cloneOrOpen(this.repoDir(project), this.opts.gitUrl(project), {
       author: { name: `ASO ${role} agent (${this.opts.nodeId})`, email: `${this.opts.nodeId}@aso.local` },
       token: this.opts.token,
     });
@@ -181,13 +183,13 @@ export class JobRunner {
     const status = (state: "in_progress" | "failed", detail?: string) =>
       send("STATUS_UPDATE", { state, taskId: task.taskId, detail: detail?.slice(0, 2000) });
     try {
-      const git = await this.openRepo(task.role);
+      const git = await this.openRepo(task.project, task.role);
       const { resumed } = await git.startTask(task.taskId);
       if (resumed) await git.syncWithMain();
       status("in_progress", task.rework ? `rework round ${task.rework.round}` : undefined);
 
       const result = await this.opts.executor.implement(task, {
-        repoDir: this.repoDir,
+        repoDir: this.repoDir(task.project),
         report: (detail) => status("in_progress", detail),
         requestDependencies: (packages) => this.requestPackageChange(task, git, { type: "add_dependencies", packages }),
         setPackageScripts: (scripts) => this.requestPackageChange(task, git, { type: "set_scripts", scripts }),
@@ -244,10 +246,11 @@ export class JobRunner {
 
     await git.syncWithMain();
     // Only a new dependency needs installing; script changes don't touch node_modules.
-    if (change.type === "add_dependencies" && existsSync(path.join(this.repoDir, "package-lock.json"))) {
+    const repoDir = this.repoDir(task.project);
+    if (change.type === "add_dependencies" && existsSync(path.join(repoDir, "package-lock.json"))) {
       // Install scripts are code from the registry: they run where agent commands run.
       const result = await this.commands.run(["npm", "ci", "--no-audit", "--no-fund"], {
-        cwd: this.repoDir,
+        cwd: repoDir,
         timeoutMs: 10 * 60_000,
       });
       if (result.exitCode !== 0) {
@@ -263,7 +266,7 @@ export class JobRunner {
   private async test(job: TestExecution): Promise<void> {
     const { send } = this.opts;
     try {
-      const git = await this.openRepo("qa");
+      const git = await this.openRepo(job.project, "qa");
       await git.checkoutCommit(job.taskId, job.commit);
     } catch (err) {
       return send("STATUS_UPDATE", { state: "failed", taskId: job.taskId, detail: (err as Error).message.slice(0, 2000) });
@@ -279,7 +282,7 @@ export class JobRunner {
       const label = argv.join(" ");
       let result;
       try {
-        result = await this.commands.run(argv, { cwd: this.repoDir, env, timeoutMs: Math.max(1000, deadline - Date.now()) });
+        result = await this.commands.run(argv, { cwd: this.repoDir(job.project), env, timeoutMs: Math.max(1000, deadline - Date.now()) });
       } catch (err) {
         // The program could not start at all: a problem with this node, not with the code.
         return send("STATUS_UPDATE", { state: "failed", taskId: job.taskId, detail: `cannot run ${label}: ${(err as Error).message}` });

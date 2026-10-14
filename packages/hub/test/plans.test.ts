@@ -114,7 +114,7 @@ describe("plans (fake Architect)", () => {
 
       const arch = await fakeArchitect(ctx);
       const req = planRequest(await arch.next());
-      assert.deepEqual(req, { planId, requirement: "Build a todo app" });
+      assert.deepEqual(req, { planId, project: "project", requirement: "Build a todo app" });
       assert.equal((await api(ctx, `/api/plans/${planId}`)).body.state, "planning");
 
       arch.send(

@@ -19,20 +19,18 @@ import {
   parseAgentMessage,
   type AgentMessage,
 } from "@aso/shared";
-import { DependencyManager } from "./dependencies.js";
 import { AnthropicApiAdapter, type Effort, type LlmAdapter } from "./llm/adapter.js";
 import { ConversationManager } from "./llm/conversations.js";
 import { hasPrice } from "./llm/pricing.js";
 import { gitHttpHandler } from "./git/http-backend.js";
-import { HubRepository, type DependencyInstaller } from "./git/hub-repo.js";
-import { GitSync } from "./git/sync.js";
-import { PlanError, PlanManager } from "./plans.js";
+import { type DependencyInstaller } from "./git/hub-repo.js";
+import type { GitSync } from "./git/sync.js";
+import { PlanError, type PlanRecord } from "./plans.js";
+import { ProjectError, ProjectSet, type Project } from "./projects.js";
 import { NodeRegistry, type NodeTransport } from "./registry.js";
 import type { RoutingPolicies } from "./routing.js";
 import { StateStore } from "./state-store.js";
-import { TaskError, TaskManager, type QaOptions, type TaskRecord } from "./tasks.js";
-import { Transcripts } from "./transcripts.js";
-import type { PlanRecord } from "./plans.js";
+import { TaskError, type QaOptions, type TaskRecord } from "./tasks.js";
 
 const log = createLogger("hub");
 
@@ -40,14 +38,19 @@ const log = createLogger("hub");
 const MAX_FRAME_BYTES = 2 * 1024 * 1024;
 
 export interface HubOptions {
-  /** Absolute path to the target project repository the swarm operates on. */
-  targetDir: string;
   /**
-   * Where tasks, plans and agent conversations are saved so they survive a restart.
-   * Default: `<targetDir>/.git/aso`, which keeps the state with the project it belongs to.
-   * `null` keeps everything in memory only.
+   * Folder of projects: every git repository directly inside it is a project (id = folder name),
+   * and new projects are created there. Give this or `targetDir`.
    */
-  stateDir?: string | null;
+  projectsRoot?: string;
+  /** A single project repository, served as project `project` (no projects can be created). */
+  targetDir?: string;
+  /**
+   * Tasks, plans and transcripts are saved in each project's `.git/aso/`, and agent conversations
+   * in `<projectsRoot>/.aso/` (or the single project's `.git/aso/`). `null` keeps everything in
+   * memory only.
+   */
+  stateDir?: null;
   port?: number;
   host?: string;
   policies?: RoutingPolicies;
@@ -86,9 +89,12 @@ export interface HubOptions {
 export interface HubHandle {
   port: number;
   registry: NodeRegistry;
-  tasks: TaskManager;
-  plans: PlanManager;
-  repo: HubRepository;
+  projects: ProjectSet;
+  /** Tasks of all projects, by id. */
+  tasks: ProjectSet["tasks"];
+  /** Plans of all projects, by id. */
+  plans: ProjectSet["plans"];
+  /** Push status of the only project (single-project Hubs). */
   sync: GitSync;
   close(): Promise<void>;
 }
@@ -106,33 +112,27 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   const host = opts.host ?? "0.0.0.0";
   const nodeTimeoutMs = opts.nodeTimeoutMs ?? NODE_TIMEOUT_MS;
   const connections = new Map<string, Connection>();
-  const repo = await HubRepository.open(opts.targetDir, opts.mainBranch);
+  if (!opts.projectsRoot && !opts.targetDir) throw new Error("startHub needs projectsRoot or targetDir");
   const registry = new NodeRegistry();
-  const stateDir = opts.stateDir === undefined ? path.join(await repo.gitDir(), "aso") : opts.stateDir;
-  const store = stateDir === null ? undefined : new StateStore(stateDir);
-  const saved = await store?.load<TaskRecord, PlanRecord>();
-  const transcripts = new Transcripts(store ? path.join(store.dir, "transcripts") : undefined);
-  const persist = () => store?.scheduleSave(() => ({ tasks: tasks.list(), plans: plans.list() }));
-  const sync = await GitSync.create(repo, {
-    enabled: opts.sync?.enabled ?? true,
-    remote: opts.sync?.remote,
-    token: opts.sync?.token,
-    retryMs: opts.sync?.retryMs,
+  const projects = await ProjectSet.open(registry, {
+    root: opts.projectsRoot,
+    single: opts.targetDir,
+    mainBranch: opts.mainBranch,
+    persist: opts.stateDir !== null,
+    tasks: { policies: opts.policies, reclaimGraceMs: opts.reclaimGraceMs, qa: opts.qa },
+    deps: { installer: opts.dependencyInstaller, allow: opts.allowDependencies },
+    sync: { enabled: opts.sync?.enabled, remote: opts.sync?.remote, token: opts.sync?.token, retryMs: opts.sync?.retryMs },
   });
-  /** Merged tasks waiting for their commits to reach the remote. */
-  const unpushed = new Set<string>();
-  const tasks = new TaskManager(registry, repo, {
-    onMerged: (task) => {
-      if (!sync.status().enabled) return;
-      unpushed.add(task.spec.taskId);
-      void sync.requestPush();
-    },
-    onChange: persist,
-    onTranscript: (taskId, entry) => transcripts.append({ kind: "task", id: taskId }, entry),
-    policies: opts.policies,
-    reclaimGraceMs: opts.reclaimGraceMs,
-    qa: opts.qa,
-  });
+  const tasks = projects.tasks;
+  const plans = projects.plans;
+  // Agent conversations are Hub-wide (one model gateway for all projects).
+  const conversationDir =
+    opts.stateDir === null
+      ? undefined
+      : opts.projectsRoot
+        ? path.join(opts.projectsRoot, ".aso")
+        : path.join(await projects.get("project")!.repo.gitDir(), "aso");
+  const store = conversationDir ? new StateStore(conversationDir) : undefined;
   const llm = opts.llm ?? {};
   const model = llm.model ?? "claude-opus-5-5";
   const adapter =
@@ -145,37 +145,23 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     log.info(`LLM: ${adapter.name} ${adapter.model}`);
     if (!hasPrice(adapter.model)) log.warn(`no price known for ${adapter.model}; cost estimates will read $0`);
   }
-  sync.onResult((r) => {
-    for (const id of unpushed) {
-      tasks.recordEvent(id, r.ok ? `pushed to ${sync.status().remote} (${r.commit!.slice(0, 8)})` : `push to ${sync.status().remote} failed: ${r.error}`);
-    }
-    if (r.ok) unpushed.clear();
-  });
-  const plans = new PlanManager(registry, tasks, persist, (planId, entry) => transcripts.append({ kind: "plan", id: planId }, entry));
-  if (saved) {
-    tasks.restore(saved.tasks);
-    plans.restore(saved.plans);
-  }
   const conversations = new ConversationManager(adapter, tasks, registry, plans, {
     taskBudgetUsd: llm.taskBudgetUsd,
     planBudgetUsd: llm.planBudgetUsd,
     maxTurns: llm.maxTurns,
     concurrency: llm.concurrency,
     store,
-    transcripts,
+    transcripts: projects.transcripts,
   });
   await conversations.restore();
-  if (store) log.info(`Hub state is saved in ${store.dir}`);
-  const deps = new DependencyManager(repo, tasks, registry, {
-    installer: opts.dependencyInstaller,
-    allow: opts.allowDependencies,
-  });
 
   /** Idempotent: safe to call from both the timeout sweep and the socket close event. */
   const dropNode = (nodeId: string, transport: NodeTransport) => {
     if (!registry.unregister(nodeId, transport)) return;
-    tasks.handleNodeGone(nodeId);
-    plans.handleNodeGone(nodeId);
+    for (const p of projects.list()) {
+      p.tasks.handleNodeGone(nodeId);
+      p.plans.handleNodeGone(nodeId);
+    }
   };
 
   const reject = (conn: Connection, reason: string, issues: string[] = [], refId?: string) => {
@@ -210,9 +196,8 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
           : `architect ${msg.from} registered`,
       );
       registry.send(msg.from, "REGISTRATION_ACK", { nodeId: msg.from });
-      tasks.nodeRegistered(msg.from, p.nodeKind === "worker" ? p.resume : undefined);
-      plans.dispatch();
-      return tasks.dispatch();
+      for (const project of projects.list()) project.tasks.nodeRegistered(msg.from, p.nodeKind === "worker" ? p.resume : undefined);
+      return projects.dispatchAll();
     }
 
     if (!conn.nodeId) return reject(conn, "NODE_REGISTRATION required first", [], msg.id);
@@ -226,12 +211,25 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
         registry.setHeartbeat(conn.nodeId, msg.payload);
         return;
       case "STATUS_UPDATE": {
-        const error = tasks.handleStatus(conn.nodeId, msg.payload);
+        const { taskId } = msg.payload;
+        if (taskId === undefined) return; // idle keepalive
+        const owner = projects.taskOwner(taskId);
+        const error = owner ? owner.tasks.handleStatus(conn.nodeId, msg.payload) : `unknown task ${taskId}`;
         if (error) reject(conn, error, [], msg.id);
         return;
       }
       case "DEPENDENCY_REQUEST": {
-        const error = deps.handle(conn.nodeId, msg.payload);
+        const owner = projects.taskOwner(msg.payload.taskId);
+        if (!owner) {
+          // Answer rather than error, so the worker's pending request ends now instead of timing out.
+          registry.send(conn.nodeId, "DEPENDENCY_RESPONSE", {
+            requestId: msg.payload.requestId,
+            outcome: "rejected",
+            reason: `task ${msg.payload.taskId} is not being implemented by ${conn.nodeId}`,
+          });
+          return;
+        }
+        const error = owner.deps.handle(conn.nodeId, msg.payload);
         if (error) reject(conn, error, [], msg.id);
         return;
       }
@@ -241,17 +239,20 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
         return;
       }
       case "FILE_OPERATION": {
-        const error = tasks.recordFileOperation(conn.nodeId, msg.payload);
+        const owner = projects.taskOwner(msg.payload.taskId);
+        const error = owner ? owner.tasks.recordFileOperation(conn.nodeId, msg.payload) : `unknown task ${msg.payload.taskId}`;
         if (error) reject(conn, error, [], msg.id);
         return;
       }
       case "PLAN_RESULT": {
-        const error = plans.handleResult(conn.nodeId, msg.payload);
+        const owner = projects.planOwner(msg.payload.planId);
+        const error = owner ? owner.plans.handleResult(conn.nodeId, msg.payload) : `plan ${msg.payload.planId} is not being planned by ${conn.nodeId}`;
         if (error) reject(conn, error, [], msg.id);
         return;
       }
       case "FEEDBACK_LOOP": {
-        const error = tasks.handleFeedback(conn.nodeId, msg.payload);
+        const owner = projects.taskOwner(msg.payload.taskId);
+        const error = owner ? owner.tasks.handleFeedback(conn.nodeId, msg.payload) : `no QA run of ${msg.payload.taskId} is assigned to ${conn.nodeId}`;
         if (error) reject(conn, error, [], msg.id);
         return;
       }
@@ -301,20 +302,24 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   app.use(`${GIT_PATH}/*`, requireAuth);
   app.use(WS_PATH, requireAuth);
 
-  // Workers clone, fetch and push the target project here; pushes are limited to task/* refs.
-  const git = gitHttpHandler(repo.dir);
-  app.on(["GET", "POST"], [GIT_PATH, `${GIT_PATH}/*`], (c) => git(c));
+  // Workers clone, fetch and push each project at /git/<project>.git; pushes are limited to task/* refs.
+  const git = gitHttpHandler((id) => projects.get(id)?.dir);
+  app.on(["GET", "POST"], [`${GIT_PATH}/*`], (c) => git(c));
 
   app.get("/api/health", (c) => {
     if (token !== null && !isAuthorized(c.req.header("authorization"), token)) return c.json({ status: "ok", auth: true });
+    const only = projects.list().length === 1 ? projects.list()[0] : undefined;
     return c.json({
       status: "ok",
       auth: token !== null,
-      targetDir: opts.targetDir,
-      stateDir: store?.dir ?? null,
-      mainBranch: repo.mainBranch,
-      sync: sync.status(),
-      qa: tasks.qa,
+      projectsRoot: projects.root ?? null,
+      projects: projects.list().map((p) => p.id),
+      // Single-project details, kept for tools that predate projects.
+      targetDir: only?.dir ?? null,
+      stateDir: only?.store?.dir ?? null,
+      mainBranch: only?.repo.mainBranch ?? null,
+      sync: only?.sync.status() ?? null,
+      qa: projects.list()[0]?.tasks.qa ?? null,
       allowDependencies: opts.allowDependencies ?? null,
       connections: connections.size,
       uptimeSec: Math.round(process.uptime()),
@@ -325,19 +330,77 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
 
   app.get("/api/llm", (c) => c.json(conversations.status()));
 
-  app.get("/api/sync", (c) => c.json(sync.status()));
-  app.post("/api/sync", async (c) => {
-    await sync.requestPush();
-    return c.json(sync.status());
-  });
-
-  const planError = (c: Context, err: unknown) => {
-    if (!(err instanceof PlanError)) throw err;
-    const status = err.code === "not_found" ? 404 : err.code === "conflict" ? 409 : 400;
-    return c.json({ error: err.message }, status);
+  /** Maps the errors a request can hit to HTTP statuses. */
+  const fail = (c: Context, err: unknown) => {
+    if (err instanceof ProjectError || err instanceof PlanError) {
+      return c.json({ error: err.message }, err.code === "not_found" ? 404 : err.code === "conflict" ? 409 : 400);
+    }
+    if (err instanceof TaskError) {
+      const status = err.code === "not_found" ? 404 : err.code === "duplicate" || err.code === "conflict" ? 409 : 400;
+      return c.json({ error: err.message }, status);
+    }
+    throw err;
+  };
+  const body = async (c: Context): Promise<Record<string, unknown> | undefined> => {
+    const data = (await c.req.json().catch(() => undefined)) as unknown;
+    return data && typeof data === "object" && !Array.isArray(data) ? (data as Record<string, unknown>) : undefined;
   };
 
-  app.get("/api/plans", (c) => c.json(plans.list()));
+  const projectView = (p: Project) => {
+    const list = p.tasks.list();
+    const count = (states: string[]) => list.filter((t) => states.includes(t.state)).length;
+    return {
+      id: p.id,
+      dir: p.dir,
+      mainBranch: p.repo.mainBranch,
+      sync: p.sync.status(),
+      tasks: {
+        total: list.length,
+        running: count(["assigned", "in_progress", "verifying", "awaiting_qa", "testing", "merging"]),
+        queued: count(["pending"]),
+        failed: count(["failed"]),
+        merged: count(["merged"]),
+      },
+      plansAwaitingApproval: p.plans.list().filter((pl) => pl.state === "proposed").length,
+    };
+  };
+  app.get("/api/projects", (c) => c.json(projects.list().map(projectView)));
+  app.get("/api/projects/:id", (c) => {
+    const p = projects.get(c.req.param("id"));
+    return p ? c.json(projectView(p)) : c.json({ error: "not found" }, 404);
+  });
+  app.post("/api/projects", async (c) => {
+    try {
+      return c.json(projectView(await projects.create((await body(c))?.name)), 201);
+    } catch (err) {
+      return fail(c, err);
+    }
+  });
+
+  /** `?project=` narrows a list to one project. */
+  const inProject = <T extends { project: string }>(c: Context, list: T[]) => {
+    const project = c.req.query("project");
+    return project ? list.filter((x) => x.project === project) : list;
+  };
+
+  app.get("/api/sync", (c) => {
+    try {
+      return c.json(projects.resolve(c.req.query("project")).sync.status());
+    } catch (err) {
+      return fail(c, err);
+    }
+  });
+  app.post("/api/sync", async (c) => {
+    try {
+      const p = projects.resolve(c.req.query("project") ?? (await body(c))?.project);
+      await p.sync.requestPush();
+      return c.json(p.sync.status());
+    } catch (err) {
+      return fail(c, err);
+    }
+  });
+
+  app.get("/api/plans", (c) => c.json(inProject(c, plans.list())));
 
   app.get("/api/plans/:id", (c) => {
     const plan = plans.get(c.req.param("id"));
@@ -345,52 +408,50 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   });
 
   app.post("/api/plans", async (c) => {
-    const body = (await c.req.json().catch(() => null)) as { requirement?: unknown } | null;
     try {
-      return c.json(plans.create(body?.requirement), 201);
+      const data = await body(c);
+      return c.json(projects.resolve(data?.project).plans.create(data?.requirement), 201);
     } catch (err) {
-      return planError(c, err);
+      return fail(c, err);
     }
   });
 
-  app.post("/api/plans/:id/approve", (c) => {
+  const planAction = (c: Context, action: (p: Project, id: string) => PlanRecord) => {
+    const id = c.req.param("id")!;
+    const owner = projects.planOwner(id);
+    if (!owner) return c.json({ error: `plan ${id} not found` }, 404);
     try {
-      return c.json(plans.approve(c.req.param("id")));
+      return c.json(action(owner, id));
     } catch (err) {
-      if (err instanceof TaskError) return c.json({ error: err.message }, 400);
-      return planError(c, err);
+      return fail(c, err);
     }
-  });
+  };
+  app.post("/api/plans/:id/approve", (c) => planAction(c, (p, id) => p.plans.approve(id)));
+  app.post("/api/plans/:id/reject", (c) => planAction(c, (p, id) => p.plans.reject(id)));
 
-  app.post("/api/plans/:id/reject", (c) => {
-    try {
-      return c.json(plans.reject(c.req.param("id")));
-    } catch (err) {
-      return planError(c, err);
-    }
-  });
-
-  app.get("/api/tasks", (c) => c.json(tasks.list()));
+  app.get("/api/tasks", (c) => c.json(inProject(c, tasks.list())));
 
   /** `?after=<seq>` returns only newer entries, so the console can poll cheaply. */
   const transcript = (c: Context, kind: "task" | "plan", exists: boolean) => {
     if (!exists) return c.json({ error: "not found" }, 404);
     const after = Number(c.req.query("after") ?? -1);
-    return c.json(transcripts.read({ kind, id: c.req.param("id")! }, Number.isInteger(after) ? after : -1));
+    return c.json(projects.transcripts.read({ kind, id: c.req.param("id")! }, Number.isInteger(after) ? after : -1));
   };
   app.get("/api/tasks/:id/transcript", (c) => transcript(c, "task", !!tasks.get(c.req.param("id"))));
   app.get("/api/plans/:id/transcript", (c) => transcript(c, "plan", !!plans.get(c.req.param("id"))));
 
-  const taskAction = (c: Context, action: (id: string) => TaskRecord) => {
+  const taskAction = (c: Context, action: (p: Project, id: string) => TaskRecord) => {
+    const id = c.req.param("id")!;
+    const owner = projects.taskOwner(id);
+    if (!owner) return c.json({ error: `task ${id} not found` }, 404);
     try {
-      return c.json(action(c.req.param("id")!));
+      return c.json(action(owner, id));
     } catch (err) {
-      if (!(err instanceof TaskError)) throw err;
-      return c.json({ error: err.message }, err.code === "not_found" ? 404 : 409);
+      return fail(c, err);
     }
   };
-  app.post("/api/tasks/:id/cancel", (c) => taskAction(c, (id) => tasks.cancel(id)));
-  app.post("/api/tasks/:id/retry", (c) => taskAction(c, (id) => tasks.retry(id)));
+  app.post("/api/tasks/:id/cancel", (c) => taskAction(c, (p, id) => p.tasks.cancel(id)));
+  app.post("/api/tasks/:id/retry", (c) => taskAction(c, (p, id) => p.tasks.retry(id)));
 
   app.get("/api/tasks/:id", (c) => {
     const task = tasks.get(c.req.param("id"));
@@ -398,17 +459,13 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   });
 
   app.post("/api/tasks", async (c) => {
-    let body: unknown;
+    const data = await body(c);
+    if (!data) return c.json({ error: "body must be a JSON object" }, 400);
     try {
-      body = await c.req.json();
-    } catch {
-      return c.json({ error: "body must be JSON" }, 400);
-    }
-    try {
-      return c.json(tasks.submit(body), 201);
+      const { project, ...spec } = data;
+      return c.json(projects.resolve(project).tasks.submit(spec), 201);
     } catch (err) {
-      if (err instanceof TaskError) return c.json({ error: err.message }, err.code === "duplicate" ? 409 : 400);
-      throw err;
+      return fail(c, err);
     }
   });
 
@@ -449,7 +506,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   injectWebSocket(server);
   // Port 0 asks the OS for a free port; report the one actually bound.
   const boundPort = (server.address() as AddressInfo | null)?.port ?? port;
-  log.info(`listening on ${host}:${boundPort} (ws ${WS_PATH}, git ${GIT_PATH}), target ${opts.targetDir}`);
+  log.info(`listening on ${host}:${boundPort} (ws ${WS_PATH}, git ${GIT_PATH}/<project>.git), ${opts.projectsRoot ? `projects in ${opts.projectsRoot}` : `project ${opts.targetDir}`}`);
 
   // Half-open TCP connections (sleeping laptops, pulled cables) never fire onClose on their own.
   const sweep = setInterval(() => {
@@ -460,7 +517,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       // Live-but-slow peers get the close frame; dead peers are cut off after a grace period.
       setTimeout(() => node.transport.terminate(), 2000).unref();
     }
-    tasks.sweepDetached();
+    for (const p of projects.list()) p.tasks.sweepDetached();
     conversations.sweep();
   }, Math.min(15_000, nodeTimeoutMs, opts.reclaimGraceMs ?? Infinity));
   sweep.unref();
@@ -468,18 +525,19 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   return {
     port: boundPort,
     registry,
+    projects,
     tasks,
     plans,
-    repo,
-    sync,
+    get sync() {
+      return projects.resolve(undefined).sync;
+    },
     close: async () => {
       clearInterval(sweep);
-      sync.stop();
       // Save before the nodes are disconnected: those disconnects are the Hub's doing, and
       // restore() decides what happens to their jobs. Hub-side steps still running (a merge)
       // are saved mid-way and simply run again on the next start.
+      await projects.close();
       await store?.close();
-      await transcripts.close();
       for (const c of connections.values()) c.ws.close(1001, "hub shutting down");
       await new Promise<void>((resolve) => server.close(() => resolve()));
     },

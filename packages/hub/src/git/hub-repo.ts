@@ -42,7 +42,7 @@ export type MergeResult =
   | { ok: false; conflict: false; reason: string };
 
 /**
- * The canonical project repository on the Hub (the `--dir` target). Workers push `task/*`
+ * A project repository on the Hub (a folder in the projects root). Workers push `task/*`
  * branches into it over the Git HTTP endpoint; the Hub merges QA-approved work into main.
  */
 export class HubRepository {

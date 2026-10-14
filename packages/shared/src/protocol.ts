@@ -14,6 +14,15 @@ export const TaskIdSchema = z
   .regex(/^[a-z0-9][a-z0-9-]{0,63}$/, "task id must be lowercase alphanumerics and dashes (max 64)");
 export type TaskId = z.infer<typeof TaskIdSchema>;
 
+/**
+ * A project is a folder in the Hub's projects root; its id is the folder name. Restricted so it
+ * is safe as a path segment, a URL segment and a directory name on workers.
+ */
+export const ProjectIdSchema = z
+  .string()
+  .regex(/^[a-z0-9][a-z0-9_-]{0,63}$/, "project name must be lowercase letters, digits, dashes or underscores (max 64)");
+export type ProjectId = z.infer<typeof ProjectIdSchema>;
+
 export const CommitShaSchema = z.string().regex(/^[0-9a-f]{40}([0-9a-f]{24})?$/, "invalid commit sha");
 
 /** Repository-relative POSIX path that cannot escape the repo or touch `.git`. */
@@ -186,6 +195,8 @@ const TestFailure = z.strictObject({
 });
 
 const TaskAssignmentPayload = TaskSpecSchema.extend({
+  /** The project the task belongs to: the worker checks out `/git/<project>.git`. */
+  project: ProjectIdSchema,
   /** Present when the task comes back after a failed QA run, verification or merge. */
   rework: z
     .strictObject({
@@ -199,6 +210,7 @@ const TaskAssignmentPayload = TaskSpecSchema.extend({
 
 const TestExecutionPayload = z.strictObject({
   taskId: TaskIdSchema,
+  project: ProjectIdSchema,
   /** Exact commit on `task/<id>` the QA worker must test. */
   commit: CommitShaSchema,
   /** argv for the test runner; executed without a shell. */
@@ -400,6 +412,7 @@ const PromptResultPayload = z.discriminatedUnion("outcome", [
 /** Hub → Architect: turn a requirement into a plan. */
 const PlanRequestPayload = z.strictObject({
   planId: PlanIdSchema,
+  project: ProjectIdSchema,
   requirement: z.string().min(1).max(50_000),
 });
 

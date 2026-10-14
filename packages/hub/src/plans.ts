@@ -21,6 +21,8 @@ export type PlanState = "pending" | "planning" | "proposed" | "approved" | "reje
 
 export interface PlanRecord {
   planId: string;
+  /** The project the plan is for. */
+  project: string;
   requirement: string;
   state: PlanState;
   architectNodeId?: string;
@@ -56,11 +58,23 @@ export class PlanManager {
     private readonly onChange?: () => void,
     /** Receives plan events for the plan's transcript. */
     private readonly onTranscript?: (planId: string, entry: TranscriptInput) => void,
+    /** Called when an Architect may have become free; with several projects, dispatches all of them. */
+    private readonly onDispatchNeeded?: () => void,
   ) {}
+
+  get project(): string {
+    return this.tasks.project;
+  }
+
+  private kick(): void {
+    if (this.onDispatchNeeded) this.onDispatchNeeded();
+    else this.dispatch();
+  }
 
   /** Load plans saved before a Hub restart; a plan the Architect was working on is planned again. */
   restore(records: readonly PlanRecord[]): void {
     for (const plan of records) {
+      plan.project ??= this.project; // saved before projects existed
       this.plans.set(plan.planId, plan);
       if (plan.state === "planning") {
         plan.state = "pending";
@@ -85,6 +99,7 @@ export class PlanManager {
     const now = new Date().toISOString();
     const plan: PlanRecord = {
       planId: `plan-${randomBytes(4).toString("hex")}`,
+      project: this.project,
       requirement: requirement.trim(),
       state: "pending",
       llm: { calls: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0 },
@@ -95,7 +110,7 @@ export class PlanManager {
     };
     this.plans.set(plan.planId, plan);
     this.note(plan, "created");
-    this.dispatch();
+    this.kick();
     return plan;
   }
 
@@ -111,7 +126,7 @@ export class PlanManager {
       plan.state = "planning";
       plan.architectNodeId = architect.nodeId;
       this.note(plan, `planning on ${architect.nodeId}`);
-      this.registry.send(architect.nodeId, "PLAN_REQUEST", { planId: plan.planId, requirement: plan.requirement });
+      this.registry.send(architect.nodeId, "PLAN_REQUEST", { planId: plan.planId, project: this.project, requirement: plan.requirement });
     }
   }
 
@@ -143,7 +158,7 @@ export class PlanManager {
         this.note(plan, `proposed ${ordered.length} task(s); waiting for approval`);
       }
     }
-    this.dispatch();
+    this.kick();
     return undefined;
   }
 
@@ -193,7 +208,7 @@ export class PlanManager {
         this.note(plan, `requeued: ${nodeId} disconnected`);
       }
     }
-    this.dispatch();
+    this.kick();
   }
 
   recordLlmUsage(planId: string, usage: LlmUsage): void {

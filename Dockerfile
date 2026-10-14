@@ -37,4 +37,4 @@ COPY --from=build /app /app
 VOLUME /data
 EXPOSE 7420 7421
 ENTRYPOINT ["node", "packages/cli/dist/index.js"]
-CMD ["start-hub", "--dir", "/project", "--no-architect"]
+CMD ["start-hub", "--root", "/projects", "--no-architect"]

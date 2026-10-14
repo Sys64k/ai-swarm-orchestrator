@@ -1,5 +1,5 @@
 # Used by `aso start-hub --docker`, which sets these variables. To run it by hand:
-#   ASO_TARGET_DIR=~/projects/my-app ASO_UID=$(id -u) ASO_GID=$(id -g) docker compose up --build
+#   ASO_PROJECTS_ROOT=~/aso-projects ASO_TOKEN=... ASO_UID=$(id -u) ASO_GID=$(id -g) docker compose up --build
 name: aso
 services:
   hub:
@@ -14,7 +14,8 @@ services:
       - "${ASO_BIND:-0.0.0.0}:${ASO_HUB_PORT:-7420}:7420"
       - "${ASO_BIND:-0.0.0.0}:${ASO_DASHBOARD_PORT:-7421}:7421"
     volumes:
-      - "${ASO_TARGET_DIR:?set ASO_TARGET_DIR to the target project path}:/project"
+      # The projects folder: each git repository in it is a project.
+      - "${ASO_PROJECTS_ROOT:?set ASO_PROJECTS_ROOT to the projects folder}:/projects"
       - aso-data:/data
     environment:
       ASO_LOG_LEVEL: "${ASO_LOG_LEVEL:-info}"
