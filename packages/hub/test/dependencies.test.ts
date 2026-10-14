@@ -391,7 +391,7 @@ describe("dependency requests (real worker)", () => {
           },
         };
         const dir = tempDir("aso-w-");
-        const dev = await startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "dev", roles: ["backend"], workDir: dir, hardware: hardware(), executor });
+        const dev = await startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "dev", roles: ["backend"], workDir: dir, hardware: hardware(), sandbox: "none", executor });
         try {
           await waitFor(() => ctx.hub.registry.has("dev"));
           await postTask(ctx.port, { taskId: "pad", role: "backend", title: "Use left-pad", description: "d" });
@@ -451,8 +451,8 @@ describe("empty project bootstrap (real worker)", () => {
           },
         };
         const dirs = [tempDir("aso-dev-"), tempDir("aso-qa-")];
-        const dev = await startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "dev", roles: ["backend"], workDir: dirs[0], hardware: hardware(), executor });
-        const qa = await startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "qa", roles: ["qa"], workDir: dirs[1], hardware: hardware() });
+        const dev = await startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "dev", roles: ["backend"], workDir: dirs[0], hardware: hardware(), sandbox: "none", executor });
+        const qa = await startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "qa", roles: ["qa"], workDir: dirs[1], hardware: hardware(), sandbox: "none" });
         try {
           await waitFor(() => ctx.hub.registry.has("dev") && ctx.hub.registry.has("qa"));
           await postTask(ctx.port, { taskId: "sum", role: "backend", title: "Add sum", description: "d" });

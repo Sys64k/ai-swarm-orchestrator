@@ -203,7 +203,7 @@ console.log("greeting ok");
           nodeId: "dev",
           roles: ["backend"],
           workDir: dirs[0],
-          hardware: hardware(),
+          hardware: hardware(), sandbox: "none",
           executor,
         });
         const qa = await startWorker({
@@ -212,7 +212,7 @@ console.log("greeting ok");
           nodeId: "qa",
           roles: ["qa"],
           workDir: dirs[1],
-          hardware: hardware(),
+          hardware: hardware(), sandbox: "none",
         });
         try {
           await waitFor(() => ctx.hub.registry.has("dev") && ctx.hub.registry.has("qa"));
@@ -246,7 +246,7 @@ console.log("greeting ok");
   it("fails the task with a clear reason when the Hub has no LLM configured", () =>
     withHub(async (ctx) => {
       const dir = tempDir("aso-w-");
-      const dev = await startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "dev", roles: ["backend"], workDir: dir, hardware: hardware() });
+      const dev = await startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "dev", roles: ["backend"], workDir: dir, hardware: hardware(), sandbox: "none" });
       try {
         await waitFor(() => ctx.hub.registry.has("dev"));
         await postTask(ctx.port, task("nobody-home"));

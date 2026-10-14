@@ -47,6 +47,13 @@ export class Planner {
           throw new Error("the Architect cannot change package.json");
         },
         fileOperation: () => undefined,
+        // The Architect's role has no run_command; this only backs that up.
+        commands: {
+          kind: "host",
+          run: async () => {
+            throw new Error("the Architect cannot run commands");
+          },
+        },
       });
 
       const conversationId = randomUUID();

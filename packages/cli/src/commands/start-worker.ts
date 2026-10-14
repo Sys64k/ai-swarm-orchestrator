@@ -9,12 +9,16 @@ export async function startWorkerCommand(opts: {
   roles?: WorkerRole[];
   workDir?: string;
   token?: string;
+  sandbox: "docker" | "none";
+  sandboxImage?: string;
+  sandboxNetwork?: string;
 }): Promise<void> {
   const token = opts.token ?? resolveToken()?.token;
   if (!token) {
     throw new Error("no ASO token: pass --token or set ASO_TOKEN (run `aso token` on the Hub machine to see it)");
   }
-  const worker = await startWorker({ ...opts, token });
+  const { sandboxImage, sandboxNetwork, ...rest } = opts;
+  const worker = await startWorker({ ...rest, token, sandboxOptions: { image: sandboxImage, network: sandboxNetwork } });
 
   const shutdown = (signal: string) => {
     log.info(`${signal} received, stopping worker`);

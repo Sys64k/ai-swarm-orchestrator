@@ -148,6 +148,7 @@ flowchart LR
 | | `agent/executor.ts` | `LlmTaskExecutor`: the agent loop (model turn via Hub → run tools → repeat until `finish`) |
 | | `agent/tools.ts` | `AgentTools`: executes the model's tool calls inside the checkout |
 | | `run-command.ts` | Shell-free command runner with process-group timeout |
+| | `sandbox.ts` | `CommandRunner`: `DockerSandbox` (a container per job command, default) or `hostRunner` (`--sandbox none`) |
 | | `hardware.ts` | `systeminformation` profile and disk write benchmark |
 | | `git/agent-git-client.ts` | The only Git interface agents get |
 | `@aso/cli` | `index.ts`, `commands/*` | Argument parsing and process orchestration (native or Docker) |
@@ -764,7 +765,7 @@ sequenceDiagram
 | `read_file` | Numbered lines; `offset`/`limit` (default first 2,000 lines); refuses binaries |
 | `search` | `git grep -E` over tracked and untracked files; up to 300 matches |
 | `write_file` / `edit_file` / `delete_file` | Exact-match edits (unique unless `replace_all`); protected files refused; reported via `FILE_OPERATION` |
-| `run_command` | argv without a shell; `CI=1`; default 120 s timeout (max 900); `git`, shells, `sudo` and `npm install`-style commands refused |
+| `run_command` | argv without a shell, in the job sandbox; `CI=1`; default 120 s timeout (max 900); `git`, shells, `sudo` and `npm install`-style commands refused |
 | `request_dependencies` | Adds up to 30 npm packages via the Hub in one commit; returns once installed and rebased |
 | `set_package_scripts` | Sets npm scripts via the Hub (creates package.json if missing); returns once rebased |
 | `finish` | Ends the loop with a summary and commit message; refused if other calls in the same turn failed |
@@ -777,6 +778,7 @@ text. Unfinished work is never pushed, so it never reaches QA or burns rework ro
 
 **Limits and safety:**
 
+- **Job sandbox.** See [The job sandbox](#the-job-sandbox) below.
 - **Output cap.** Each tool result is capped at 50,000 characters, and a turn's results at
   about 1.2 MB, which keeps them under the 2 MB frame limit.
 - **Untrusted paths.** Every model-supplied path is checked twice. The schema forbids absolute
@@ -786,6 +788,54 @@ text. Unfinished work is never pushed, so it never reaches QA or burns rework ro
   budget (default $5, estimated).
 - **Idle conversations.** These are dropped after 30 minutes, and as soon as their task is no
   longer being implemented by that node.
+
+### The job sandbox
+
+Agents decide what runs on a worker: their own commands, the test scripts they write, and the
+install scripts of packages they request. The program blocklist in `run_command` only stops
+honest mistakes, since `node -e` can start anything. So the worker runs every job command
+through a `CommandRunner`, and by default that is `DockerSandbox` (`sandbox.ts`). The file
+tools and git stay on the host, where they are confined to the checkout.
+
+| Runs in the sandbox | Stays on the host |
+|---|---|
+| `run_command`, `npm ci` after a dependency change, QA setup steps and test command | File tools (path-checked), all git operations, hardware profiling, the Hub connection |
+
+Each command is its own `docker run --rm` (`dockerRunArgs()`, a pure function with tests):
+
+- **Mounts.** The checkout at the same path, so absolute paths in caches stay valid, with
+  `.git` mounted again read-only on top. A container that could write `.git/hooks` or
+  `.git/config` would get code run by the worker's next git command on the host. The shared
+  cache (`<workDir>/../cache`: npm cache and Playwright browsers) is mounted at `/cache`.
+- **Privileges.** The worker's uid:gid (files keep their owner), `--cap-drop ALL`,
+  `no-new-privileges`, `--read-only` root filesystem with a 4 GB `/tmp` tmpfs as `HOME`,
+  `--pids-limit 4096`, `--init`.
+- **Environment.** Only `CI=1`, `HOME`, the cache locations and what the caller passes. Nothing
+  of the worker's environment, so no ASO token.
+- **Entrypoint.** The program itself, which bypasses image entrypoint scripts (Node's runs unknown
+  commands as `node <name>`).
+- **Timeouts.** Killing the `docker` client doesn't stop the container, so a timed-out command's
+  container is removed with `docker rm -f`. Containers carry a label derived from the work
+  directory; leftovers from a crashed worker are removed on the next start.
+- **Errors.** Exit 125 (Docker failed) and the init's "exec failed" (program not in the image)
+  reject, like a missing program on the host. QA reports that as a node problem, not a test
+  failure.
+
+**Image.** By default the worker builds `aso-sandbox:node<major>-<hash>` on first start:
+`node:<major>-bookworm`, matching the worker's own Node, plus `playwright install-deps
+chromium`. The tag hashes the Dockerfile, so a change rebuilds it once. Browsers are downloaded
+into the shared cache by the project's own Playwright version. The full ReadAloud suite (npm ci,
+359 unit tests, 36 Playwright e2e tests with a Next.js production build) passes in it.
+
+**Known gaps.**
+- **Network.** The default is `bridge`: npm and browser downloads need the internet, so jobs
+  can also reach the LAN. `--sandbox-network none` closes that, but then installs fail.
+- **Shared cache.** Jobs share the cache. npm verifies what it reads by integrity hash;
+  Playwright's browser directory isn't verified.
+- **No Docker inside.** Jobs can't run Docker, because mounting the socket would hand them the
+  host. `container_build` tasks can write Dockerfiles but not build them on a worker.
+- **Fail-closed.** With `--sandbox docker` (the default), a worker without usable Docker refuses
+  to start. `--sandbox none` restores the old behaviour explicitly.
 
 ### Cost accounting
 
