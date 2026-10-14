@@ -13,7 +13,7 @@ COPY packages/dashboard/package.json packages/dashboard/
 RUN npm ci
 COPY packages packages
 COPY scripts scripts
-COPY .env.example docker-compose.yml ./
+COPY .env.example LICENSE docker-compose.yml ./
 ENV NEXT_TELEMETRY_DISABLED=1
 # Build id of the source this image is built from (the CLI passes the host's git commit).
 ARG ASO_BUILD=unknown
