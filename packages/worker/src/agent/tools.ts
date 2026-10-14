@@ -47,7 +47,7 @@ export interface ToolHost {
   repoDir: string;
   /** Decides which tools are available and which paths may be written. */
   role: AgentRole;
-  requestDependency(req: DependencyRequest): Promise<{ mainCommit: string }>;
+  requestDependencies(packages: DependencyRequest[]): Promise<{ mainCommit: string }>;
   setPackageScripts(scripts: Record<string, string>): Promise<{ mainCommit: string }>;
   fileOperation(op: Omit<MessageOf<"FILE_OPERATION">["payload"], "taskId">): void;
 }
@@ -99,8 +99,8 @@ export class AgentTools {
           return done(await this.deleteFile(parsed.data as AgentToolInput<"delete_file">));
         case "run_command":
           return await this.runCommand(parsed.data as AgentToolInput<"run_command">, done);
-        case "request_dependency":
-          return done(await this.requestDependency(parsed.data as AgentToolInput<"request_dependency">));
+        case "request_dependencies":
+          return done(await this.requestDependencies(parsed.data as AgentToolInput<"request_dependencies">));
         case "set_package_scripts":
           return done(await this.setPackageScripts(parsed.data as AgentToolInput<"set_package_scripts">));
       }
@@ -123,7 +123,7 @@ export class AgentTools {
 
   private writable(repoPath: string): void {
     if (isProtectedPath(repoPath)) {
-      throw new ToolError(`${repoPath} is managed by the Hub; use request_dependency to add packages`);
+      throw new ToolError(`${repoPath} is managed by the Hub; use request_dependencies to add packages`);
     }
     const denial = writeDenial(this.host.role, repoPath);
     if (denial) throw new ToolError(denial);
@@ -219,7 +219,7 @@ export class AgentTools {
       return done(`${program} is not available to agents (version control happens when you call finish; there is no shell)`, true);
     }
     if (PACKAGE_MANAGERS.has(program) && argv.slice(1).some((a) => BLOCKED_PM_COMMANDS.has(a))) {
-      return done(`\`${argv.join(" ")}\` would change dependencies; use request_dependency instead`, true);
+      return done(`\`${argv.join(" ")}\` would change dependencies; use request_dependencies instead`, true);
     }
     let result;
     try {
@@ -243,10 +243,11 @@ export class AgentTools {
     }
   }
 
-  private async requestDependency({ name, version, dev }: AgentToolInput<"request_dependency">): Promise<string> {
+  private async requestDependencies({ packages }: AgentToolInput<"request_dependencies">): Promise<string> {
     try {
-      const { mainCommit } = await this.host.requestDependency({ name, version, dev });
-      return `${name}${version ? `@${version}` : ""} is installed (main @ ${mainCommit.slice(0, 8)}); package.json and the lockfile were updated on main and your branch was rebased`;
+      const { mainCommit } = await this.host.requestDependencies(packages);
+      const names = packages.map((p) => `${p.name}${p.version ? `@${p.version}` : ""}`).join(", ");
+      return `${names} ${packages.length === 1 ? "is" : "are"} installed (main @ ${mainCommit.slice(0, 8)}); package.json and the lockfile were updated on main and your branch was rebased`;
     } catch (err) {
       if (err instanceof DependencyRejectedError) throw new ToolError(`dependency rejected by the Hub: ${err.message}`);
       throw err;

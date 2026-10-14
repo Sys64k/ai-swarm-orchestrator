@@ -21,7 +21,7 @@ export class ProtectedFileError extends AgentGitError {
   constructor(readonly files: string[]) {
     super(
       `task branches may not modify dependency manifests or lockfiles: ${files.join(", ")}. ` +
-        "Use requestDependency() instead.",
+        "Use requestDependencies() instead.",
     );
   }
 }

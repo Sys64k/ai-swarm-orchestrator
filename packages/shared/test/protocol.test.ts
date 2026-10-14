@@ -123,12 +123,22 @@ describe("AgentMessageSchema", () => {
 
   it("only allows registry packages with semver ranges in DEPENDENCY_REQUEST", () => {
     const base = { requestId: randomUUID(), taskId: "t1" };
-    const dep = (change: Record<string, unknown>) => frame("DEPENDENCY_REQUEST", { ...base, change: { type: "add_dependency", ...change } });
+    const dep = (pkg: Record<string, unknown>) => frame("DEPENDENCY_REQUEST", { ...base, change: { type: "add_dependencies", packages: [pkg] } });
     assert.ok(parseAgentMessage(dep({ name: "@scope/pkg", version: "^1.2.0" })).ok);
     issuesOf(dep({ name: "Bad Name" }));
     issuesOf(dep({ name: "pkg", version: "git+https://evil/x.git" }));
     issuesOf(dep({ name: "pkg", version: "file:../x" }));
     issuesOf(dep({ name: "pkg", version: "1.0.0; rm -rf /" }));
+  });
+
+  it("limits a dependency batch to 1..30 distinct packages", () => {
+    const base = { requestId: randomUUID(), taskId: "t1" };
+    const deps = (packages: Record<string, unknown>[]) => frame("DEPENDENCY_REQUEST", { ...base, change: { type: "add_dependencies", packages } });
+    const many = (n: number) => Array.from({ length: n }, (_, i) => ({ name: `pkg-${i}` }));
+    assert.ok(parseAgentMessage(deps(many(30))).ok);
+    issuesOf(deps([]));
+    issuesOf(deps(many(31)));
+    issuesOf(deps([{ name: "react" }, { name: "react", dev: true }]));
   });
 
   it("validates npm script changes", () => {

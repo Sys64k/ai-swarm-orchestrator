@@ -287,12 +287,26 @@ export const ScriptCommandSchema = z
  * A change to package.json that only the Hub may make (on main). If the project has no
  * package.json yet, the Hub creates a minimal one first.
  */
+export const DependencySpecSchema = z.strictObject({
+  name: NpmPackageNameSchema,
+  version: VersionRangeSchema.optional(),
+  dev: z.boolean().default(false),
+});
+
+/** Most packages one request may add: a scaffold needs a dozen or more at once. */
+export const MAX_PACKAGES_PER_REQUEST = 30;
+
+/** 1..MAX_PACKAGES_PER_REQUEST packages, each named once. */
+export const DependencySpecListSchema = z
+  .array(DependencySpecSchema)
+  .min(1)
+  .max(MAX_PACKAGES_PER_REQUEST)
+  .refine((list) => new Set(list.map((p) => p.name)).size === list.length, { message: "each package may appear only once" });
+
 export const PackageChangeSchema = z.discriminatedUnion("type", [
   z.strictObject({
-    type: z.literal("add_dependency"),
-    name: NpmPackageNameSchema,
-    version: VersionRangeSchema.optional(),
-    dev: z.boolean().default(false),
+    type: z.literal("add_dependencies"),
+    packages: DependencySpecListSchema,
   }),
   z.strictObject({
     type: z.literal("set_scripts"),

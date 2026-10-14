@@ -32,11 +32,11 @@ export interface ExecutionContext {
   /** Free-text progress, forwarded to the Hub as STATUS_UPDATE detail. */
   report(detail: string): void;
   /**
-   * Ask the Hub to add an npm package. Resolves once the Hub committed it to main, this
+   * Ask the Hub to add npm packages. Resolves once the Hub committed them to main, this
    * branch was rebased onto that commit (uncommitted edits preserved) and `npm ci` ran.
    * Rejects with DependencyRejectedError if the Hub refused.
    */
-  requestDependency(request: DependencyRequest): Promise<{ mainCommit: string }>;
+  requestDependencies(packages: DependencyRequest[]): Promise<{ mainCommit: string }>;
   /**
    * Ask the Hub to add/update npm scripts (creating package.json if the project has none).
    * Resolves once the change is on main and this branch was rebased onto it.
@@ -181,8 +181,7 @@ export class JobRunner {
       const result = await this.opts.executor.implement(task, {
         repoDir: this.repoDir,
         report: (detail) => status("in_progress", detail),
-        requestDependency: (req) =>
-          this.requestPackageChange(task, git, { type: "add_dependency", name: req.name, version: req.version, dev: req.dev }),
+        requestDependencies: (packages) => this.requestPackageChange(task, git, { type: "add_dependencies", packages }),
         setPackageScripts: (scripts) => this.requestPackageChange(task, git, { type: "set_scripts", scripts }),
         callModel: (turn) => this.model.call({ taskId: task.taskId }, turn),
         fileOperation: (op) => send("FILE_OPERATION", { ...op, taskId: task.taskId } as PayloadInput<"FILE_OPERATION">),
@@ -207,8 +206,8 @@ export class JobRunner {
   ): Promise<{ mainCommit: string }> {
     const change = PackageChangeSchema.parse(input);
     const label =
-      change.type === "add_dependency"
-        ? `${change.name}${change.version ? `@${change.version}` : ""}`
+      change.type === "add_dependencies"
+        ? change.packages.map((p) => `${p.name}${p.version ? `@${p.version}` : ""}`).join(", ")
         : `scripts ${Object.keys(change.scripts).join(", ")}`;
     const { send } = this.opts;
     const message: PayloadInput<"DEPENDENCY_REQUEST"> = { requestId: randomUUID(), taskId: task.taskId, change };
@@ -236,7 +235,7 @@ export class JobRunner {
 
     await git.syncWithMain();
     // Only a new dependency needs installing; script changes don't touch node_modules.
-    if (change.type === "add_dependency" && existsSync(path.join(this.repoDir, "package-lock.json"))) {
+    if (change.type === "add_dependencies" && existsSync(path.join(this.repoDir, "package-lock.json"))) {
       const result = await runCommand(["npm", "ci", "--no-audit", "--no-fund"], {
         cwd: this.repoDir,
         timeoutMs: 10 * 60_000,

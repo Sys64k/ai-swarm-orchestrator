@@ -18,7 +18,7 @@ const BUILD: AgentToolName[] = [
   "edit_file",
   "delete_file",
   "run_command",
-  "request_dependency",
+  "request_dependencies",
   "set_package_scripts",
   "finish",
 ];

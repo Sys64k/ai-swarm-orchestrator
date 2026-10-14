@@ -26,7 +26,7 @@ export class LlmTaskExecutor implements TaskExecutor {
     const tools = new AgentTools({
       repoDir: ctx.repoDir,
       role: task.role,
-      requestDependency: (req) => ctx.requestDependency(req),
+      requestDependencies: (packages) => ctx.requestDependencies(packages),
       setPackageScripts: (scripts) => ctx.setPackageScripts(scripts),
       fileOperation: (op) => ctx.fileOperation(op),
     });
