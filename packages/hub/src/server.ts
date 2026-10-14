@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
+import path from "node:path";
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { serve, type ServerType } from "@hono/node-server";
 import { createNodeWebSocket } from "@hono/node-ws";
@@ -28,7 +29,9 @@ import { GitSync } from "./git/sync.js";
 import { PlanError, PlanManager } from "./plans.js";
 import { NodeRegistry, type NodeTransport } from "./registry.js";
 import type { RoutingPolicies } from "./routing.js";
-import { TaskError, TaskManager, type QaOptions } from "./tasks.js";
+import { StateStore } from "./state-store.js";
+import { TaskError, TaskManager, type QaOptions, type TaskRecord } from "./tasks.js";
+import type { PlanRecord } from "./plans.js";
 
 const log = createLogger("hub");
 
@@ -38,6 +41,12 @@ const MAX_FRAME_BYTES = 2 * 1024 * 1024;
 export interface HubOptions {
   /** Absolute path to the target project repository the swarm operates on. */
   targetDir: string;
+  /**
+   * Where tasks, plans and agent conversations are saved so they survive a restart.
+   * Default: `<targetDir>/.git/aso`, which keeps the state with the project it belongs to.
+   * `null` keeps everything in memory only.
+   */
+  stateDir?: string | null;
   port?: number;
   host?: string;
   policies?: RoutingPolicies;
@@ -98,6 +107,10 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   const connections = new Map<string, Connection>();
   const repo = await HubRepository.open(opts.targetDir, opts.mainBranch);
   const registry = new NodeRegistry();
+  const stateDir = opts.stateDir === undefined ? path.join(await repo.gitDir(), "aso") : opts.stateDir;
+  const store = stateDir === null ? undefined : new StateStore(stateDir);
+  const saved = await store?.load<TaskRecord, PlanRecord>();
+  const persist = () => store?.scheduleSave(() => ({ tasks: tasks.list(), plans: plans.list() }));
   const sync = await GitSync.create(repo, {
     enabled: opts.sync?.enabled ?? true,
     remote: opts.sync?.remote,
@@ -112,6 +125,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       unpushed.add(task.spec.taskId);
       void sync.requestPush();
     },
+    onChange: persist,
     policies: opts.policies,
     reclaimGraceMs: opts.reclaimGraceMs,
     qa: opts.qa,
@@ -134,13 +148,20 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     }
     if (r.ok) unpushed.clear();
   });
-  const plans = new PlanManager(registry, tasks);
+  const plans = new PlanManager(registry, tasks, persist);
+  if (saved) {
+    tasks.restore(saved.tasks);
+    plans.restore(saved.plans);
+  }
   const conversations = new ConversationManager(adapter, tasks, registry, plans, {
     taskBudgetUsd: llm.taskBudgetUsd,
     planBudgetUsd: llm.planBudgetUsd,
     maxTurns: llm.maxTurns,
     concurrency: llm.concurrency,
+    store,
   });
+  await conversations.restore();
+  if (store) log.info(`Hub state is saved in ${store.dir}`);
   const deps = new DependencyManager(repo, tasks, registry, {
     installer: opts.dependencyInstaller,
     allow: opts.allowDependencies,
@@ -286,6 +307,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       status: "ok",
       auth: token !== null,
       targetDir: opts.targetDir,
+      stateDir: store?.dir ?? null,
       mainBranch: repo.mainBranch,
       sync: sync.status(),
       qa: tasks.qa,
@@ -426,12 +448,15 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     plans,
     repo,
     sync,
-    close: () =>
-      new Promise<void>((resolve) => {
-        clearInterval(sweep);
-        sync.stop();
-        for (const c of connections.values()) c.ws.close(1001, "hub shutting down");
-        server.close(() => resolve());
-      }),
+    close: async () => {
+      clearInterval(sweep);
+      sync.stop();
+      // Save before the nodes are disconnected: those disconnects are the Hub's doing, and
+      // restore() decides what happens to their jobs. Hub-side steps still running (a merge)
+      // are saved mid-way and simply run again on the next start.
+      await store?.close();
+      for (const c of connections.values()) c.ws.close(1001, "hub shutting down");
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    },
   };
 }

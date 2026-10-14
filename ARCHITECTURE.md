@@ -90,7 +90,9 @@ flowchart TB
   writes into the mounted project keep the right owner.
 - **`safe.directory`.** Git's `safe.directory` is set to `*` inside the image, so a mount owned
   by a different uid still works.
-- **`HOME`.** `HOME=/data` is a named volume, for state and caches in later phases.
+- **`HOME`.** `HOME=/data` is a named volume, used for the npm cache.
+- **State.** Tasks, plans and conversations live in the mounted project's `.git/aso/`, so they
+  survive the container being removed or rebuilt.
 - **Process handling.** `init: true` makes signals and child-process reaping work.
 - **Shutdown.** Ctrl+C reaches compose through the terminal's process group. The CLI only
   forwards signals that came from elsewhere, such as SIGTERM, because a second SIGINT would
@@ -139,6 +141,7 @@ flowchart LR
 | | `llm/conversations.ts` | `ConversationManager`: Hub-held conversations, turn checks, budget, concurrency queue |
 | | `llm/prompts.ts`, `llm/pricing.ts` | Role system prompts, task prompt (with rework feedback), price table |
 | | `plans.ts` | `PlanManager`: plan queue, Architect assignment, validation, approval → tasks |
+| | `state-store.ts` | `StateStore`: saves tasks, plans and conversations to `.git/aso/` and loads them on start |
 | `@aso/architect` | `client.ts`, `planner.ts` | Architect node: registers, plans each `PLAN_REQUEST` with read-only tools via the Hub, submits `PLAN_RESULT`. Run by the CLI's hidden `aso architect` command in tmux |
 | `@aso/worker` | `client.ts` | Connect, register (with resume claim), heartbeat, offline outbox, dispatch jobs |
 | | `jobs.ts` | `JobRunner`: implementation jobs (via a `TaskExecutor`, with `requestDependencies` / `callModel`) and QA runs |
@@ -274,6 +277,45 @@ flowchart TD
 
 Holding a started job is cheap. LLM access is centralized, so a disconnected worker can't make
 progress anyway; it is effectively paused. A short network blip therefore costs nothing.
+
+### When the Hub restarts
+
+Tasks, plans and agent conversations are saved to disk, so a Hub restart looks to the swarm
+like every node dropping off at once and coming back.
+
+**Where.** `<project>/.git/aso/` by default (`HubOptions.stateDir`; `null` keeps everything in
+memory). Inside `.git` the state stays with the project it describes, is covered by the Docker
+bind mount, and is never committed or served: the Git endpoint only answers smart-HTTP paths,
+so clones don't include it.
+
+| File | Content | Written |
+|---|---|---|
+| `state.json` | `{version, savedAt, tasks, plans}` | 200 ms after a change, batched; on shutdown |
+| `conversations/<id>.json` | Messages, next turn, pending tool calls, last answer | After every model turn; deleted with the conversation |
+
+Writes go to a temp file that is renamed into place, one at a time, so a crash leaves the
+previous version intact. A file the Hub can't read (bad JSON, unknown `version`) is renamed
+to `state.json.unreadable-<time>`, never deleted, and the Hub starts empty.
+
+**On start**, before any node connects, saved work is put back like this:
+
+| Saved state | After the restart |
+|---|---|
+| `in_progress`, or `testing` with tests started | Held for its node for the grace period (`detachedAt = now`); the node reclaims it with its resume claim |
+| `assigned`, or `testing` not started | Back to `pending` / `awaiting_qa`; not counted as a drop |
+| `verifying` | Verified again |
+| `merging` | Merged again; a commit already on `main` merges as "already up to date" |
+| Plan `planning` | Back to `pending` for the next Architect |
+| Anything else | Unchanged |
+
+The state is saved **before** the Hub closes the nodes' connections on shutdown, so those
+disconnects, which are the Hub's doing, never count against a task.
+
+**Agents continue mid-task.** Because the Hub holds the conversation (see
+[section 10](#10-llm-gateway-and-agent-loop)), restoring it is enough: the worker reconnects,
+re-sends the turn it was waiting for (answered from the saved last answer if the model had
+already replied), and the next turn goes to the model with the full history. Conversations
+whose task moved on are deleted on load.
 
 **Node ids** are `<hostname>-<random>` for workers and `architect-<uuid>` for the Architect.
 They are fixed for the life of the process, so a reconnect reuses the same id.
@@ -684,6 +726,10 @@ sequenceDiagram
   (Opus 5.5: $0.20 vs $4 per million input tokens).
 - **Frames stay small.** Only the new tool results travel each turn, not the whole history.
 - **Costs are counted centrally.** One place counts tokens and enforces per-task budgets.
+- **Restarts are cheap.** Conversations are saved after every turn, so a Hub restart doesn't
+  throw away an agent's work in progress (see [When the Hub restarts](#when-the-hub-restarts)).
+  A conversation stays alive while its worker is briefly disconnected and is dropped once
+  its task moves on.
 
 ### Request settings (`AnthropicApiAdapter`)
 

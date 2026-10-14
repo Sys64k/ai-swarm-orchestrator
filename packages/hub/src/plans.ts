@@ -51,7 +51,22 @@ export class PlanManager {
   constructor(
     private readonly registry: NodeRegistry,
     private readonly tasks: TaskManager,
+    /** Called whenever a plan record changes (used to persist Hub state). */
+    private readonly onChange?: () => void,
   ) {}
+
+  /** Load plans saved before a Hub restart; a plan the Architect was working on is planned again. */
+  restore(records: readonly PlanRecord[]): void {
+    for (const plan of records) {
+      this.plans.set(plan.planId, plan);
+      if (plan.state === "planning") {
+        plan.state = "pending";
+        plan.architectNodeId = undefined;
+        this.note(plan, "requeued: Hub restarted during planning");
+      }
+    }
+    if (records.length) log.info(`restored ${records.length} plan(s)`);
+  }
 
   list(): PlanRecord[] {
     return [...this.plans.values()];
@@ -188,10 +203,12 @@ export class PlanManager {
     l.cacheReadTokens += usage.cacheReadTokens;
     l.cacheWriteTokens += usage.cacheWriteTokens;
     l.costUsd = Math.round((l.costUsd + usage.costUsd) * 1e6) / 1e6;
+    this.onChange?.();
   }
 
   recordAgentTurn(planId: string, turn: Omit<AgentTurn, "at">): void {
     this.plans.get(planId)?.agentLog.push({ at: new Date().toISOString(), ...turn });
+    this.onChange?.();
   }
 
   recordEvent(planId: string, event: string): void {
@@ -210,5 +227,6 @@ export class PlanManager {
     plan.updatedAt = at;
     plan.history.push({ at, event });
     log.info(`${plan.planId}: ${event}`);
+    this.onChange?.();
   }
 }

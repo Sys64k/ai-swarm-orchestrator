@@ -33,6 +33,7 @@ For the design, diagrams and protocol reference, see **[ARCHITECTURE.md](ARCHITE
 | 5 | LLM gateway on the Hub (Anthropic API), coding agent loop on workers, per-task cost tracking | ✅ Done |
 | 6 | Architect planning (`aso plan`), task dependencies, role prompts and write scopes | ✅ Done |
 | 7 | Token authentication, push to `origin` after merges, packaged CLI served by the Hub, `aso update` | ✅ Done |
+| 8 | Hub state saved to disk: tasks, plans and agent conversations survive a Hub restart | ✅ Done |
 
 The whole loop runs end to end: a task is routed, and an agent on a worker explores and edits
 the code. The agent verifies its work, then the change is pushed, checked by the Hub, tested by
@@ -232,6 +233,20 @@ rework rounds, and an event history.
 
 A task is failed after 3 node losses.
 
+**If the Hub restarts** (redeploy, crash, reboot), it picks up where it left off. Tasks, plans
+and agent conversations are saved in the project's `.git/aso/` directory, so they stay with
+the project and never end up in a commit or a worker's clone. On restart:
+
+- **Started jobs** are held for 5 minutes, as if their worker had dropped off. The worker
+  reconnects on its own, and its agent continues the same conversation.
+- **Jobs not started yet** go back to the queue. This doesn't count as a node loss.
+- **Hub-side steps** (verifying a push, merging) run again.
+- **Plans** the Architect was working on are planned again; proposed plans still wait for
+  approval.
+
+Delete `.git/aso/` while the Hub is stopped to start with an empty task list. A state file the
+Hub can't read is renamed to `state.json.unreadable-<time>` and the Hub starts empty.
+
 ## Package changes: dependencies and scripts
 
 Workers may never edit `package.json` or lockfiles. Agents ask the Hub instead:
@@ -392,7 +407,7 @@ Options:
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/health` | Without a token: `{status, auth}`. With it: also target, main branch, QA, sync status, connections, uptime |
+| `GET` | `/api/health` | Without a token: `{status, auth}`. With it: also target, state directory, main branch, QA, sync status, connections, uptime |
 | `GET` | `/api/version` | Version and SHA-256 of the `aso` package this Hub serves (public) |
 | `GET` | `/dist/aso.tgz` | The `aso` package for installing/updating machines (public; contains no secrets) |
 | `GET` / `POST` | `/api/sync` | Push status / retry the push of `main` to `origin` |

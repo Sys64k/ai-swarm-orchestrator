@@ -26,3 +26,4 @@ export { priceUsage } from "./llm/pricing.js";
 export { architectSystemPrompt, planPrompt, systemPrompt, taskPrompt } from "./llm/prompts.js";
 export { PlanError, PlanManager, type PlanRecord, type PlanState } from "./plans.js";
 export { GitSync, sanitizeUrl, type SyncStatus } from "./git/sync.js";
+export { StateStore, type Snapshot } from "./state-store.js";

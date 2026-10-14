@@ -81,6 +81,11 @@ export class HubRepository {
     return repo;
   }
 
+  /** Absolute path of the repository's .git directory. */
+  async gitDir(): Promise<string> {
+    return (await this.git.raw(["rev-parse", "--absolute-git-dir"])).trim();
+  }
+
   async mainHead(): Promise<string> {
     return (await this.resolve(`refs/heads/${this.mainBranch}`)) ?? "";
   }
