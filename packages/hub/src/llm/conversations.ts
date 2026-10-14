@@ -11,6 +11,7 @@ import {
 import type { PlanManager } from "../plans.js";
 import type { NodeRegistry } from "../registry.js";
 import type { StateStore } from "../state-store.js";
+import type { Transcripts } from "../transcripts.js";
 import type { AgentTurn, TaskManager } from "../tasks.js";
 import { LlmError, type LlmAdapter } from "./adapter.js";
 import { priceUsage } from "./pricing.js";
@@ -35,6 +36,8 @@ export interface ConversationOptions {
   idleTimeoutMs?: number;
   /** Saves conversations after every turn so agents can carry on after a Hub restart. */
   store?: StateStore;
+  /** Records the agent's text, tool calls and tool results for the console. */
+  transcripts?: Transcripts;
 }
 
 /** What a conversation works on: a task (worker agent) or a plan (Architect). */
@@ -95,6 +98,7 @@ export class ConversationManager {
   private readonly idleTimeoutMs: number;
   private readonly slots: Semaphore;
   private readonly store?: StateStore;
+  private readonly transcripts?: Transcripts;
   private totals = { calls: 0, costUsd: 0 };
 
   constructor(
@@ -110,6 +114,7 @@ export class ConversationManager {
     this.idleTimeoutMs = opts.idleTimeoutMs ?? 30 * 60_000;
     this.slots = new Semaphore(opts.concurrency ?? 2);
     this.store = opts.store;
+    this.transcripts = opts.transcripts;
   }
 
   /** Load conversations saved before a Hub restart (after tasks and plans are restored). */
@@ -169,7 +174,7 @@ export class ConversationManager {
         id,
         role,
         budgetUsd: this.taskBudgetUsd,
-        spentUsd: () => this.tasks.get(id)?.llm.costUsd ?? 0,
+        spentUsd: () => this.tasks.spentSinceRetry(id),
         firstPrompt: () => taskPrompt(this.tasks.get(id)!),
         active: () => this.tasks.isHeldFor(nodeId, id),
         recordUsage: (u) => this.tasks.recordLlmUsage(id, u),
@@ -280,6 +285,12 @@ export class ConversationManager {
             })),
           };
 
+    if (req.turn > 0 && req.toolResults.length) {
+      const names = new Map(conv.results.get(req.turn - 1)?.toolCalls.map((c) => [c.id, c.name]) ?? []);
+      for (const r of req.toolResults) {
+        this.transcripts?.append(conv.subject, { kind: "result", id: r.toolUseId, name: names.get(r.toolUseId), content: r.content, isError: r.isError ?? false });
+      }
+    }
     conv.inflight = req.requestId;
     conv.lastActivity = Date.now();
     this.requests.set(req.requestId, { conversationId: conv.id, turn: req.turn });
@@ -335,6 +346,8 @@ export class ConversationManager {
       conv.turn++;
       const actions = toolCalls.length ? toolCalls.map(describeCall) : [`(${response.stopReason})`];
       conv.subject.recordTurn({ turn: result.turn, actions, costUsd: usage.costUsd });
+      if (text.trim()) this.transcripts?.append(conv.subject, { kind: "text", text });
+      for (const c of toolCalls) this.transcripts?.append(conv.subject, { kind: "call", id: c.id, name: c.name, input: c.input });
       this.save(conv, result);
       log.debug(`${conv.subject.id} turn ${result.turn}: ${actions.join(", ")} ($${usage.costUsd.toFixed(4)})`);
       this.respond(conv.nodeId, result);

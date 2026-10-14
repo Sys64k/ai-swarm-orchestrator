@@ -8,6 +8,7 @@ import {
 } from "@aso/shared";
 import type { NodeRegistry } from "./registry.js";
 import type { AgentTurn, TaskManager } from "./tasks.js";
+import type { TranscriptInput } from "./transcripts.js";
 
 const log = createLogger("plans");
 
@@ -53,6 +54,8 @@ export class PlanManager {
     private readonly tasks: TaskManager,
     /** Called whenever a plan record changes (used to persist Hub state). */
     private readonly onChange?: () => void,
+    /** Receives plan events for the plan's transcript. */
+    private readonly onTranscript?: (planId: string, entry: TranscriptInput) => void,
   ) {}
 
   /** Load plans saved before a Hub restart; a plan the Architect was working on is planned again. */
@@ -227,6 +230,7 @@ export class PlanManager {
     plan.updatedAt = at;
     plan.history.push({ at, event });
     log.info(`${plan.planId}: ${event}`);
+    this.onTranscript?.(plan.planId, { kind: "event", text: event });
     this.onChange?.();
   }
 }

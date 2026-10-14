@@ -407,8 +407,12 @@ stateDiagram-v2
   merging --> merged: merge commit on main
   merging --> pending: rework (merge conflict)
   merging --> failed: merge blocked (dirty Hub checkout)
+  pending --> cancelled: a person cancels (any unfinished state but merging)
+  failed --> pending: a person retries
+  cancelled --> pending: a person retries
   merged --> [*]
   failed --> [*]
+  cancelled --> [*]
 ```
 
 | Limit | Default | When exceeded |
@@ -429,6 +433,30 @@ stateDiagram-v2
   owns that stage of the task.
 - **History.** Every task keeps an event history (last 50 entries), shown by
   `GET /api/tasks/:id` and the dashboard.
+- **Cancel.** `POST /api/tasks/:id/cancel` works in every state except `merged`, `failed`,
+  `cancelled` and `merging`. It releases the task's nodes. A node still working on it is
+  fenced like a node that lost its job: its status updates, model calls and QA verdicts are
+  refused, so the agent stops at its next model turn. Dependants are `blocked`, as for a
+  failure.
+- **Retry.** `POST /api/tasks/:id/retry` requeues a `failed` or `cancelled` task with fresh
+  limits: rework rounds, node drops, QA attempts and budget. The budget counts from the retry
+  (`budgetBaseUsd`), while `llm.costUsd` keeps the total. The branch keeps the previous
+  attempt, and the agent gets a `rework` note saying why it is running again.
+
+### Transcripts
+
+Every task and plan has a transcript: the agent's text, each tool call (long string inputs
+trimmed to 2,000 characters), each tool result, Hub events and QA verdicts with the runner's
+output. Long text keeps its first 1,500 and last 6,500 characters, because the end of a test
+run is usually what matters. The `ConversationManager` records the agent side as turns pass
+through it. `TaskManager` and `PlanManager` record events and verdicts.
+
+- **Storage.** Kept in memory (last 1,000 entries per transcript) and appended to
+  `<stateDir>/transcripts/<task|plan>-<id>.jsonl`. They survive restarts and outlive the
+  conversation itself.
+- **Reading.** `GET /api/tasks/:id/transcript?after=<seq>` (and `/api/plans/:id/transcript`)
+  returns `{entries, last}`. Entries have increasing `seq` numbers, so the console polls for
+  only what's new.
 
 ## 8. Git flow
 

@@ -27,3 +27,4 @@ export { architectSystemPrompt, planPrompt, systemPrompt, taskPrompt } from "./l
 export { PlanError, PlanManager, type PlanRecord, type PlanState } from "./plans.js";
 export { GitSync, sanitizeUrl, type SyncStatus } from "./git/sync.js";
 export { StateStore, type Snapshot } from "./state-store.js";
+export { Transcripts, type TranscriptEntry, type TranscriptInput, type TranscriptSubject } from "./transcripts.js";
