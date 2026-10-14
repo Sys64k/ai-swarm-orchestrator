@@ -656,6 +656,31 @@ code,
   margin-top: 16px;
 }
 
+.token-input {
+  position: relative;
+}
+
+.token-input .input {
+  padding-right: 76px;
+  font-family: var(--mono);
+}
+
+.token-toggle {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  transform: translateY(-50%);
+  color: var(--accent);
+  background: var(--surface-2);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
 @media (min-width: 720px) {
   .page {
     padding-top: 20px;
