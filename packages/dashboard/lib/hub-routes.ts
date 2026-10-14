@@ -5,6 +5,9 @@
 const ID = "[A-Za-z0-9_-]{1,128}";
 const RULES: ReadonlyArray<{ method: "GET" | "POST"; pattern: RegExp }> = [
   { method: "GET", pattern: /^health$/ },
+  { method: "GET", pattern: /^projects$/ },
+  { method: "POST", pattern: /^projects$/ },
+  { method: "GET", pattern: new RegExp(`^projects/${ID}$`) },
   { method: "GET", pattern: /^llm$/ },
   { method: "GET", pattern: /^nodes$/ },
   { method: "GET", pattern: /^tasks$/ },

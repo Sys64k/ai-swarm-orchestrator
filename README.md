@@ -215,9 +215,15 @@ The console is the Hub's web UI at `http://<hub-ip>:7421`. It's designed for a p
 and it works on a laptop too. On a phone, use **Add to Home Screen** to open it like an app.
 
 - **Home.**
-  - **Needs you** comes first: plans waiting for approval and failed tasks.
-  - Then plans in progress, running and queued tasks, workers, and recent finished work.
+  - **Needs you** comes first: plans waiting for approval and failed tasks, across all
+    projects.
+  - Then your **projects** (with what each needs), work running anywhere, and the workers.
   - It refreshes every few seconds while the screen is on.
+- **Project.**
+  - That project's plans, running and queued tasks, and finished work.
+  - **New plan** from here plans for this project.
+  - **+ New project** on the home screen creates a new repository in the projects folder.
+    The name is checked as you type, and the folder it will create is shown.
 - **Task.**
   - **Live** shows the agent's work as a terminal: its messages, the commands it runs with
     their output, file edits, Hub events and QA results. Finished tasks keep this transcript.
@@ -228,7 +234,8 @@ and it works on a laptop too. On a phone, use **Add to Home Screen** to open it 
   - **Approve and start** or **Reject** from a bar at the bottom of the screen.
   - After approval, each task shows its live state.
   - "How the Architect worked" replays how it explored the project.
-- **New plan.** Describe what you want; the Architect proposes a plan for you to approve.
+- **New plan.** Pick the project (if you have several) and describe what you want. The
+  Architect proposes a plan for you to approve.
 
 **Sign-in.**
 - **Session:** sign in once with the ASO token. It's kept in an `httpOnly` cookie, so page

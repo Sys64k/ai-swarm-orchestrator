@@ -20,6 +20,8 @@ export interface HistoryEntry {
 }
 
 export interface Task {
+  /** The project (folder in the Hub's projects root) the task belongs to. */
+  project: string;
   spec: {
     taskId: string;
     role: string;
@@ -59,6 +61,7 @@ export interface PlannedTask {
 
 export interface Plan {
   planId: string;
+  project: string;
   requirement: string;
   state: PlanState;
   summary?: string;
@@ -81,9 +84,17 @@ export interface HubNode {
   lastSeenAt: string;
 }
 
+export interface Project {
+  id: string;
+  dir: string;
+  tasks: { total: number; running: number; queued: number; failed: number; merged: number };
+  plansAwaitingApproval: number;
+}
+
 export interface Health {
   status: string;
-  targetDir?: string;
+  projectsRoot?: string | null;
+  targetDir?: string | null;
   uptimeSec?: number;
 }
 

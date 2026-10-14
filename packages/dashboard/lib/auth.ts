@@ -29,6 +29,28 @@ export function isSignedIn(token: string | undefined, cookie: string | undefined
   return false;
 }
 
+/**
+ * Undo what phone keyboards and copy-paste do to a token: spaces, line breaks and invisible
+ * characters inside it, typographic dashes, and a capitalised first letter of the `aso_`
+ * prefix. The random part is left alone, so this doesn't make guessing any easier.
+ */
+export function normalizeToken(input: string): string {
+  const cleaned = input.replace(/[\s\u200B-\u200D\u2060\uFEFF]/g, "").replace(/[\u2010-\u2015\u2212]/g, "-");
+  return /^aso_/i.test(cleaned) ? `aso_${cleaned.slice(4)}` : cleaned;
+}
+
+/**
+ * Why a sign-in failed, for the server log only (never shown to the browser and never
+ * containing the token): enough to tell a typo from a stale or foreign token.
+ */
+export function mismatchHint(given: string, expected: string): string {
+  if (!given) return "empty token";
+  const hints = [`${given.length} characters (expected ${expected.length})`];
+  if (!given.startsWith("aso_")) hints.push("does not start with aso_");
+  if (given.length === expected.length && given.toLowerCase() === expected.toLowerCase()) hints.push("differs only in letter case");
+  return hints.join(", ");
+}
+
 /** A POST from our own pages: no Origin header (same-origin form posts in some browsers) or a matching host. */
 export function isSameOrigin(origin: string | null, host: string | null): boolean {
   if (!origin) return true;
