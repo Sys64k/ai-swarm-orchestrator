@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { browserOrigin, isPublicPath, isSameOrigin, isSignedIn, redirectTo, safeNext } from "../lib/auth.ts";
+import { browserOrigin, isPublicPath, isSameOrigin, isSignedIn, mismatchHint, normalizeToken, redirectTo, safeNext } from "../lib/auth.ts";
 import { errorMessage, hubPath } from "../lib/hub-routes.ts";
 
 describe("console sign-in", () => {
@@ -78,5 +78,29 @@ describe("error messages", () => {
     assert.equal(errorMessage(502, null), "HTTP 502");
     assert.equal(errorMessage(500, { error: "" }), "HTTP 500");
     assert.equal(errorMessage(500, "<html>"), "HTTP 500");
+  });
+});
+
+describe("tokens typed on a phone", () => {
+  const token = "aso_Xy3kQ9-abcDEF_ghij0123456789klmn";
+
+  it("undoes what keyboards and copy-paste do, but not the random part", () => {
+    assert.equal(normalizeToken(token), token);
+    assert.equal(normalizeToken(`  ${token}\n`), token, "surrounding whitespace");
+    assert.equal(normalizeToken(`Aso_${token.slice(4)}`), token, "auto-capitalised first letter");
+    assert.equal(normalizeToken(`ASO_${token.slice(4)}`), token);
+    assert.equal(normalizeToken(`${token.slice(0, 10)} ${token.slice(10)}`), token, "space from a line wrap");
+    assert.equal(normalizeToken(`${token.slice(0, 10)}\u200B${token.slice(10)}`), token, "zero-width space");
+    assert.equal(normalizeToken(token.replace("-", "\u2013")), token, "typographic dash");
+    assert.notEqual(normalizeToken(token.replace("X", "x")), token, "case inside the random part still matters");
+  });
+
+  it("explains a failure for the log without revealing the token", () => {
+    const expected = "aso_abcdefghijklmnopqrstuvwxyz012345";
+    assert.equal(mismatchHint("", expected), "empty token");
+    assert.equal(mismatchHint("aso_abc", expected), "7 characters (expected 36)");
+    assert.equal(mismatchHint("x".repeat(36), expected), "36 characters (expected 36), does not start with aso_");
+    assert.equal(mismatchHint(expected.toUpperCase().replace("ASO_", "aso_"), expected), "36 characters (expected 36), differs only in letter case");
+    assert.ok(!mismatchHint("aso_zzz", expected).includes(expected.slice(4, 10)));
   });
 });

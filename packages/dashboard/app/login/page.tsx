@@ -1,9 +1,11 @@
+import { TokenInput } from "../../components/token-input.tsx";
 import { safeNext } from "../../lib/auth.ts";
 
 export const metadata = { title: "Sign in · ASO" };
 
 export default async function Page({ searchParams }: { searchParams: Promise<{ next?: string; error?: string }> }) {
   const { next, error } = await searchParams;
+  const length = process.env.ASO_TOKEN?.length;
   return (
     <main className="page login">
       <div className="login-mark" aria-hidden>
@@ -13,18 +15,15 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ n
       <p className="muted">
         Sign in with the ASO token. Run <code>aso token</code> on the Hub machine to see it.
       </p>
-      {error && <div className="banner banner-bad">That token is not right.</div>}
+      {error && (
+        <div className="banner banner-bad">
+          That token doesn&apos;t match. It starts with <code>aso_</code>
+          {length ? ` and is ${length} characters long` : ""}; tap Show to check what you entered.
+        </div>
+      )}
       <form method="post" action="/api/session" className="login-form">
         <input type="hidden" name="next" value={safeNext(next)} />
-        <input
-          className="input"
-          type="password"
-          name="token"
-          autoComplete="current-password"
-          placeholder="ASO token"
-          required
-          autoFocus
-        />
+        <TokenInput />
         <button type="submit" className="button button-primary button-wide">
           Sign in
         </button>
