@@ -36,9 +36,9 @@ beforeEach(() => {
     repoDir: repo,
     role: "backend",
     fileOperation: (op) => ops.push(`${op.op} ${op.path}`),
-    requestDependency: async (req) => {
-      if (req.name === "evil") throw new DependencyRejectedError("not on allowlist");
-      deps.push(req.name);
+    requestDependencies: async (packages) => {
+      if (packages.some((p) => p.name === "evil")) throw new DependencyRejectedError("not on allowlist");
+      deps.push(...packages.map((p) => p.name));
       return { mainCommit: "a".repeat(40) };
     },
     setPackageScripts: async (scripts) => {
@@ -53,7 +53,7 @@ describe("agent tools", () => {
   it("publishes JSON schemas for every tool", () => {
     const defs = agentToolDefinitions();
     assert.deepEqual(defs.map((d) => d.name), [
-      "list_files", "read_file", "search", "write_file", "edit_file", "delete_file", "run_command", "request_dependency", "set_package_scripts", "finish", "submit_plan",
+      "list_files", "read_file", "search", "write_file", "edit_file", "delete_file", "run_command", "request_dependencies", "set_package_scripts", "finish", "submit_plan",
     ]);
     for (const d of defs) {
       assert.equal(d.input_schema.type, "object");
@@ -100,7 +100,7 @@ describe("agent tools", () => {
   });
 
   it("refuses protected files and paths outside the checkout", async () => {
-    err(await call("write_file", { path: "package.json", content: "{}" }), /use request_dependency/);
+    err(await call("write_file", { path: "package.json", content: "{}" }), /use request_dependencies/);
     err(await call("edit_file", { path: "apps/web/package-lock.json", old_string: "a", new_string: "b" }), /managed by the Hub/);
     err(await call("read_file", { path: "../secret.txt" }), /invalid input/);
     err(await call("read_file", { path: "/etc/passwd" }), /invalid input/);
@@ -120,19 +120,25 @@ describe("agent tools", () => {
     assert.match(ok(await call("run_command", { argv: ["node", "-e", "console.log('a && b')"] })), /exit code 0[\s\S]*a && b/);
     err(await call("run_command", { argv: ["git", "push"] }), /not available to agents/);
     err(await call("run_command", { argv: ["/bin/bash", "-c", "ls"] }), /not available to agents/);
-    err(await call("run_command", { argv: ["npm", "install", "left-pad"] }), /use request_dependency/);
-    err(await call("run_command", { argv: ["pnpm", "add", "x"] }), /use request_dependency/);
+    err(await call("run_command", { argv: ["npm", "install", "left-pad"] }), /use request_dependencies/);
+    err(await call("run_command", { argv: ["pnpm", "add", "x"] }), /use request_dependencies/);
     err(await call("run_command", { argv: ["definitely-not-a-program"] }), /cannot run/);
     err(await call("run_command", { argv: ["node", "-e", "setTimeout(()=>{}, 5000)"], timeout_sec: 1 }), /timed out after 1s/);
   });
 
   it("requests dependencies through the Hub", async () => {
-    assert.match(ok(await call("request_dependency", { name: "zod", version: "^4.0.0" })), /zod@\^4.0.0 is installed/);
-    err(await call("request_dependency", { name: "evil" }), /rejected by the Hub: not on allowlist/);
-    err(await call("request_dependency", { name: "Bad Name" }), /invalid input/);
+    assert.match(ok(await call("request_dependencies", { packages: [{ name: "zod", version: "^4.0.0" }] })), /zod@\^4.0.0 is installed/);
+    assert.match(
+      ok(await call("request_dependencies", { packages: [{ name: "react" }, { name: "vitest", dev: true }] })),
+      /react, vitest are installed/,
+    );
+    err(await call("request_dependencies", { packages: [{ name: "zod" }, { name: "evil" }] }), /rejected by the Hub: not on allowlist/);
+    err(await call("request_dependencies", { packages: [{ name: "Bad Name" }] }), /invalid input/);
+    err(await call("request_dependencies", { packages: [] }), /invalid input/);
+    err(await call("request_dependencies", { packages: [{ name: "zod" }, { name: "zod" }] }), /invalid input/);
     assert.match(ok(await call("set_package_scripts", { scripts: { test: "node --test" } })), /scripts updated on main @ bbbbbbbb \(test\)/);
     err(await call("set_package_scripts", { scripts: { postinstall: "x" } }), /invalid input/);
-    assert.deepEqual(deps, ["zod", "scripts:test"]);
+    assert.deepEqual(deps, ["zod", "react", "vitest", "scripts:test"]);
   });
 
   it("validates inputs and rejects unknown tools", async () => {
@@ -154,7 +160,7 @@ describe("agent tools", () => {
         repoDir: repo,
         role,
         fileOperation: (op) => ops.push(`${op.op} ${op.path}`),
-        requestDependency: async () => ({ mainCommit: "a".repeat(40) }),
+        requestDependencies: async () => ({ mainCommit: "a".repeat(40) }),
         setPackageScripts: async () => ({ mainCommit: "b".repeat(40) }),
       });
     const qa = as("qa");

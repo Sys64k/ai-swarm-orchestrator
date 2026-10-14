@@ -35,11 +35,13 @@ const LOCK = (deps: Record<string, string> = {}) =>
  */
 function fakeInstaller(log: string[] = []): DependencyInstaller {
   return {
-    async install(dir, req) {
-      log.push(`${req.name}@${req.version ?? "latest"}${req.dev ? ":dev" : ""}`);
+    async install(dir, packages) {
       const pkg = JSON.parse(readFileSync(path.join(dir, "package.json"), "utf8"));
-      const key = req.dev ? "asoTestDevDependencies" : "asoTestDependencies";
-      pkg[key] = { ...pkg[key], [req.name]: req.version ?? "^1.0.0" };
+      for (const req of packages) {
+        log.push(`${req.name}@${req.version ?? "latest"}${req.dev ? ":dev" : ""}`);
+        const key = req.dev ? "asoTestDevDependencies" : "asoTestDependencies";
+        pkg[key] = { ...pkg[key], [req.name]: req.version ?? "^1.0.0" };
+      }
       writeFileSync(path.join(dir, "package.json"), JSON.stringify(pkg, null, 2) + "\n");
       writeFileSync(path.join(dir, "package-lock.json"), LOCK());
     },
@@ -64,11 +66,12 @@ async function implementer(ctx: HubContext, nodeId: string, taskId: string): Pro
   return w;
 }
 
-const request = (nodeId: string, taskId: string, extra: Record<string, unknown> = {}) =>
+/** One package (left-pad unless `extra` names another); `packages` sends a whole list. */
+const request = (nodeId: string, taskId: string, extra: Record<string, unknown> = {}, packages?: Record<string, unknown>[]) =>
   createMessage("DEPENDENCY_REQUEST", nodeId, {
     requestId: crypto.randomUUID(),
     taskId,
-    change: { type: "add_dependency", name: "left-pad", ...extra },
+    change: { type: "add_dependencies", packages: packages ?? [{ name: "left-pad", ...extra }] },
   } as never);
 
 const scriptsRequest = (nodeId: string, taskId: string, scripts: Record<string, string>) =>
@@ -104,6 +107,35 @@ describe("dependency requests (Hub)", () => {
     );
   });
 
+  it("adds a batch of runtime and dev packages in one commit", () => {
+    const calls: string[] = [];
+    return withHub(
+      async (ctx) => {
+        const w = await implementer(ctx, "dev", "feat");
+        const before = git(ctx.repoDir, "rev-parse", "main");
+        w.send(
+          request("dev", "feat", {}, [
+            { name: "next", version: "^16.0.0" },
+            { name: "react" },
+            { name: "vitest", dev: true },
+            { name: "@types/react", dev: true },
+          ]),
+        );
+
+        const r = response(await w.next());
+        assert.equal(r.outcome, "installed");
+        assert.deepEqual(calls, ["next@^16.0.0", "react@latest", "vitest@latest:dev", "@types/react@latest:dev"]);
+        assert.equal(git(ctx.repoDir, "rev-list", "--count", `${before}..main`), "1");
+        assert.equal(
+          git(ctx.repoDir, "log", "-1", "--format=%B", "main").trim(),
+          "chore(deps): add 4 packages\n\nnext@^16.0.0\nreact\nvitest (dev)\n@types/react (dev)\n\nRequested by task feat.",
+        );
+        w.ws.close();
+      },
+      { files: NPM_PROJECT, dependencyInstaller: fakeInstaller(calls) },
+    );
+  });
+
   it("only accepts requests from the node implementing the task", () =>
     withHub(
       async (ctx) => {
@@ -131,6 +163,10 @@ describe("dependency requests (Hub)", () => {
         w.send(request("dev", "feat", { name: "left-pad" }));
         const r = response(await w.next());
         assert.ok(r.outcome === "rejected" && /not on the Hub's dependency allowlist/.test(r.reason));
+        // One disallowed package rejects the whole batch, naming only the offenders.
+        w.send(request("dev", "feat", {}, [{ name: "zod" }, { name: "left-pad" }, { name: "is-odd" }]));
+        const batch = response(await w.next());
+        assert.ok(batch.outcome === "rejected" && /^left-pad, is-odd are not on the Hub's dependency allowlist$/.test(batch.reason), JSON.stringify(batch));
         w.ws.close();
       },
       { files: NPM_PROJECT, dependencyInstaller: fakeInstaller(), allowDependencies: ["zod", "@prisma/*"] },
@@ -260,6 +296,35 @@ describe("dependency requests (Hub)", () => {
     );
   });
 
+  it("adds a batch of runtime and dev packages in one commit", () => {
+    const calls: string[] = [];
+    return withHub(
+      async (ctx) => {
+        const w = await implementer(ctx, "dev", "feat");
+        const before = git(ctx.repoDir, "rev-parse", "main");
+        w.send(
+          request("dev", "feat", {}, [
+            { name: "next", version: "^16.0.0" },
+            { name: "react" },
+            { name: "vitest", dev: true },
+            { name: "@types/react", dev: true },
+          ]),
+        );
+
+        const r = response(await w.next());
+        assert.equal(r.outcome, "installed");
+        assert.deepEqual(calls, ["next@^16.0.0", "react@latest", "vitest@latest:dev", "@types/react@latest:dev"]);
+        assert.equal(git(ctx.repoDir, "rev-list", "--count", `${before}..main`), "1");
+        assert.equal(
+          git(ctx.repoDir, "log", "-1", "--format=%B", "main").trim(),
+          "chore(deps): add 4 packages\n\nnext@^16.0.0\nreact\nvitest (dev)\n@types/react (dev)\n\nRequested by task feat.",
+        );
+        w.ws.close();
+      },
+      { files: NPM_PROJECT, dependencyInstaller: fakeInstaller(calls) },
+    );
+  });
+
   it("does not commit when the dependency is already satisfied", () =>
     withHub(
       async (ctx) => {
@@ -295,10 +360,10 @@ describe("dependency requests (Hub)", () => {
       {
         files: NPM_PROJECT,
         dependencyInstaller: {
-          async install(dir, req) {
+          async install(dir, packages) {
             maxRunning = Math.max(maxRunning, ++running);
             await new Promise((r) => setTimeout(r, 100));
-            await inner.install(dir, req);
+            await inner.install(dir, packages);
             running--;
           },
         },
@@ -313,15 +378,15 @@ describe("dependency requests (real worker)", () => {
       async (ctx) => {
         const observed: Record<string, unknown> = {};
         const executor: TaskExecutor = {
-          async implement(_t, { repoDir, requestDependency }) {
+          async implement(_t, { repoDir, requestDependencies }) {
             writeFiles(repoDir, { "src/uses-dep.ts": "import pad from 'left-pad';\n" });
-            const { mainCommit } = await requestDependency({ name: "left-pad", version: "^1.3.0" });
+            const { mainCommit } = await requestDependencies([{ name: "left-pad", version: "^1.3.0" }]);
             const pkg = JSON.parse(readFileSync(path.join(repoDir, "package.json"), "utf8"));
             observed.dep = pkg.asoTestDependencies?.["left-pad"];
             observed.editKept = existsSync(path.join(repoDir, "src/uses-dep.ts"));
             observed.npmCiRan = existsSync(path.join(repoDir, ".ci-ran"));
             observed.mainCommit = mainCommit;
-            await assert.rejects(requestDependency({ name: "evil-pkg" }), DependencyRejectedError);
+            await assert.rejects(requestDependencies([{ name: "evil-pkg" }]), DependencyRejectedError);
             return { commitMessage: "use left-pad" };
           },
         };
@@ -425,17 +490,22 @@ describe("npm installer (real registry)", () => {
     const dir = makeTargetRepo({ "package.json": PKG });
     try {
       const repo = await HubRepository.open(dir);
-      const result = await repo.changePackage({ type: "add_dependency", name: "is-number", version: "^7.0.0", dev: false }, npmInstaller, "chore(deps): add is-number");
+      const result = await repo.changePackage(
+        { type: "add_dependencies", packages: [{ name: "is-number", version: "^7.0.0", dev: false }, { name: "is-odd", version: "^3.0.0", dev: true }] },
+        npmInstaller,
+        "chore(deps): add is-number, is-odd",
+      );
       assert.ok(result.ok && result.changed, JSON.stringify(result));
       const pkg = JSON.parse(readFileSync(path.join(dir, "package.json"), "utf8"));
       assert.equal(pkg.dependencies["is-number"], "^7.0.0");
+      assert.match(pkg.devDependencies["is-odd"], /^\^3\./);
       const lock = JSON.parse(readFileSync(path.join(dir, "package-lock.json"), "utf8"));
       assert.ok(lock.packages["node_modules/is-number"]);
       assert.equal(existsSync(path.join(dir, "node_modules")), false, "Hub must not install packages");
       assert.equal(git(dir, "status", "--porcelain"), "");
       assert.equal(git(dir, "show", "--name-only", "--format=", "HEAD"), "package-lock.json\npackage.json");
 
-      const bad = await repo.changePackage({ type: "add_dependency", name: "aso-surely-nonexistent-pkg-x9z", dev: false }, npmInstaller, "x");
+      const bad = await repo.changePackage({ type: "add_dependencies", packages: [{ name: "aso-surely-nonexistent-pkg-x9z", dev: false }] }, npmInstaller, "x");
       assert.ok(!bad.ok && /npm install aso-surely-nonexistent-pkg-x9z failed/.test(bad.reason));
       assert.equal(git(dir, "status", "--porcelain"), "");
     } finally {

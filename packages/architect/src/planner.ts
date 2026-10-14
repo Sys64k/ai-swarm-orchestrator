@@ -40,7 +40,7 @@ export class Planner {
       const tools = new AgentTools({
         repoDir,
         role: "architect",
-        requestDependency: async () => {
+        requestDependencies: async () => {
           throw new Error("the Architect cannot add dependencies");
         },
         setPackageScripts: async () => {

@@ -141,7 +141,7 @@ flowchart LR
 | | `plans.ts` | `PlanManager`: plan queue, Architect assignment, validation, approval → tasks |
 | `@aso/architect` | `client.ts`, `planner.ts` | Architect node: registers, plans each `PLAN_REQUEST` with read-only tools via the Hub, submits `PLAN_RESULT`. Run by the CLI's hidden `aso architect` command in tmux |
 | `@aso/worker` | `client.ts` | Connect, register (with resume claim), heartbeat, offline outbox, dispatch jobs |
-| | `jobs.ts` | `JobRunner`: implementation jobs (via a `TaskExecutor`, with `requestDependency` / `callModel`) and QA runs |
+| | `jobs.ts` | `JobRunner`: implementation jobs (via a `TaskExecutor`, with `requestDependencies` / `callModel`) and QA runs |
 | | `agent/executor.ts` | `LlmTaskExecutor`: the agent loop (model turn via Hub → run tools → repeat until `finish`) |
 | | `agent/tools.ts` | `AgentTools`: executes the model's tool calls inside the checkout |
 | | `run-command.ts` | Shell-free command runner with process-group timeout |
@@ -181,7 +181,7 @@ keys are rejected.
 | `TEST_EXECUTION` | hub → node | 3 | QA: test an exact commit with `setup` steps and a `command` argv |
 | `FEEDBACK_LOOP` | node → hub | 3 | QA verdict: `pass`, or `fail` with at least one failure and the output tail |
 | `FILE_OPERATION` | node → hub | 5 | Audit trail of agent file edits (sent by the agent loop) |
-| `DEPENDENCY_REQUEST` | node → hub | 4 | Ask the Hub for a package.json change: `add_dependency` or `set_scripts` (idempotent by `requestId`) |
+| `DEPENDENCY_REQUEST` | node → hub | 4 | Ask the Hub for a package.json change: `add_dependencies` or `set_scripts` (idempotent by `requestId`) |
 | `DEPENDENCY_RESPONSE` | hub → node | 4 | `installed` (with the main commit) or `rejected` |
 | `PROMPT_EXECUTION` | node → hub | 5 | One agent turn for a `taskId` (worker) or `planId` (Architect): `conversationId`, `turn`, and the results of the previous turn's tool calls. Nothing else: the Hub holds the conversation |
 | `PROMPT_RESULT` | hub → node | 5 | The model's visible text and tool calls for that turn, plus usage/cost; or an error marked retryable or not |
@@ -554,13 +554,13 @@ sequenceDiagram
   participant H as Hub (DependencyManager)
   participant M as Hub repo main
 
-  Ag->>W: ctx.requestDependency({ name, version?, dev? })
+  Ag->>W: ctx.requestDependencies([{ name, version?, dev? }, ...])
   W->>H: STATUS waiting_dependency
-  W->>H: DEPENDENCY_REQUEST {requestId, taskId, name, version, dev}
+  W->>H: DEPENDENCY_REQUEST {requestId, taskId, packages}
   H->>H: owner? allowlist? per-task limit? duplicate requestId?
   H->>M: withMainLock: checkout clean + on main, npm project?
-  H->>M: npm install pkg --package-lock-only --ignore-scripts
-  H->>M: only package.json / package-lock.json changed? commit "chore(deps): add pkg"
+  H->>M: npm install pkgs --package-lock-only --ignore-scripts (runtime, then dev)
+  H->>M: only package.json / package-lock.json changed? commit "chore(deps): add pkgs"
   H-->>W: DEPENDENCY_RESPONSE installed {mainCommit}
   W->>W: syncWithMain() (stash edits, rebase, restore)
   W->>W: npm ci
@@ -574,7 +574,7 @@ sequenceDiagram
 
 | `change.type` | Fields | Hub action |
 |---|---|---|
-| `add_dependency` | `name`, `version?`, `dev` | `npm install --package-lock-only --ignore-scripts` |
+| `add_dependencies` | `packages: [{name, version?, dev}]` (1–30, distinct names) | `npm install --package-lock-only --ignore-scripts`, one run for runtime and one for dev packages, one commit |
 | `set_scripts` | `scripts: {name: command}` (1–10) | Edit `package.json` directly, merging scripts and keeping the indentation and other fields |
 
 **Empty projects.** When the target has no `package.json`, the Hub first writes a minimal one
@@ -597,8 +597,8 @@ repository be bootstrapped entirely by agents.
 |---|---|
 | `requestId` seen before from the same node | Re-send the cached answer, or let the in-flight one arrive; never install twice |
 | Sender is the connected implementer of `taskId` | `rejected` |
-| Dependency name allowed by `--allow-deps` (exact name or `@scope/*`) | `rejected` |
-| At most 10 requests per task | `rejected` |
+| Every package name allowed by `--allow-deps` (exact name or `@scope/*`) | `rejected` (whole request) |
+| At most 10 requests per task (each may add up to 30 packages) | `rejected` |
 | Hub checkout clean and on `main` | `rejected` |
 | No `pnpm-lock.yaml` / `yarn.lock` / `bun.lock*` | `rejected` (npm only) |
 | Root `package.json` missing | Created (minimal), then the change is applied |
@@ -719,7 +719,7 @@ sequenceDiagram
 | `search` | `git grep -E` over tracked and untracked files; up to 300 matches |
 | `write_file` / `edit_file` / `delete_file` | Exact-match edits (unique unless `replace_all`); protected files refused; reported via `FILE_OPERATION` |
 | `run_command` | argv without a shell; `CI=1`; default 120 s timeout (max 900); `git`, shells, `sudo` and `npm install`-style commands refused |
-| `request_dependency` | Adds an npm package via the Hub; returns once installed and rebased |
+| `request_dependencies` | Adds up to 30 npm packages via the Hub in one commit; returns once installed and rebased |
 | `set_package_scripts` | Sets npm scripts via the Hub (creates package.json if missing); returns once rebased |
 | `finish` | Ends the loop with a summary and commit message; refused if other calls in the same turn failed |
 
@@ -765,7 +765,7 @@ refuses tools and paths outside the policy. The Hub re-checks every branch befor
 | Role | Tools | Writable | System prompt focus |
 |---|---|---|---|
 | Architect | `list_files`, `read_file`, `search`, `submit_plan` | none | Explore, then split the requirement into independently testable tasks with explicit contracts and dependencies |
-| `backend` | explore + edit + `run_command` + `request_dependency` + `finish` | any (minus protected files) | Data models, DB, API routes; prefers Prisma + PostgreSQL, Hono |
+| `backend` | explore + edit + `run_command` + `request_dependencies` + `finish` | any (minus protected files) | Data models, DB, API routes; prefers Prisma + PostgreSQL, Hono |
 | `frontend` | same | any (minus protected files) | UI; prefers Next.js App Router, Tailwind, shadcn/ui |
 | `qa` | same | test files and test config | Tests only; describes bugs instead of fixing feature code; prefers Vitest, Playwright |
 | `devops` | same | Dockerfiles, compose, CI, `infra/`, `deploy/`, `scripts/`, `Makefile` | Containers and CI; prefers GitHub Actions |

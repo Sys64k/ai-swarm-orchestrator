@@ -4,7 +4,7 @@ import {
   type MessageOf,
   type PayloadInput,
 } from "@aso/shared";
-import type { DependencyInstaller, HubRepository } from "./git/hub-repo.js";
+import type { DependencyInstaller, DependencySpec, HubRepository } from "./git/hub-repo.js";
 import type { NodeRegistry } from "./registry.js";
 import type { TaskManager } from "./tasks.js";
 
@@ -21,26 +21,37 @@ const NPM_TIMEOUT_MS = 5 * 60_000;
  * runs on the Hub; workers install for real with `npm ci`.
  */
 export const npmInstaller: DependencyInstaller = {
-  install(dir, req) {
-    const spec = req.version ? `${req.name}@${req.version}` : req.name;
-    const args = [
-      "install",
-      spec,
-      req.dev ? "--save-dev" : "--save",
-      "--package-lock-only",
-      "--ignore-scripts",
-      "--no-audit",
-      "--no-fund",
-    ];
-    return new Promise((resolve, reject) => {
-      execFile("npm", args, { cwd: dir, timeout: NPM_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 }, (err, _stdout, stderr) => {
-        if (!err) return resolve();
-        const detail = stderr.trim().split("\n").slice(-15).join("\n") || err.message;
-        reject(new Error(`npm install ${spec} failed: ${detail}`));
-      });
-    });
+  async install(dir, packages) {
+    // --save and --save-dev are per command, so runtime and dev packages are installed separately.
+    for (const dev of [false, true]) {
+      const specs = packages.filter((p) => p.dev === dev).map(packageSpec);
+      if (specs.length) await npmInstall(dir, specs, dev);
+    }
   },
 };
+
+function packageSpec(p: DependencySpec): string {
+  return p.version ? `${p.name}@${p.version}` : p.name;
+}
+
+function npmInstall(dir: string, specs: string[], dev: boolean): Promise<void> {
+  const args = [
+    "install",
+    ...specs,
+    dev ? "--save-dev" : "--save",
+    "--package-lock-only",
+    "--ignore-scripts",
+    "--no-audit",
+    "--no-fund",
+  ];
+  return new Promise((resolve, reject) => {
+    execFile("npm", args, { cwd: dir, timeout: NPM_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 }, (err, _stdout, stderr) => {
+      if (!err) return resolve();
+      const detail = stderr.trim().split("\n").slice(-15).join("\n") || err.message;
+      reject(new Error(`npm install ${specs.join(" ")} failed: ${detail}`));
+    });
+  });
+}
 
 export interface DependencyManagerOptions {
   installer?: DependencyInstaller;
@@ -97,8 +108,9 @@ export class DependencyManager {
       return undefined;
     }
     const { change } = req;
-    if (change.type === "add_dependency" && this.allow && !this.allowed(change.name)) {
-      reject(`${change.name} is not on the Hub's dependency allowlist`);
+    const denied = change.type === "add_dependencies" && this.allow ? change.packages.filter((p) => !this.allowed(p.name)) : [];
+    if (denied.length) {
+      reject(`${denied.map((p) => p.name).join(", ")} ${denied.length === 1 ? "is" : "are"} not on the Hub's dependency allowlist`);
       return undefined;
     }
     const count = (this.perTask.get(req.taskId) ?? 0) + 1;
@@ -108,16 +120,23 @@ export class DependencyManager {
     }
     this.perTask.set(req.taskId, count);
 
+    const added = change.type === "add_dependencies" ? change.packages.map((p) => `${packageSpec(p)}${p.dev ? " (dev)" : ""}`) : [];
     const label =
-      change.type === "add_dependency"
-        ? `${change.name}${change.version ? `@${change.version}` : ""}${change.dev ? " (dev)" : ""}`
+      change.type === "add_dependencies"
+        ? added.join(", ")
         : `scripts ${Object.entries(change.scripts).map(([k, v]) => `${k}="${v}"`).join(", ")}`;
-    const subject = change.type === "add_dependency" ? `chore(deps): add ${label}` : `chore: set npm ${label}`;
+    // A long list goes in the commit body so the subject stays readable.
+    const many = added.length > 3;
+    const subject =
+      change.type === "add_dependencies"
+        ? `chore(deps): add ${many ? `${added.length} packages` : label}`
+        : `chore: set npm ${label}`;
+    const body = many ? `${added.join("\n")}\n\n` : "";
     log.info(`${nodeId} requests ${label} for task ${req.taskId}`);
     this.tasks.recordEvent(req.taskId, `package change requested: ${label}`);
 
     void this.repo
-      .changePackage(change, this.installer, `${subject}\n\nRequested by task ${req.taskId}.`)
+      .changePackage(change, this.installer, `${subject}\n\n${body}Requested by task ${req.taskId}.`)
       .then(
         (result) => {
           if (!result.ok) return reject(result.reason);

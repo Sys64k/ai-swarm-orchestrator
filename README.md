@@ -211,7 +211,7 @@ rework rounds, and an event history.
    - `list_files`, `read_file`, `search`
    - `write_file`, `edit_file`, `delete_file`
    - `run_command` (no shell, no git)
-   - `request_dependency`, `set_package_scripts`
+   - `request_dependencies`, `set_package_scripts`
 3. **Verify.** The Hub checks that the reported commit is the head of `task/<id>` and doesn't
    touch `package.json` or lockfiles.
 4. **QA.** A QA worker checks out that exact commit, runs `npm ci` if the commit has a
@@ -234,7 +234,9 @@ A task is failed after 3 node losses.
 
 Workers may never edit `package.json` or lockfiles. Agents ask the Hub instead:
 
-- **`request_dependency`** adds a package (`{ name, version?, dev? }`).
+- **`request_dependencies`** adds up to 30 packages in one request
+  (`{ packages: [{ name, version?, dev? }] }`). Agents are told to request everything they
+  need at once.
 - **`set_package_scripts`** adds or updates npm scripts such as `test`, `build`, `dev` and
   `lint`.
 
@@ -246,10 +248,12 @@ For a dependency, the flow is:
 
 1. **Pause.** The worker reports `waiting_dependency` and sends a request to the Hub.
 2. **Hub install.** Under the `main` lock, the Hub runs
-   `npm install <pkg> --package-lock-only --ignore-scripts`. This only updates `package.json`
+   `npm install <pkgs> --package-lock-only --ignore-scripts` (one run for runtime packages, one
+   for dev packages). This only updates `package.json`
    and `package-lock.json`: no `node_modules` on the Hub, and no package code ever runs there.
-3. **Commit and reply.** The Hub commits both files to `main` as
-   `chore(deps): add <pkg>` and replies with the commit.
+3. **Commit and reply.** The Hub commits both files to `main` in one commit,
+   `chore(deps): add <pkgs>` (more than three are listed in the commit body), and replies
+   with the commit.
 4. **Rebase and install.** The worker rebases its task branch onto the new `main`, keeping the
    agent's uncommitted edits, and runs `npm ci`. Then the agent continues.
 
@@ -261,9 +265,9 @@ never run agent-defined hooks automatically.
 Rules:
 
 - **Who can ask.** Only the node currently implementing a task can request package changes for
-  it, at most 10 per task.
+  it, at most 10 requests per task. One request can add many packages.
 - **Allowlist.** `--allow-deps zod,@prisma/*` restricts which packages agents may add; the
-  default allows any.
+  default allows any. One disallowed package rejects the whole request.
 - **Rollback.** If npm fails or touches anything besides the two files, the Hub rolls back and
   the request is rejected.
 - **npm only.** pnpm, yarn and bun projects are rejected with a clear message.

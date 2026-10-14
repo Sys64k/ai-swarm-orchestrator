@@ -28,8 +28,8 @@ export interface DependencySpec {
 }
 
 export interface DependencyInstaller {
-  /** Update package.json + lockfile in `dir`; throw with a readable message on failure. */
-  install(dir: string, request: DependencySpec): Promise<void>;
+  /** Add all `packages` to package.json + lockfile in `dir`; throw with a readable message on failure. */
+  install(dir: string, packages: readonly DependencySpec[]): Promise<void>;
 }
 
 export type DependencyResult =
@@ -151,8 +151,8 @@ export class HubRepository {
       const before = await this.mainHead();
       try {
         if (!has("package.json")) await this.createManifest();
-        if (change.type === "add_dependency") {
-          await installer.install(this.dir, { name: change.name, version: change.version, dev: change.dev });
+        if (change.type === "add_dependencies") {
+          await installer.install(this.dir, change.packages);
         } else {
           await this.setScripts(change.scripts);
         }

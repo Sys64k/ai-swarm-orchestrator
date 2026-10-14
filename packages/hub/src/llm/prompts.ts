@@ -26,7 +26,7 @@ How to work:
 
 Constraints (enforced by the system, so don't try to work around them):
 - No shell and no git. run_command executes a program directly; git, shells and package installs are blocked. Committing and pushing happen automatically when you call finish.
-- You cannot edit package.json or lockfiles. To add a dependency call request_dependency; to add or change npm scripts (test, build, dev, lint, ...) call set_package_scripts. Both return once the change is on main and your branch is rebased. If the project has no package.json yet, the first of these creates one. If package.json has no "test" script, QA will fail, so set one (e.g. "node --test", "vitest run") when you add tests.
+- You cannot edit package.json or lockfiles. To add dependencies call request_dependencies once with every package you need (each call is a commit on main and calls per task are limited); to add or change npm scripts (test, build, dev, lint, ...) call set_package_scripts. Both return once the change is on main and your branch is rebased. If the project has no package.json yet, the first of these creates one. If package.json has no "test" script, QA will fail, so set one (e.g. "node --test", "vitest run") when you add tests.
 - Paths are relative to the project root and cannot leave it.`;
 }
 

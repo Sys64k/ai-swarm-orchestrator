@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  MAX_PACKAGES_PER_REQUEST,
   NpmPackageNameSchema,
   PlannedTaskSchema,
   RepoPathSchema,
@@ -12,7 +13,7 @@ import {
  * Tools the coding agent can call. The Hub sends these definitions to the model; the worker
  * validates each call against the same schemas and executes it inside the task checkout.
  * Agents get no shell and no git: version control goes through AgentGitClient, dependencies
- * through request_dependency.
+ * through request_dependencies.
  */
 export const AGENT_TOOLS = {
   list_files: {
@@ -68,14 +69,24 @@ export const AGENT_TOOLS = {
       timeout_sec: z.number().int().min(1).max(900).optional().describe("Default 120"),
     }),
   },
-  request_dependency: {
+  request_dependencies: {
     description:
-      "Ask the Hub to add an npm package to the project. You cannot edit package.json or lockfiles yourself. " +
-      "Blocks until the package is added on main, your branch is rebased (your edits are kept) and npm ci has run.",
+      "Ask the Hub to add npm packages to the project. You cannot edit package.json or lockfiles yourself. " +
+      "Request every package you need in one call (up to " + MAX_PACKAGES_PER_REQUEST + "): each call is a commit on main " +
+      "and the number of calls per task is limited. " +
+      "Blocks until the packages are added on main, your branch is rebased (your edits are kept) and npm ci has run.",
     input: z.strictObject({
-      name: NpmPackageNameSchema,
-      version: VersionRangeSchema.optional().describe("Semver range; default latest"),
-      dev: z.boolean().optional().describe("Add as a devDependency"),
+      packages: z
+        .array(
+          z.strictObject({
+            name: NpmPackageNameSchema,
+            version: VersionRangeSchema.optional().describe("Semver range; default latest"),
+            dev: z.boolean().optional().describe("Add as a devDependency"),
+          }),
+        )
+        .min(1)
+        .max(MAX_PACKAGES_PER_REQUEST)
+        .refine((list) => new Set(list.map((p) => p.name)).size === list.length, { message: "each package may appear only once" }),
     }),
   },
   set_package_scripts: {
