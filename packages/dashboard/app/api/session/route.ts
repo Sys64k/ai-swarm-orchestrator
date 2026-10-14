@@ -1,0 +1,32 @@
+import { NextResponse, type NextRequest } from "next/server";
+import { browserOrigin, constantTimeEqual, redirectTo, safeNext, SESSION_COOKIE, SESSION_MAX_AGE_SEC } from "../../../lib/auth.ts";
+
+/** Sign in with the ASO token (form post from /login). */
+export async function POST(request: NextRequest) {
+  const form = await request.formData();
+  const token = String(form.get("token") ?? "").trim();
+  const next = safeNext(String(form.get("next") ?? "/"));
+  const expected = process.env.ASO_TOKEN;
+  if (expected && !constantTimeEqual(token, expected)) {
+    return redirectTo(`/login?next=${encodeURIComponent(next)}&error=1`, request.headers, request.nextUrl.origin);
+  }
+  const response = new NextResponse(null, { status: 303, headers: { location: new URL(next, browserOrigin(request.headers, request.nextUrl.origin)).href } });
+  if (expected) {
+    response.cookies.set(SESSION_COOKIE, expected, {
+      httpOnly: true,
+      sameSite: "lax",
+      // Behind an HTTPS proxy (e.g. Tailscale) the server itself only sees http.
+      secure: request.headers.get("x-forwarded-proto") === "https" || request.nextUrl.protocol === "https:",
+      path: "/",
+      maxAge: SESSION_MAX_AGE_SEC,
+    });
+  }
+  return response;
+}
+
+/** Sign out. */
+export async function DELETE() {
+  const response = NextResponse.json({ ok: true });
+  response.cookies.delete(SESSION_COOKIE);
+  return response;
+}

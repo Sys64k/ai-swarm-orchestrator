@@ -152,7 +152,9 @@ flowchart LR
 | | `hardware.ts` | `systeminformation` profile and disk write benchmark |
 | | `git/agent-git-client.ts` | The only Git interface agents get |
 | `@aso/cli` | `index.ts`, `commands/*` | Argument parsing and process orchestration (native or Docker) |
-| `@aso/dashboard` | `app/page.tsx` | Read-only view of nodes and tasks |
+| `@aso/dashboard` | `app/**`, `components/*` | The console: home, task (live transcript), plan (approve/reject), new plan, sign-in. Client pages poll the Hub through `app/api/hub/[...path]` |
+| | `lib/view.ts` | Pure view logic: home grouping, badges, transcript → terminal lines |
+| | `lib/auth.ts`, `lib/hub-routes.ts`, `proxy.ts` | Session cookie and Basic auth, browser-origin redirects, the allowlist of Hub endpoints the browser may reach |
 
 ## 4. Communication protocol
 
@@ -457,6 +459,36 @@ through it. `TaskManager` and `PlanManager` record events and verdicts.
 - **Reading.** `GET /api/tasks/:id/transcript?after=<seq>` (and `/api/plans/:id/transcript`)
   returns `{entries, last}`. Entries have increasing `seq` numbers, so the console polls for
   only what's new.
+
+### The console
+
+The console (`packages/dashboard`, Next.js App Router, standalone server on :7421) is a
+phone-first client of the API above.
+
+```mermaid
+flowchart LR
+  B["Phone / laptop browser"] -->|"session cookie"| P["proxy.ts<br/>(sign-in check)"]
+  P --> PG["Pages: client components"]
+  PG -->|"poll every 2–3 s while visible"| R["/api/hub/[...path]<br/>allowlist + Bearer"]
+  R --> H["Hub :7420"]
+```
+
+- **Polling.** Lists poll every 3 s and transcripts every 2 s, only while the page is visible,
+  so a phone in a pocket costs nothing. Transcripts fetch with `?after=<seq>`, so each poll
+  carries only new lines. Server-sent events would be lighter but add a long-lived
+  connection per phone through the proxy; polling was enough for v1.
+- **The token stays on the server.** Pages call `/api/hub/...`. The route handler checks the
+  path against `lib/hub-routes.ts` (task/plan reads and transcripts, cancel/retry,
+  create/approve/reject plans; no raw task submission, sync or node endpoints) and adds the
+  Bearer token. A cross-site `Origin` on a POST is refused, since browsers re-send Basic-auth
+  credentials across sites.
+- **Redirects use the browser's address.** Next.js builds `request.url` from the address it
+  binds to (`localhost`), so a redirect built from it would send a phone on the LAN to
+  `localhost`, and the session cookie would be lost. `browserOrigin()` uses the `Host`
+  header, or `X-Forwarded-Host`/`-Proto` behind an HTTPS proxy.
+- **Logic stays out of components.** `lib/view.ts` decides what needs attention, the badges
+  and how a transcript entry reads as a terminal line. It is unit-tested with `node --test`
+  like the rest of the repo.
 
 ## 8. Git flow
 
@@ -952,7 +984,7 @@ flowchart LR
   T[("~/.config/aso/token<br/>(created by start-hub, mode 600)")]
   T --> HUB["Hub: middleware on /api/*, /git/*, /ws"]
   T --> ARCH["Architect (same machine, reads the file)"]
-  T --> DASH["Dashboard: server-side API calls + Basic auth for browsers"]
+  T --> DASH["Console: session cookie (or Basic) for browsers; adds Bearer when proxying to the Hub"]
   W["Workers: ASO_TOKEN (env or ~/.config/aso/.env)"] -->|"WebSocket Authorization header,<br/>git http.extraHeader"| HUB
   CLI["CLI: aso plan / sync"] -->|Bearer| HUB
 ```
@@ -962,7 +994,7 @@ flowchart LR
 | WebSocket `/ws` | `Authorization: Bearer` on the upgrade request | `401` before upgrade; the worker logs "check ASO_TOKEN" |
 | API `/api/*` | `Bearer`, or Basic with the token as password | `401` with `WWW-Authenticate: Basic` |
 | Git `/git/project.git/*` | `http.extraHeader` per git command (never in `.git/config`) | `401` (git fails without prompting) |
-| Dashboard | Browser Basic auth (any user, token as password); server-side calls use `Bearer` | `401` login prompt |
+| Console | Sign-in page sets an `httpOnly`, `SameSite=Lax` session cookie (`Secure` behind HTTPS); Basic auth also accepted. Its proxy to the Hub adds `Bearer` server-side and allows only the console's endpoints | Pages redirect to `/login`; `/api/*` returns `401` |
 | `/api/health`, `/api/version`, `/dist/aso.tgz` | none | Health shows only `{status, auth}` |
 
 **Implementation notes:**

@@ -135,8 +135,8 @@ aso token
 
 You get:
 
-- **Dashboard:** `http://<hub-ip>:7421`. Log in with any user name and the token as the
-  password.
+- **Console:** `http://<hub-ip>:7421`, built for phones first. Sign in once with the token
+  and the browser remembers it. See [The console](#the-console).
 - **Hub endpoints:** the API, WebSocket and Git endpoint at `<hub-ip>:7420`.
 - **Architect:** runs in tmux (`tmux attach -t aso-architect`).
 - **Container ownership:** in Docker the container runs as your user ID, so files the Hub
@@ -208,6 +208,34 @@ curl -X POST http://localhost:7420/api/tasks \
 
 `GET /api/tasks/<id>` and the dashboard show the task's state, the node working on it, any
 rework rounds, and an event history.
+
+## The console
+
+The console is the Hub's web UI at `http://<hub-ip>:7421`. It's designed for a phone first,
+and it works on a laptop too. On a phone, use **Add to Home Screen** to open it like an app.
+
+- **Home.**
+  - **Needs you** comes first: plans waiting for approval and failed tasks.
+  - Then plans in progress, running and queued tasks, workers, and recent finished work.
+  - It refreshes every few seconds while the screen is on.
+- **Task.**
+  - **Live** shows the agent's work as a terminal: its messages, the commands it runs with
+    their output, file edits, Hub events and QA results. Finished tasks keep this transcript.
+  - **Details** shows the description, acceptance criteria, files touched and history.
+  - **Cancel** a task that's going the wrong way, or **Retry** a failed one.
+- **Plan.**
+  - Shows the requirement, the Architect's approach and the proposed tasks.
+  - **Approve and start** or **Reject** from a bar at the bottom of the screen.
+  - After approval, each task shows its live state.
+  - "How the Architect worked" replays how it explored the project.
+- **New plan.** Describe what you want; the Architect proposes a plan for you to approve.
+
+**Sign-in.**
+- **Session:** sign in once with the ASO token. It's kept in an `httpOnly` cookie, so page
+  scripts never see it.
+- **Scripts:** HTTP Basic auth (any user name, the token as password) still works for scripts.
+- **Proxy:** the browser reaches the Hub only through the console's server, which adds the
+  token itself and allows only the endpoints the console uses.
 
 ## How a task flows
 

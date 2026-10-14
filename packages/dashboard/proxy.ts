@@ -1,27 +1,19 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { isPublicPath, isSignedIn, redirectTo, SESSION_COOKIE } from "./lib/auth.ts";
 
 /**
- * Browser access needs the ASO token: HTTP Basic auth, any user name, the token as password.
- * Without ASO_TOKEN (Hub started with authentication disabled) the dashboard is open.
+ * Everything but the sign-in page needs the ASO token: the session cookie set by signing in,
+ * or HTTP Basic auth. Pages redirect to /login; API calls get 401.
+ * Without ASO_TOKEN (Hub started with authentication disabled) the console is open.
  */
 export function proxy(request: NextRequest) {
-  const token = process.env.ASO_TOKEN;
-  if (!token) return NextResponse.next();
-  const header = request.headers.get("authorization") ?? "";
-  if (header.startsWith("Basic ")) {
-    const decoded = atob(header.slice(6));
-    if (constantTimeEqual(decoded.slice(decoded.indexOf(":") + 1), token)) return NextResponse.next();
+  const { pathname, search } = request.nextUrl;
+  if (isPublicPath(pathname)) return NextResponse.next();
+  if (isSignedIn(process.env.ASO_TOKEN, request.cookies.get(SESSION_COOKIE)?.value, request.headers.get("authorization"))) {
+    return NextResponse.next();
   }
-  return new NextResponse("ASO dashboard: sign in with any user name and the ASO token as the password.", {
-    status: 401,
-    headers: { "WWW-Authenticate": 'Basic realm="ASO dashboard", charset="UTF-8"' },
-  });
-}
-
-function constantTimeEqual(a: string, b: string): boolean {
-  let diff = a.length ^ b.length;
-  for (let i = 0; i < Math.max(a.length, b.length); i++) diff |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
-  return diff === 0;
+  if (pathname.startsWith("/api/")) return NextResponse.json({ error: "sign in first" }, { status: 401 });
+  return redirectTo(`/login?next=${encodeURIComponent(pathname + search)}`, request.headers, request.nextUrl.origin, 307);
 }
 
 export const config = { matcher: "/:path*" };
