@@ -21,6 +21,6 @@ export {
   type TestExecution,
 } from "./jobs.js";
 export { runCommand, type CommandResult } from "./run-command.js";
-export { LlmTaskExecutor, ModelError, callModelWithRetry, describe as describeToolCall } from "./agent/executor.js";
+export { AgentStoppedError, LlmTaskExecutor, ModelError, callModelWithRetry, describe as describeToolCall } from "./agent/executor.js";
 export { ModelChannel, type ModelSubject } from "./model-channel.js";
 export { AgentTools, TOOL_OUTPUT_LIMIT, type ToolCall, type ToolHost, type ToolResult } from "./agent/tools.js";

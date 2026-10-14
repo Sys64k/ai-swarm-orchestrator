@@ -723,6 +723,12 @@ sequenceDiagram
 | `set_package_scripts` | Sets npm scripts via the Hub (creates package.json if missing); returns once rebased |
 | `finish` | Ends the loop with a summary and commit message; refused if other calls in the same turn failed |
 
+**Stopping without `finish`.** A reply with no tool calls hands nothing in. The worker sends the
+next turn with no tool results, and the Hub turns that into a reminder (`CONTINUE_PROMPT`): call
+`finish` if done, keep working, or explain the blocker. If the agent stops again right after the
+reminder, the worker throws `AgentStoppedError` and reports the task `failed` with the agent's
+text. Unfinished work is never pushed, so it never reaches QA or burns rework rounds.
+
 **Limits and safety:**
 
 - **Output cap.** Each tool result is capped at 50,000 characters, and a turn's results at

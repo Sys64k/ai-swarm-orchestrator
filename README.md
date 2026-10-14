@@ -207,7 +207,9 @@ rework rounds, and an event history.
 2. **Implement.** The worker checks out `task/<id>` from the Hub. It starts from `main`, or
    continues an existing branch when reworking. The agent works through tools the worker
    executes locally until it calls `finish`, and the worker commits and pushes the branch back
-   to the Hub. The tools are:
+   to the Hub. If the agent stops without calling `finish`, it is reminded once. If it stops
+   again, the task fails with the agent's explanation, and nothing is pushed or sent to QA.
+   The tools are:
    - `list_files`, `read_file`, `search`
    - `write_file`, `edit_file`, `delete_file`
    - `run_command` (no shell, no git)

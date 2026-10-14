@@ -57,6 +57,15 @@ export function planPrompt(plan: PlanRecord): string {
   return `# Requirement (${plan.planId})\n\n${plan.requirement}`;
 }
 
+/**
+ * Sent when the agent ended its turn without calling `finish` and the worker asks it to go on.
+ * The worker fails the task if the agent stops again, so the agent is told how to bail out.
+ */
+export const CONTINUE_PROMPT =
+  "You ended your turn without calling finish, so nothing has been handed in. If the task is complete and verified, " +
+  "call finish now. Otherwise keep working with your tools. If you cannot complete the task, reply with a short " +
+  "explanation of what blocks you and call no tool: the task then fails with your explanation, and nothing goes to QA.";
+
 /** First user message: the task as the Hub knows it, including feedback from a failed attempt. */
 export function taskPrompt(task: TaskRecord): string {
   const { spec, rework } = task;

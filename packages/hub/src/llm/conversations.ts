@@ -13,7 +13,7 @@ import type { NodeRegistry } from "../registry.js";
 import type { AgentTurn, TaskManager } from "../tasks.js";
 import { LlmError, type LlmAdapter } from "./adapter.js";
 import { priceUsage } from "./pricing.js";
-import { architectSystemPrompt, planPrompt, systemPrompt, taskPrompt } from "./prompts.js";
+import { architectSystemPrompt, CONTINUE_PROMPT, planPrompt, systemPrompt, taskPrompt } from "./prompts.js";
 
 const log = createLogger("llm");
 
@@ -214,10 +214,13 @@ export class ConversationManager {
       return void fail(`${subject.kind} ${subject.id} reached its LLM budget ($${spent.toFixed(2)} of $${subject.budgetUsd})`);
     }
 
+    // A later turn with no tool results follows a reply that ended without tool calls.
     const userMessage: Anthropic.Beta.BetaMessageParam =
       req.turn === 0
         ? { role: "user", content: subject.firstPrompt() }
-        : {
+        : req.toolResults.length === 0
+          ? { role: "user", content: CONTINUE_PROMPT }
+          : {
             role: "user",
             content: req.toolResults.map((r) => ({
               type: "tool_result" as const,

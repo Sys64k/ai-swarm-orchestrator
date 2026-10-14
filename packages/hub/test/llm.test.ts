@@ -93,9 +93,14 @@ describe("LLM gateway (Hub)", () => {
           tu_a: { type: "tool_result", tool_use_id: "tu_a", content: "files", is_error: true },
         } as never);
 
+        // A turn answering no tool calls (the model stopped without finish) gets the reminder.
+        w.send(prompt("dev", conv, 2, []));
+        assert.equal(result(await w.next()).outcome, "ok");
+        assert.match(model.requests[2].messages.at(-1)!.content as string, /without calling finish/);
+
         const task = ctx.hub.tasks.get("greet")!;
-        assert.equal(task.llm.calls, 2);
-        assert.equal(task.llm.inputTokens, 2000);
+        assert.equal(task.llm.calls, 3);
+        assert.equal(task.llm.inputTokens, 3000);
         w.ws.close();
       },
       { llm: { adapter: model } },
@@ -335,6 +340,64 @@ console.log("greeting ok");\n`;
         }
       },
       { files: { "check.mjs": CHECK }, qa: { command: ["node", "check.mjs"] }, llm: { adapter: model } },
+    );
+  });
+
+  /** Runs one "greet" task on a single backend worker (QA off) until it merges or fails. */
+  async function runGreet(ctx: HubContext) {
+    const dir = tempDir("aso-dev-");
+    const dev = await startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "dev", roles: ["backend"], workDir: dir, hardware: hardware() });
+    try {
+      await waitFor(() => ctx.hub.registry.has("dev"));
+      await postTask(ctx.port, { taskId: "greet", role: "backend", title: "Add greeting", description: "greeting.txt must contain hello" });
+      return await waitFor(() => ["merged", "failed"].includes(ctx.hub.tasks.get("greet")!.state) && ctx.hub.tasks.get("greet")!, 30_000, "task to end");
+    } finally {
+      dev.stop();
+      await dev.runner.idle();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it("reminds an agent that stops without finish, and merges once it finishes", () => {
+    const model = new ScriptedModel((req) => {
+      switch (req.messages.length) {
+        case 1:
+          return reply([toolUse("t1", "write_file", { path: "greeting.txt", content: "hello\n" })]);
+        case 3:
+          return reply([text("I wrote the file.")], "end_turn");
+        default:
+          assert.match(req.messages.at(-1)!.content as string, /without calling finish/);
+          return reply([toolUse("t2", "finish", { summary: "wrote greeting", commit_message: "feat: add greeting" })]);
+      }
+    });
+    return withHub(
+      async (ctx) => {
+        const record = await runGreet(ctx);
+        assert.equal(record.state, "merged", record.history.map((h) => h.event).join("\n"));
+        assert.equal(git(ctx.repoDir, "show", "main:greeting.txt"), "hello");
+        assert.equal(model.requests.length, 3); // write, stop, finish after the reminder
+      },
+      { qa: { enabled: false }, llm: { adapter: model } },
+    );
+  });
+
+  it("fails the task without QA when the agent stops twice without finish", () => {
+    const model = new ScriptedModel((req) =>
+      req.messages.length === 1
+        ? reply([toolUse("t1", "write_file", { path: "greeting.txt", content: "half done\n" })])
+        : reply([text("I can't add the test script: the Hub rejects package changes.")], "end_turn"),
+    );
+    return withHub(
+      async (ctx) => {
+        const record = await runGreet(ctx);
+        const events = record.history.map((h) => h.event);
+        assert.equal(record.state, "failed", events.join("\n"));
+        assert.match(events.at(-1)!, /stopped without calling finish: I can't add the test script/);
+        assert.ok(!events.some((e) => /pushed|QA/.test(e)), events.join("\n"));
+        assert.equal(model.requests.length, 3); // write, stop, stop again after the reminder
+        assert.throws(() => git(ctx.repoDir, "show", "main:greeting.txt"));
+      },
+      { qa: { enabled: false }, llm: { adapter: model } },
     );
   });
 

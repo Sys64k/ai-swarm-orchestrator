@@ -15,6 +15,11 @@ export class ModelError extends Error {
   override name = "ModelError";
 }
 
+/** The agent stopped twice without calling `finish`; its work is not handed in. */
+export class AgentStoppedError extends Error {
+  override name = "AgentStoppedError";
+}
+
 /**
  * The coding agent. Runs on the worker: asks the Hub for the model's next step, executes the
  * requested tools in the checkout, sends the results back, until the model calls `finish`.
@@ -33,6 +38,8 @@ export class LlmTaskExecutor implements TaskExecutor {
     const conversationId = randomUUID();
     let turn = 0;
     let results: ToolResult[] = [];
+    // Set after the model ended a turn without finish; a second stop in a row fails the task.
+    let reminded = false;
 
     for (;;) {
       const reply = await callModelWithRetry((t) => ctx.callModel(t), { conversationId, turn, toolResults: results }, (m) => ctx.report(m), this.opts.retryDelaysMs);
@@ -62,10 +69,16 @@ export class LlmTaskExecutor implements TaskExecutor {
           isError: true,
         });
       } else if (reply.toolCalls.length === 0) {
-        // Ended its turn without finish: treat the final message as the summary.
-        log.info(`task ${task.taskId}: model ended without finish; committing its work`);
-        return { commitMessage: `${task.taskId}: ${task.title}`, summary: reply.text || undefined };
+        // Never hand in work the agent did not finish: remind it once, then give up.
+        if (reminded) {
+          throw new AgentStoppedError(`the agent stopped without calling finish: ${reply.text.slice(0, 1500) || "(no explanation)"}`);
+        }
+        log.info(`task ${task.taskId}: model ended without finish; reminding it once`);
+        ctx.report("agent stopped without finish; reminding it");
+        reminded = true;
+        continue;
       }
+      reminded = false;
       results = fitBudget(results);
     }
   }
