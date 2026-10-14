@@ -240,6 +240,10 @@ rework rounds, and an event history.
 
 A task is failed after 3 node losses.
 
+**You can step in** at any point: cancel a task that's going the wrong way, or retry a failed
+one. A retry gets fresh limits and budget, and the agent is told why it's running again. See
+[Hub endpoints](#hub-endpoints).
+
 **If the Hub restarts** (redeploy, crash, reboot), it picks up where it left off. Tasks, plans
 and agent conversations are saved in the project's `.git/aso/` directory, so they stay with
 the project and never end up in a commit or a worker's clone. On restart:
@@ -425,6 +429,9 @@ Options:
 | `GET` | `/api/nodes` | Registered nodes with hardware, latest heartbeat and current task |
 | `GET` | `/api/tasks` | All tasks with state, nodes, commits, rework round and history |
 | `GET` | `/api/tasks/:id` | A single task (history, agent turn log, LLM cost, files touched) |
+| `GET` | `/api/tasks/:id/transcript`, `/api/plans/:id/transcript` | What the agent said and did: text, tool calls, command output, events, QA verdicts. `?after=<seq>` returns only newer entries |
+| `POST` | `/api/tasks/:id/cancel` | Stop a task that isn't finished; a worker still on it is cut off at its next model turn |
+| `POST` | `/api/tasks/:id/retry` | Queue a failed or cancelled task again with fresh limits and budget |
 | `POST` | `/api/plans` | Start a plan: `{ "requirement": "..." }` → `201` with `planId` |
 | `GET` | `/api/plans`, `/api/plans/:id` | Plans with state, summary, proposed tasks, cost |
 | `POST` | `/api/plans/:id/approve` / `reject` | Decide on a proposed plan; approve returns the created task ids |

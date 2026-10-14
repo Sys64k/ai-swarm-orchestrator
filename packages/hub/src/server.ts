@@ -31,6 +31,7 @@ import { NodeRegistry, type NodeTransport } from "./registry.js";
 import type { RoutingPolicies } from "./routing.js";
 import { StateStore } from "./state-store.js";
 import { TaskError, TaskManager, type QaOptions, type TaskRecord } from "./tasks.js";
+import { Transcripts } from "./transcripts.js";
 import type { PlanRecord } from "./plans.js";
 
 const log = createLogger("hub");
@@ -110,6 +111,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   const stateDir = opts.stateDir === undefined ? path.join(await repo.gitDir(), "aso") : opts.stateDir;
   const store = stateDir === null ? undefined : new StateStore(stateDir);
   const saved = await store?.load<TaskRecord, PlanRecord>();
+  const transcripts = new Transcripts(store ? path.join(store.dir, "transcripts") : undefined);
   const persist = () => store?.scheduleSave(() => ({ tasks: tasks.list(), plans: plans.list() }));
   const sync = await GitSync.create(repo, {
     enabled: opts.sync?.enabled ?? true,
@@ -126,6 +128,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       void sync.requestPush();
     },
     onChange: persist,
+    onTranscript: (taskId, entry) => transcripts.append({ kind: "task", id: taskId }, entry),
     policies: opts.policies,
     reclaimGraceMs: opts.reclaimGraceMs,
     qa: opts.qa,
@@ -148,7 +151,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     }
     if (r.ok) unpushed.clear();
   });
-  const plans = new PlanManager(registry, tasks, persist);
+  const plans = new PlanManager(registry, tasks, persist, (planId, entry) => transcripts.append({ kind: "plan", id: planId }, entry));
   if (saved) {
     tasks.restore(saved.tasks);
     plans.restore(saved.plans);
@@ -159,6 +162,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     maxTurns: llm.maxTurns,
     concurrency: llm.concurrency,
     store,
+    transcripts,
   });
   await conversations.restore();
   if (store) log.info(`Hub state is saved in ${store.dir}`);
@@ -368,6 +372,26 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
 
   app.get("/api/tasks", (c) => c.json(tasks.list()));
 
+  /** `?after=<seq>` returns only newer entries, so the console can poll cheaply. */
+  const transcript = (c: Context, kind: "task" | "plan", exists: boolean) => {
+    if (!exists) return c.json({ error: "not found" }, 404);
+    const after = Number(c.req.query("after") ?? -1);
+    return c.json(transcripts.read({ kind, id: c.req.param("id")! }, Number.isInteger(after) ? after : -1));
+  };
+  app.get("/api/tasks/:id/transcript", (c) => transcript(c, "task", !!tasks.get(c.req.param("id"))));
+  app.get("/api/plans/:id/transcript", (c) => transcript(c, "plan", !!plans.get(c.req.param("id"))));
+
+  const taskAction = (c: Context, action: (id: string) => TaskRecord) => {
+    try {
+      return c.json(action(c.req.param("id")!));
+    } catch (err) {
+      if (!(err instanceof TaskError)) throw err;
+      return c.json({ error: err.message }, err.code === "not_found" ? 404 : 409);
+    }
+  };
+  app.post("/api/tasks/:id/cancel", (c) => taskAction(c, (id) => tasks.cancel(id)));
+  app.post("/api/tasks/:id/retry", (c) => taskAction(c, (id) => tasks.retry(id)));
+
   app.get("/api/tasks/:id", (c) => {
     const task = tasks.get(c.req.param("id"));
     return task ? c.json(task) : c.json({ error: "not found" }, 404);
@@ -455,6 +479,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       // restore() decides what happens to their jobs. Hub-side steps still running (a merge)
       // are saved mid-way and simply run again on the next start.
       await store?.close();
+      await transcripts.close();
       for (const c of connections.values()) c.ws.close(1001, "hub shutting down");
       await new Promise<void>((resolve) => server.close(() => resolve()));
     },

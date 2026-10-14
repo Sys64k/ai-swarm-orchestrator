@@ -12,12 +12,14 @@ import {
 import type { HubRepository } from "./git/hub-repo.js";
 import type { NodeRegistry } from "./registry.js";
 import { DEFAULT_ROUTING_POLICIES, selectNode, type RoutingPolicies } from "./routing.js";
+import type { TranscriptInput } from "./transcripts.js";
 
 const log = createLogger("tasks");
 
 /**
  * pending → assigned → in_progress → verifying → awaiting_qa → testing → merging → merged
  * Verification, QA or merge problems send the task back to pending as a rework round.
+ * A person can cancel any task that isn't finished, and retry a failed or cancelled one.
  */
 export type TaskState =
   | "pending"
@@ -28,7 +30,8 @@ export type TaskState =
   | "testing"
   | "merging"
   | "merged"
-  | "failed";
+  | "failed"
+  | "cancelled";
 
 type Rework = NonNullable<PayloadInput<"TASK_ASSIGNMENT">["rework"]>;
 type Feedback = MessageOf<"FEEDBACK_LOOP">["payload"];
@@ -57,6 +60,10 @@ export interface TaskRecord {
   qaSetup?: string[][];
   /** Accumulated model usage for this task (estimated cost). */
   llm: { calls: number } & LlmUsage;
+  /** Spend before the latest retry; the budget applies to what was spent since. */
+  budgetBaseUsd?: number;
+  /** Times a person retried this task. */
+  retries?: number;
   /** Files the agent reported touching (FILE_OPERATION), most recent last. */
   filesTouched: string[];
   /** One line per model turn: what the agent did and what it cost. */
@@ -83,7 +90,7 @@ const AGENT_LOG_LIMIT = 200;
 export class TaskError extends Error {
   constructor(
     message: string,
-    readonly code: "duplicate" | "invalid",
+    readonly code: "duplicate" | "invalid" | "not_found" | "conflict",
   ) {
     super(message);
   }
@@ -116,6 +123,8 @@ export interface TaskManagerOptions {
   onMerged?: (task: TaskRecord) => void;
   /** Called whenever a task record changes (used to persist Hub state). */
   onChange?: () => void;
+  /** Receives task events and QA verdicts for the task's transcript. */
+  onTranscript?: (taskId: string, entry: TranscriptInput) => void;
 }
 
 const HISTORY_LIMIT = 50;
@@ -132,6 +141,7 @@ export class TaskManager {
   readonly qa: QaOptions;
   private readonly onMerged?: (task: TaskRecord) => void;
   private readonly onChange?: () => void;
+  private readonly onTranscript?: (taskId: string, entry: TranscriptInput) => void;
 
   constructor(
     private readonly registry: NodeRegistry,
@@ -146,6 +156,65 @@ export class TaskManager {
     this.qa = { ...DEFAULT_QA, ...opts.qa };
     this.onMerged = opts.onMerged;
     this.onChange = opts.onChange;
+    this.onTranscript = opts.onTranscript;
+  }
+
+  /**
+   * Stop a task. A node still working on it is fenced: its status updates, model calls and QA
+   * results are refused from now on, so the job ends at its next model turn.
+   */
+  cancel(taskId: string): TaskRecord {
+    const task = this.require(taskId);
+    if (task.state === "merged" || task.state === "failed" || task.state === "cancelled") {
+      throw new TaskError(`task ${taskId} is already ${task.state}`, "conflict");
+    }
+    if (task.state === "merging") throw new TaskError(`task ${taskId} is being merged right now`, "conflict");
+    for (const nodeId of [task.nodeId, task.qaNodeId]) if (nodeId) this.registry.release(nodeId, taskId);
+    task.state = "cancelled";
+    task.detachedAt = undefined;
+    task.qaNodeId = undefined;
+    task.waitingReason = undefined;
+    this.note(task, "cancelled by a person");
+    this.dispatch();
+    return task;
+  }
+
+  /**
+   * Queue a failed or cancelled task again with fresh limits (rework rounds, node drops,
+   * budget). Its branch keeps the previous attempt, and the agent is told why it failed.
+   */
+  retry(taskId: string): TaskRecord {
+    const task = this.require(taskId);
+    if (task.state !== "failed" && task.state !== "cancelled") {
+      throw new TaskError(`task ${taskId} is ${task.state}; only failed or cancelled tasks can be retried`, "conflict");
+    }
+    const why = task.state === "failed" ? `the previous attempt failed: ${task.detail ?? "no detail"}` : "the previous attempt was cancelled";
+    task.retries = (task.retries ?? 0) + 1;
+    task.budgetBaseUsd = task.llm.costUsd;
+    task.reworkRound = 0;
+    task.drops = 0;
+    task.qaAttempts = 0;
+    task.nodeId = undefined;
+    task.qaNodeId = undefined;
+    task.commit = undefined;
+    task.detail = undefined;
+    task.rework = { round: 1, reason: `Retried by a person; ${why}. Your branch may already contain that attempt.` };
+    task.state = "pending";
+    this.note(task, `retry ${task.retries} requested by a person`);
+    this.dispatch();
+    return task;
+  }
+
+  /** What the task spent on the model since it was last retried (the budget applies to this). */
+  spentSinceRetry(taskId: string): number {
+    const task = this.tasks.get(taskId);
+    return task ? task.llm.costUsd - (task.budgetBaseUsd ?? 0) : 0;
+  }
+
+  private require(taskId: string): TaskRecord {
+    const task = this.tasks.get(taskId);
+    if (!task) throw new TaskError(`task ${taskId} not found`, "not_found");
+    return task;
   }
 
   /**
@@ -246,9 +315,9 @@ export class TaskManager {
   private dispatchImplementation(task: TaskRecord): void {
     const unmet = task.spec.dependsOn.map((id) => this.tasks.get(id)!).filter((d) => d.state !== "merged");
     if (unmet.length) {
-      const failed = unmet.filter((d) => d.state === "failed").map((d) => d.spec.taskId);
+      const failed = unmet.filter((d) => d.state === "failed" || d.state === "cancelled").map((d) => d.spec.taskId);
       task.waitingReason = failed.length
-        ? `blocked: dependency ${failed.join(", ")} failed`
+        ? `blocked: dependency ${failed.join(", ")} failed or was cancelled`
         : `waiting for ${unmet.map((d) => d.spec.taskId).join(", ")} to be merged`;
       return;
     }
@@ -437,6 +506,12 @@ export class TaskManager {
 
     this.registry.release(nodeId, task.spec.taskId);
     task.qaNodeId = undefined;
+    this.onTranscript?.(task.spec.taskId, {
+      kind: "qa",
+      outcome: feedback.outcome,
+      summary: feedback.summary,
+      output: feedback.outcome === "fail" ? feedback.output : undefined,
+    });
     if (feedback.outcome === "pass") {
       this.note(task, `QA passed on ${nodeId}: ${feedback.summary}`);
       void this.merge(task);
@@ -585,6 +660,7 @@ export class TaskManager {
     task.history.push({ at, event });
     if (task.history.length > HISTORY_LIMIT) task.history.splice(0, task.history.length - HISTORY_LIMIT);
     log.info(`task ${task.spec.taskId}: ${event}`);
+    this.onTranscript?.(task.spec.taskId, { kind: "event", text: event });
     this.onChange?.();
   }
 
