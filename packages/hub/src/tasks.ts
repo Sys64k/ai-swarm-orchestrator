@@ -114,6 +114,8 @@ export interface TaskManagerOptions {
   qa?: Partial<QaOptions>;
   /** Called after a task is merged into main (e.g. to push main to GitHub). */
   onMerged?: (task: TaskRecord) => void;
+  /** Called whenever a task record changes (used to persist Hub state). */
+  onChange?: () => void;
 }
 
 const HISTORY_LIMIT = 50;
@@ -129,6 +131,7 @@ export class TaskManager {
   private readonly reclaimGraceMs: number;
   readonly qa: QaOptions;
   private readonly onMerged?: (task: TaskRecord) => void;
+  private readonly onChange?: () => void;
 
   constructor(
     private readonly registry: NodeRegistry,
@@ -142,6 +145,51 @@ export class TaskManager {
     this.reclaimGraceMs = opts.reclaimGraceMs ?? 5 * 60_000;
     this.qa = { ...DEFAULT_QA, ...opts.qa };
     this.onMerged = opts.onMerged;
+    this.onChange = opts.onChange;
+  }
+
+  /**
+   * Load tasks saved before a Hub restart. Every node was disconnected by the restart, so work
+   * in flight is treated like a disconnect: started jobs are held for their node to reclaim,
+   * unstarted ones go back to the queue, and Hub-side steps (verify, merge) run again.
+   * Not counted as a node drop: the Hub went away, not the node.
+   */
+  restore(records: readonly TaskRecord[], now = Date.now()): void {
+    for (const record of records) this.tasks.set(record.spec.taskId, record);
+    for (const task of records) {
+      task.detachedAt = undefined;
+      switch (task.state) {
+        case "assigned":
+        case "in_progress":
+        case "testing": {
+          const started = task.state === "testing" ? task.qaStarted : task.state === "in_progress";
+          const owner = task.state === "testing" ? task.qaNodeId : task.nodeId;
+          if (started) {
+            task.detachedAt = now;
+            this.note(task, `Hub restarted; holding for ${owner} to reconnect for ${Math.round(this.reclaimGraceMs / 1000)}s`);
+          } else if (task.state === "testing") {
+            task.qaNodeId = undefined;
+            task.state = "awaiting_qa";
+            this.note(task, "Hub restarted before QA started; requeued");
+          } else {
+            task.nodeId = undefined;
+            task.state = "pending";
+            this.note(task, "Hub restarted before work started; requeued");
+          }
+          break;
+        }
+        case "verifying":
+          this.note(task, "Hub restarted; verifying again");
+          void this.verify(task, task.commit!);
+          break;
+        case "merging":
+          // Idempotent: a commit that already reached main merges as "already up to date".
+          this.note(task, "Hub restarted; merging again");
+          void this.merge(task);
+          break;
+      }
+    }
+    if (records.length) log.info(`restored ${records.length} task(s)`);
   }
 
   list(): TaskRecord[] {
@@ -245,6 +293,12 @@ export class TaskManager {
     }
   }
 
+  /** True while `taskId` is assigned to `nodeId` for implementation, even if the node is briefly disconnected. */
+  isHeldFor(nodeId: string, taskId: string): boolean {
+    const task = this.tasks.get(taskId);
+    return !!task && task.nodeId === nodeId && (task.state === "assigned" || task.state === "in_progress");
+  }
+
   /** True while `nodeId` is the connected implementer of `taskId`. */
   isImplementing(nodeId: string, taskId: string): boolean {
     const task = this.tasks.get(taskId);
@@ -266,6 +320,7 @@ export class TaskManager {
     l.cacheReadTokens += usage.cacheReadTokens;
     l.cacheWriteTokens += usage.cacheWriteTokens;
     l.costUsd = Math.round((l.costUsd + usage.costUsd) * 1e6) / 1e6;
+    this.onChange?.();
   }
 
   recordAgentTurn(taskId: string, turn: Omit<AgentTurn, "at">): void {
@@ -273,6 +328,7 @@ export class TaskManager {
     if (!task) return;
     task.agentLog.push({ at: new Date().toISOString(), ...turn });
     if (task.agentLog.length > AGENT_LOG_LIMIT) task.agentLog.splice(0, task.agentLog.length - AGENT_LOG_LIMIT);
+    this.onChange?.();
   }
 
   /** Track an agent's file edit. Returns an error string if the sender isn't implementing the task. */
@@ -529,10 +585,12 @@ export class TaskManager {
     task.history.push({ at, event });
     if (task.history.length > HISTORY_LIMIT) task.history.splice(0, task.history.length - HISTORY_LIMIT);
     log.info(`task ${task.spec.taskId}: ${event}`);
+    this.onChange?.();
   }
 
   private touch(task: TaskRecord): void {
     task.updatedAt = new Date().toISOString();
+    this.onChange?.();
   }
 
   private generateId(title: string): string {

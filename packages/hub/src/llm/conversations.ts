@@ -10,6 +10,7 @@ import {
 } from "@aso/shared";
 import type { PlanManager } from "../plans.js";
 import type { NodeRegistry } from "../registry.js";
+import type { StateStore } from "../state-store.js";
 import type { AgentTurn, TaskManager } from "../tasks.js";
 import { LlmError, type LlmAdapter } from "./adapter.js";
 import { priceUsage } from "./pricing.js";
@@ -32,6 +33,8 @@ export interface ConversationOptions {
   concurrency?: number;
   /** Drop idle conversations after this long. */
   idleTimeoutMs?: number;
+  /** Saves conversations after every turn so agents can carry on after a Hub restart. */
+  store?: StateStore;
 }
 
 /** What a conversation works on: a task (worker agent) or a plan (Architect). */
@@ -65,6 +68,18 @@ interface Conversation {
   lastActivity: number;
 }
 
+/** A conversation as saved on disk: the subject and tools are rebuilt from the kind, id and role. */
+interface SavedConversation {
+  id: string;
+  subject: { kind: Subject["kind"]; id: string; role: AgentRole };
+  nodeId: string;
+  messages: Anthropic.Beta.BetaMessageParam[];
+  turn: number;
+  pendingToolUseIds: string[];
+  /** Answer to the last turn, for a worker that lost it in the restart and asks again. */
+  lastResult?: OkResult;
+}
+
 /**
  * Hub side of the agent loop. Workers send tool results; the Hub owns the conversation,
  * composes the prompts, calls the model and returns only the visible text and tool calls.
@@ -79,6 +94,7 @@ export class ConversationManager {
   private readonly maxTurns: number;
   private readonly idleTimeoutMs: number;
   private readonly slots: Semaphore;
+  private readonly store?: StateStore;
   private totals = { calls: 0, costUsd: 0 };
 
   constructor(
@@ -93,6 +109,33 @@ export class ConversationManager {
     this.maxTurns = opts.maxTurns ?? 80;
     this.idleTimeoutMs = opts.idleTimeoutMs ?? 30 * 60_000;
     this.slots = new Semaphore(opts.concurrency ?? 2);
+    this.store = opts.store;
+  }
+
+  /** Load conversations saved before a Hub restart (after tasks and plans are restored). */
+  async restore(): Promise<void> {
+    if (!this.store) return;
+    const saved = await this.store.loadConversations<SavedConversation>();
+    for (const c of saved) {
+      const subject = this.makeSubject(c.subject.kind, c.subject.id, c.subject.role, c.nodeId);
+      if (!subject.active()) {
+        this.store.deleteConversation(c.id);
+        continue;
+      }
+      this.conversations.set(c.id, {
+        id: c.id,
+        subject,
+        nodeId: c.nodeId,
+        tools: this.toolsFor(subject.role),
+        system: subject.role === "architect" ? architectSystemPrompt() : systemPrompt(subject.role),
+        messages: c.messages,
+        turn: c.turn,
+        pendingToolUseIds: c.pendingToolUseIds,
+        results: c.lastResult ? new Map([[c.lastResult.turn, c.lastResult]]) : new Map(),
+        lastActivity: Date.now(),
+      });
+    }
+    if (this.conversations.size) log.info(`restored ${this.conversations.size} agent conversation(s)`);
   }
 
   /** Byte-stable and in a fixed order per role, so tools + system prompt form a cacheable prefix. */
@@ -111,33 +154,40 @@ export class ConversationManager {
     if (req.taskId !== undefined) {
       const taskId = req.taskId;
       if (!this.tasks.isImplementing(nodeId, taskId)) return `task ${taskId} is not being implemented by ${nodeId}`;
-      const task = this.tasks.get(taskId)!;
-      return {
-        kind: "task",
-        id: taskId,
-        role: task.spec.role,
-        budgetUsd: this.taskBudgetUsd,
-        spentUsd: () => this.tasks.get(taskId)?.llm.costUsd ?? 0,
-        firstPrompt: () => taskPrompt(this.tasks.get(taskId)!),
-        active: () => this.tasks.isImplementing(nodeId, taskId),
-        recordUsage: (u) => this.tasks.recordLlmUsage(taskId, u),
-        recordTurn: (t) => this.tasks.recordAgentTurn(taskId, t),
-        recordEvent: (e) => this.tasks.recordEvent(taskId, e),
-      };
+      return this.makeSubject("task", taskId, this.tasks.get(taskId)!.spec.role, nodeId);
     }
     const planId = req.planId!;
     if (!this.plans.isPlanning(nodeId, planId)) return `plan ${planId} is not being planned by ${nodeId}`;
+    return this.makeSubject("plan", planId, "architect", nodeId);
+  }
+
+  /** `active` stays true while a task's node is briefly disconnected, so its conversation survives. */
+  private makeSubject(kind: Subject["kind"], id: string, role: AgentRole, nodeId: string): Subject {
+    if (kind === "task") {
+      return {
+        kind,
+        id,
+        role,
+        budgetUsd: this.taskBudgetUsd,
+        spentUsd: () => this.tasks.get(id)?.llm.costUsd ?? 0,
+        firstPrompt: () => taskPrompt(this.tasks.get(id)!),
+        active: () => this.tasks.isHeldFor(nodeId, id),
+        recordUsage: (u) => this.tasks.recordLlmUsage(id, u),
+        recordTurn: (t) => this.tasks.recordAgentTurn(id, t),
+        recordEvent: (e) => this.tasks.recordEvent(id, e),
+      };
+    }
     return {
-      kind: "plan",
-      id: planId,
-      role: "architect",
+      kind,
+      id,
+      role,
       budgetUsd: this.planBudgetUsd,
-      spentUsd: () => this.plans.get(planId)?.llm.costUsd ?? 0,
-      firstPrompt: () => planPrompt(this.plans.get(planId)!),
-      active: () => this.plans.isPlanning(nodeId, planId),
-      recordUsage: (u) => this.plans.recordLlmUsage(planId, u),
-      recordTurn: (t) => this.plans.recordAgentTurn(planId, t),
-      recordEvent: (e) => this.plans.recordEvent(planId, e),
+      spentUsd: () => this.plans.get(id)?.llm.costUsd ?? 0,
+      firstPrompt: () => planPrompt(this.plans.get(id)!),
+      active: () => this.plans.isPlanning(nodeId, id),
+      recordUsage: (u) => this.plans.recordLlmUsage(id, u),
+      recordTurn: (t) => this.plans.recordAgentTurn(id, t),
+      recordEvent: (e) => this.plans.recordEvent(id, e),
     };
   }
 
@@ -285,6 +335,7 @@ export class ConversationManager {
       conv.turn++;
       const actions = toolCalls.length ? toolCalls.map(describeCall) : [`(${response.stopReason})`];
       conv.subject.recordTurn({ turn: result.turn, actions, costUsd: usage.costUsd });
+      this.save(conv, result);
       log.debug(`${conv.subject.id} turn ${result.turn}: ${actions.join(", ")} ($${usage.costUsd.toFixed(4)})`);
       this.respond(conv.nodeId, result);
     } catch (err) {
@@ -304,9 +355,23 @@ export class ConversationManager {
       if (conv.inflight) continue;
       if (now - conv.lastActivity > this.idleTimeoutMs || !conv.subject.active()) {
         this.conversations.delete(conv.id);
+        this.store?.deleteConversation(conv.id);
         for (const [id, r] of this.requests) if (r.conversationId === conv.id) this.requests.delete(id);
       }
     }
+  }
+
+  private save(conv: Conversation, lastResult: OkResult): void {
+    const saved: SavedConversation = {
+      id: conv.id,
+      subject: { kind: conv.subject.kind, id: conv.subject.id, role: conv.subject.role },
+      nodeId: conv.nodeId,
+      messages: conv.messages,
+      turn: conv.turn,
+      pendingToolUseIds: conv.pendingToolUseIds,
+      lastResult,
+    };
+    this.store?.saveConversation(conv.id, saved);
   }
 
   private respond(nodeId: string, result: Result): void {
