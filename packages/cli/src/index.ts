@@ -15,6 +15,7 @@ import {
 } from "@aso/shared";
 import type { Effort } from "@aso/hub";
 import { startArchitect } from "@aso/architect";
+import { consoleLinkCommand } from "./commands/console-link.js";
 import { llmCheckCommand } from "./commands/llm-check.js";
 import { syncCommand } from "./commands/sync.js";
 import { layout } from "./layout.js";
@@ -151,6 +152,15 @@ program
     const architect = startArchitect({ hub: opts.hub, workDir: opts.workDir, token: resolveToken()?.token });
     for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, () => (architect.stop(), process.exit(0)));
   });
+
+program
+  .command("console-link")
+  .description("Print a one-time link (and QR code) that signs a phone or another browser in to the console")
+  .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
+  .option("--url <base>", "console address to put in the link (default: the Tailscale HTTPS address if served, else the LAN address)")
+  .option("--dashboard-port <port>", "console port", parsePort, DEFAULT_DASHBOARD_PORT)
+  .option("--no-qr", "print only the link")
+  .action(consoleLinkCommand);
 
 program
   .command("sync")

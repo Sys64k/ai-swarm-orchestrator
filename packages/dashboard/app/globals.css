@@ -725,3 +725,36 @@ select.input {
   margin: 4px 4px 0;
   overflow-wrap: anywhere;
 }
+
+/* Sign in another device */
+.qr-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.qr {
+  width: min(280px, 100%);
+  padding: 10px;
+  border-radius: 12px;
+  /* Scanners need dark modules on a light background, also in dark mode. */
+  background: #ffffff;
+}
+
+.qr svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.footer-links {
+  margin: 28px 4px 0;
+  text-align: center;
+  font-size: 0.9rem;
+}

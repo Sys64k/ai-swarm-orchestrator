@@ -19,6 +19,10 @@
     "@aso/hub": "*",
     "@aso/shared": "*",
     "@aso/worker": "*",
-    "commander": "^15.0.0"
+    "commander": "^15.0.0",
+    "qrcode": "1.5.4"
+  },
+  "devDependencies": {
+    "@types/qrcode": "1.5.5"
   }
 }

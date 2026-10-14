@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { browserOrigin, isPublicPath, isSameOrigin, isSignedIn, mismatchHint, normalizeToken, redirectTo, safeNext } from "../lib/auth.ts";
+import { browserOrigin, isPublicPath, isSameOrigin, isSignedIn, mismatchHint, normalizeToken, redirectTo, safeNext, signInLink } from "../lib/auth.ts";
 import { errorMessage, hubPath } from "../lib/hub-routes.ts";
 
 describe("console sign-in", () => {
@@ -60,6 +60,7 @@ describe("Hub proxy allowlist", () => {
     assert.equal(hubPath("POST", ["plans", "plan-1", "approve"]), "/api/plans/plan-1/approve");
     assert.equal(hubPath("GET", ["nodes"]), "/api/nodes");
     assert.equal(hubPath("GET", ["projects"]), "/api/projects");
+    assert.equal(hubPath("POST", ["sign-in-codes"]), "/api/sign-in-codes");
     assert.equal(hubPath("POST", ["projects"]), "/api/projects");
     assert.equal(hubPath("GET", ["projects", "shop"]), "/api/projects/shop");
   });
@@ -67,6 +68,8 @@ describe("Hub proxy allowlist", () => {
   it("refuses everything else", () => {
     assert.equal(hubPath("POST", ["tasks"]), undefined, "no raw task submission from the browser");
     assert.equal(hubPath("POST", ["projects", "shop"]), undefined);
+    assert.equal(hubPath("POST", ["sign-in-codes", "redeem"]), undefined, "only the console's server redeems codes");
+    assert.equal(hubPath("GET", ["sign-in-codes"]), undefined);
     assert.equal(hubPath("GET", ["sync"]), undefined);
     assert.equal(hubPath("POST", ["sync"]), undefined);
     assert.equal(hubPath("GET", ["tasks", "..", "..", "git"]), undefined);
@@ -106,5 +109,12 @@ describe("tokens typed on a phone", () => {
     assert.equal(mismatchHint("x".repeat(36), expected), "36 characters (expected 36), does not start with aso_");
     assert.equal(mismatchHint(expected.toUpperCase().replace("ASO_", "aso_"), expected), "36 characters (expected 36), differs only in letter case");
     assert.ok(!mismatchHint("aso_zzz", expected).includes(expected.slice(4, 10)));
+  });
+});
+
+describe("sign-in links", () => {
+  it("point at the login page with the code, on the console's own address", () => {
+    assert.equal(signInLink("https://agent007.tailc9777f.ts.net", "Ab_9-x"), "https://agent007.tailc9777f.ts.net/login?code=Ab_9-x");
+    assert.equal(signInLink("http://192.168.101.127:7421/", "c"), "http://192.168.101.127:7421/login?code=c");
   });
 });

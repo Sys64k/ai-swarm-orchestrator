@@ -5,6 +5,8 @@
 const ID = "[A-Za-z0-9_-]{1,128}";
 const RULES: ReadonlyArray<{ method: "GET" | "POST"; pattern: RegExp }> = [
   { method: "GET", pattern: /^health$/ },
+  // Signed-in devices may create sign-in links for other devices; redeeming is server-side only.
+  { method: "POST", pattern: /^sign-in-codes$/ },
   { method: "GET", pattern: /^projects$/ },
   { method: "POST", pattern: /^projects$/ },
   { method: "GET", pattern: new RegExp(`^projects/${ID}$`) },

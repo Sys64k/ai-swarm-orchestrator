@@ -9,14 +9,21 @@ import {
   SESSION_COOKIE,
   SESSION_MAX_AGE_SEC,
 } from "../../../lib/auth.ts";
+import { redeemSignInCode } from "../../../lib/hub-server.ts";
 
-/** Sign in with the ASO token (form post from /login). */
+/** Sign in with the ASO token or a one-time sign-in link's code (form post from /login). */
 export async function POST(request: NextRequest) {
   const form = await request.formData();
   const token = normalizeToken(String(form.get("token") ?? ""));
+  const code = String(form.get("code") ?? "");
   const next = safeNext(String(form.get("next") ?? "/"));
   const expected = process.env.ASO_TOKEN;
-  if (expected && !constantTimeEqual(token, expected)) {
+  if (expected && code) {
+    if (!(await redeemSignInCode(code))) {
+      console.warn(`[console] sign-in link refused from ${request.headers.get("x-forwarded-for") ?? "unknown address"}: used up or expired`);
+      return redirectTo(`/login?next=${encodeURIComponent(next)}&error=link`, request.headers, request.nextUrl.origin);
+    }
+  } else if (expected && !constantTimeEqual(token, expected)) {
     const from = request.headers.get("x-forwarded-for") ?? "unknown address";
     console.warn(`[console] sign-in failed from ${from}: ${mismatchHint(token, expected)}`);
     return redirectTo(`/login?next=${encodeURIComponent(next)}&error=1`, request.headers, request.nextUrl.origin);
