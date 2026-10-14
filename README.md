@@ -519,3 +519,7 @@ starts real workers that implement a task, fail QA, rework, pass and merge.
 
 Tests that talk to the in-process Hub over HTTP must use async git (`gitAsync`). A synchronous
 `execFileSync` would block the event loop the Hub needs to answer, and the test deadlocks.
+
+## License
+
+[MIT](LICENSE)

@@ -1,6 +1,7 @@
 {
   "name": "aso-monorepo",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "workspaces": [
     "packages/shared",
