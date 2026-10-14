@@ -29,11 +29,14 @@ export function PlanPage({ id }: { id: string }) {
 
   return (
     <>
-      <TopBar title={firstLine(plan.requirement, 60)} back="/" />
+      <TopBar title={firstLine(plan.requirement, 60)} back={`/projects/${plan.project}`} />
       <main className={`page${plan.state === "proposed" ? " page-with-bar" : ""}`}>
         <div className="hero">
           <Badge {...planBadge(plan)} />
           <div className="chips">
+            <Link href={`/projects/${plan.project}`} className="chip chip-link">
+              {plan.project}
+            </Link>
             {progress.total > 0 && <span className="chip">{progress.merged} of {progress.total} merged</span>}
             {plan.llm.calls > 0 && <span className="chip">planning {formatUsd(plan.llm.costUsd)}</span>}
           </div>

@@ -24,11 +24,14 @@ export function TaskPage({ id }: { id: string }) {
 
   return (
     <>
-      <TopBar title={task.spec.title} back={task.planId ? `/plans/${task.planId}` : "/"} />
+      <TopBar title={task.spec.title} back={task.planId ? `/plans/${task.planId}` : `/projects/${task.project}`} />
       <main className="page">
         <div className="hero">
           <Badge {...taskBadge(task)} />
           <div className="chips">
+            <Link href={`/projects/${task.project}`} className="chip chip-link">
+              {task.project}
+            </Link>
             <span className="chip">{task.spec.role}</span>
             {task.nodeId && live && <span className="chip">on {task.nodeId}</span>}
             {task.llm.calls > 0 && <span className="chip">{task.llm.calls} turns · {formatUsd(task.llm.costUsd)}</span>}

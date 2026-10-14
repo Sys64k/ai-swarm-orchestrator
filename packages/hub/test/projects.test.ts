@@ -49,6 +49,18 @@ const task = (taskId: string, project?: string, extra: Record<string, unknown> =
 });
 
 describe("projects", () => {
+  it("shows the host path of the projects folder when the Hub runs in Docker", async () => {
+    const root = projectsRoot();
+    const hub = await startHub({ projectsRoot: root, projectsRootDisplay: "/home/me/aso-projects", port: 0, host: "127.0.0.1", token: TOKEN, sync: { enabled: false } });
+    try {
+      assert.equal((await call(hub.port, "/api/health")).body.projectsRoot, "/home/me/aso-projects");
+      assert.equal((await call(hub.port, "/api/projects/shop")).body.dir, "/home/me/aso-projects/shop");
+    } finally {
+      await hub.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("finds the git repositories in the root and creates new ones", () =>
     withRoot(async (hub, root) => {
       const list = await call(hub.port, "/api/projects");

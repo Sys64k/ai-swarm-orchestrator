@@ -3,91 +3,49 @@
 import Link from "next/link";
 import { usePoll } from "./use-poll.ts";
 import { Badge, Banner, Row, Section, TopBar } from "./ui.tsx";
-import type { Health, HubNode, Llm, Plan, Task } from "../lib/types.ts";
-import { firstLine, formatUsd, homeView, planBadge, planProgress, taskBadge, timeAgo, workerViews } from "../lib/view.ts";
+import { NeedsYou, WorkLists } from "./work-lists.tsx";
+import type { HubNode, Llm, Plan, Project, Task } from "../lib/types.ts";
+import { formatUsd, projectSummary, workerViews } from "../lib/view.ts";
 
-const DONE_SHOWN = 8;
-
+/** Everything at a glance: what needs you, the projects, what's running, the workers. */
 export function Home() {
   const tasks = usePoll<Task[]>("tasks");
   const plans = usePoll<Plan[]>("plans");
+  const projects = usePoll<Project[]>("projects", 5000);
   const nodes = usePoll<HubNode[]>("nodes", 5000);
   const llm = usePoll<Llm>("llm", 10_000);
-  const health = usePoll<Health>("health", 10_000);
 
-  const project = health.data?.targetDir?.split("/").filter(Boolean).at(-1) ?? "ASO";
-  const view = tasks.data && plans.data ? homeView(tasks.data, plans.data) : undefined;
   const workers = workerViews(nodes.data ?? []);
   const architect = nodes.data?.some((n) => n.nodeKind === "architect");
-  const error = tasks.error ?? plans.error;
+  const error = tasks.error ?? plans.error ?? projects.error;
+  const ready = tasks.data && plans.data && projects.data;
+  const several = (projects.data?.length ?? 0) > 1;
 
   return (
     <>
-      <TopBar title={project} right={llm.data && <span className="topbar-meta">{formatUsd(llm.data.totals.costUsd)}</span>} />
+      <TopBar title="ASO" right={llm.data && <span className="topbar-meta">{formatUsd(llm.data.totals.costUsd)}</span>} />
       <main className="page">
         {error && <Banner tone="bad">Hub unreachable: {error}</Banner>}
         {llm.data && !llm.data.configured && <Banner tone="waiting">No model configured on the Hub: set ANTHROPIC_API_KEY.</Banner>}
-        {!view && !error && <p className="muted">Loading…</p>}
+        {!ready && !error && <p className="muted">Loading…</p>}
 
-        {view && view.attention.length > 0 && (
-          <Section title="Needs you" count={view.attention.length}>
-            <div className="card-list">
-              {view.attention.map((a) => (
-                <Row
-                  key={`${a.kind}-${a.id}`}
-                  href={a.href}
-                  title={a.title}
-                  sub={a.reason}
-                  badge={<Badge {...a.badge} />}
-                />
-              ))}
-            </div>
-          </Section>
-        )}
+        {ready && <NeedsYou tasks={tasks.data!} plans={plans.data!} showProject={several} />}
 
-        {view && view.activePlans.length > 0 && (
-          <Section title="Plans">
+        {ready && (
+          <Section title="Projects" count={projects.data!.length}>
             <div className="card-list">
-              {view.activePlans.map((p) => {
-                const progress = planProgress(p, tasks.data ?? []);
-                const b = planBadge(p);
-                return (
-                  <Row
-                    key={p.planId}
-                    href={`/plans/${p.planId}`}
-                    title={firstLine(p.requirement)}
-                    sub={progress.total ? `${progress.merged} of ${progress.total} tasks merged` : timeAgo(p.updatedAt)}
-                    badge={<Badge {...b} />}
-                  />
-                );
+              {projects.data!.map((p) => {
+                const s = projectSummary(p);
+                return <Row key={p.id} href={`/projects/${p.id}`} title={p.id} sub={s.text} badge={s.needsYou ? <Badge label="Needs you" tone="waiting" /> : undefined} />;
               })}
+              <Link href="/projects/new" className="row row-add">
+                + New project
+              </Link>
             </div>
           </Section>
         )}
 
-        {view && (
-          <Section title="Running" count={view.running.length}>
-            {view.running.length === 0 ? (
-              <p className="muted">Nothing running.</p>
-            ) : (
-              <div className="card-list">
-                {view.running.map((t) => (
-                  <Row key={t.spec.taskId} href={`/tasks/${t.spec.taskId}`} title={t.spec.title} sub={latest(t)} badge={<Badge {...taskBadge(t)} />} />
-                ))}
-              </div>
-            )}
-          </Section>
-        )}
-
-        {view && view.queued.length > 0 && (
-          <Section title="Queued" count={view.queued.length}>
-            <div className="card-list">
-              {view.queued.map((t) => (
-                <Row key={t.spec.taskId} href={`/tasks/${t.spec.taskId}`} title={t.spec.title} sub={t.waitingReason} badge={<Badge {...taskBadge(t)} />} />
-              ))}
-            </div>
-          </Section>
-        )}
+        {ready && <WorkLists tasks={tasks.data!} plans={plans.data!} showProject={several} sections={["running"]} />}
 
         <Section title="Workers" count={workers.length}>
           {workers.length === 0 ? (
@@ -113,24 +71,12 @@ export function Home() {
           )}
           {nodes.data && !architect && <p className="muted small">The Architect is not connected, so new plans will wait.</p>}
         </Section>
-
-        {view && view.done.length > 0 && (
-          <Section title="Done" count={view.done.length}>
-            <div className="card-list">
-              {view.done.slice(0, DONE_SHOWN).map((t) => (
-                <Row key={t.spec.taskId} href={`/tasks/${t.spec.taskId}`} title={t.spec.title} sub={timeAgo(t.updatedAt)} badge={<Badge {...taskBadge(t)} />} />
-              ))}
-            </div>
-          </Section>
-        )}
       </main>
-      <Link href="/plans/new" className="fab">
-        + New plan
-      </Link>
+      {projects.data?.length ? (
+        <Link href={projects.data.length === 1 ? `/plans/new?project=${projects.data[0].id}` : "/plans/new"} className="fab">
+          + New plan
+        </Link>
+      ) : null}
     </>
   );
-}
-
-function latest(t: Task): string {
-  return firstLine(t.history.at(-1)?.event ?? "", 90);
 }
