@@ -40,6 +40,7 @@ export async function startHubCommand(opts: StartHubOptions): Promise<void> {
   const qaEnabled = opts.qa && process.env.ASO_QA !== "0";
   const hub = await startHub({
     projectsRoot: root,
+    projectsRootDisplay: process.env.ASO_PROJECTS_ROOT_DISPLAY || undefined,
     port: opts.port,
     host: opts.host,
     token: auth.token,
@@ -85,6 +86,8 @@ async function startHubInDocker(root: string, opts: StartHubOptions, token: stri
     env: {
       ...process.env,
       ASO_PROJECTS_ROOT: root,
+      // Inside the container the folder is /projects; the console shows this host path instead.
+      ASO_PROJECTS_ROOT_DISPLAY: root,
       ASO_TOKEN: token,
       // The image has no .git; label the package it builds with the host's commit.
       ASO_BUILD: gitBuildId(),

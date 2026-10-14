@@ -59,10 +59,14 @@ describe("Hub proxy allowlist", () => {
     assert.equal(hubPath("POST", ["plans"]), "/api/plans");
     assert.equal(hubPath("POST", ["plans", "plan-1", "approve"]), "/api/plans/plan-1/approve");
     assert.equal(hubPath("GET", ["nodes"]), "/api/nodes");
+    assert.equal(hubPath("GET", ["projects"]), "/api/projects");
+    assert.equal(hubPath("POST", ["projects"]), "/api/projects");
+    assert.equal(hubPath("GET", ["projects", "shop"]), "/api/projects/shop");
   });
 
   it("refuses everything else", () => {
     assert.equal(hubPath("POST", ["tasks"]), undefined, "no raw task submission from the browser");
+    assert.equal(hubPath("POST", ["projects", "shop"]), undefined);
     assert.equal(hubPath("GET", ["sync"]), undefined);
     assert.equal(hubPath("POST", ["sync"]), undefined);
     assert.equal(hubPath("GET", ["tasks", "..", "..", "git"]), undefined);

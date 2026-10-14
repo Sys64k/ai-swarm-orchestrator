@@ -19,6 +19,7 @@ services:
       - aso-data:/data
     environment:
       ASO_LOG_LEVEL: "${ASO_LOG_LEVEL:-info}"
+      ASO_PROJECTS_ROOT_DISPLAY: "${ASO_PROJECTS_ROOT:-}"
       ASO_TEST_COMMAND: "${ASO_TEST_COMMAND:-npm test}"
       ASO_QA: "${ASO_QA:-1}"
       ASO_ALLOW_DEPS: "${ASO_ALLOW_DEPS:-}"

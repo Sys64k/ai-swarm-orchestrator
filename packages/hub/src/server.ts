@@ -43,6 +43,11 @@ export interface HubOptions {
    * and new projects are created there. Give this or `targetDir`.
    */
   projectsRoot?: string;
+  /**
+   * How to show `projectsRoot` to people: in Docker the Hub sees `/projects`, but the folder on
+   * the host is what they'd look for (e.g. `/home/me/aso-projects`).
+   */
+  projectsRootDisplay?: string;
   /** A single project repository, served as project `project` (no projects can be created). */
   targetDir?: string;
   /**
@@ -306,13 +311,19 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   const git = gitHttpHandler((id) => projects.get(id)?.dir);
   app.on(["GET", "POST"], [`${GIT_PATH}/*`], (c) => git(c));
 
+  /** A project path as people know it (the host path when the Hub runs in Docker). */
+  const shown = (dir: string) =>
+    opts.projectsRoot && opts.projectsRootDisplay && dir.startsWith(opts.projectsRoot)
+      ? opts.projectsRootDisplay + dir.slice(opts.projectsRoot.length)
+      : dir;
+
   app.get("/api/health", (c) => {
     if (token !== null && !isAuthorized(c.req.header("authorization"), token)) return c.json({ status: "ok", auth: true });
     const only = projects.list().length === 1 ? projects.list()[0] : undefined;
     return c.json({
       status: "ok",
       auth: token !== null,
-      projectsRoot: projects.root ?? null,
+      projectsRoot: projects.root ? shown(projects.root) : null,
       projects: projects.list().map((p) => p.id),
       // Single-project details, kept for tools that predate projects.
       targetDir: only?.dir ?? null,
@@ -351,7 +362,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     const count = (states: string[]) => list.filter((t) => states.includes(t.state)).length;
     return {
       id: p.id,
-      dir: p.dir,
+      dir: shown(p.dir),
       mainBranch: p.repo.mainBranch,
       sync: p.sync.status(),
       tasks: {
