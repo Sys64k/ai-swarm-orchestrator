@@ -21,3 +21,6 @@ export const HEARTBEAT_INTERVAL_MS = 15_000;
 
 /** The Hub drops nodes it has not heard from for this long. */
 export const NODE_TIMEOUT_MS = 60_000;
+
+/** What a node reports when it doesn't know its aso build (always shown as outdated). */
+export const UNKNOWN_VERSION = "unknown";

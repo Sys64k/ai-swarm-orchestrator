@@ -171,6 +171,11 @@ Run `aso update` on any machine:
 To roll out a new version, update the Hub machine, run `npm run package` there, then run
 `aso update --hub <hub-ip>` on each worker.
 
+Workers and the Architect report the build they run (`0.1.0+<commit>`; a source checkout
+reports its commit, with `-dirty` for uncommitted changes). When it differs from the package
+the Hub serves, the console marks the worker **Update** and the Hub logs a warning. Restart
+a worker after updating it so it registers with the new build.
+
 > **Do not edit the target directory by hand while the Hub runs.** The Hub merges approved
 > work into its `main` checkout. If that checkout has uncommitted changes or a different branch
 > checked out, the merge is refused and the task fails with "merge blocked".
@@ -555,7 +560,7 @@ Options:
 | `GET` | `/dist/aso.tgz` | The `aso` package for installing/updating machines (public; contains no secrets) |
 | `GET` / `POST` | `/api/sync` | Push status / retry the push of `main` to `origin` |
 | `GET` | `/api/llm` | LLM status: model, queue, calls and estimated spend since start |
-| `GET` | `/api/nodes` | Registered nodes with hardware, latest heartbeat and current task |
+| `GET` | `/api/nodes` | Registered nodes with hardware, latest heartbeat, current task, the aso build each runs (`version`) and `outdated` (a different build than the Hub serves) |
 | `GET` | `/api/tasks` | All tasks with state, nodes, commits, rework round and history |
 | `GET` | `/api/tasks/:id` | A single task (history, agent turn log, LLM cost, files touched) |
 | `GET` | `/api/tasks/:id/transcript`, `/api/plans/:id/transcript` | What the agent said and did: text, tool calls, command output, events, QA verdicts. `?after=<seq>` returns only newer entries |

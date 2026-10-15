@@ -16,6 +16,7 @@ import {
   type HardwareProfile,
   type PayloadInput,
   type WorkerRole,
+  UNKNOWN_VERSION,
 } from "@aso/shared";
 import { profileHardware, sampleLoad } from "./hardware.js";
 import { LlmTaskExecutor } from "./agent/executor.js";
@@ -47,6 +48,8 @@ export interface WorkerOptions {
   sandbox?: "docker" | "none" | CommandRunner;
   /** Options for the Docker sandbox (image, network, cache). */
   sandboxOptions?: Omit<DockerSandboxOptions, "workDir">;
+  /** The aso build this worker runs (`0.1.0+<commit>`), shown on the Hub so outdated workers stand out. */
+  version?: string;
 }
 
 export const DEFAULT_WORK_DIR = path.join(os.homedir(), ".aso", "work");
@@ -117,7 +120,7 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
         JSON.stringify(
           createMessage("NODE_REGISTRATION", nodeId, {
             nodeKind: "worker",
-            version: "0.1.0",
+            version: opts.version ?? UNKNOWN_VERSION,
             roles,
             hardware: profile,
             resume: runner.current,
