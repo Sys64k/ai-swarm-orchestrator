@@ -1,5 +1,6 @@
 import { createLogger, resolveToken, type WorkerRole } from "@aso/shared";
 import { startWorker } from "@aso/worker";
+import { layout } from "../layout.js";
 
 const log = createLogger("cli");
 
@@ -18,7 +19,7 @@ export async function startWorkerCommand(opts: {
     throw new Error("no ASO token: pass --token or set ASO_TOKEN (run `aso token` on the Hub machine to see it)");
   }
   const { sandboxImage, sandboxNetwork, ...rest } = opts;
-  const worker = await startWorker({ ...rest, token, sandboxOptions: { image: sandboxImage, network: sandboxNetwork } });
+  const worker = await startWorker({ ...rest, token, version: layout.version(), sandboxOptions: { image: sandboxImage, network: sandboxNetwork } });
 
   const shutdown = (signal: string) => {
     log.info(`${signal} received, stopping worker`);

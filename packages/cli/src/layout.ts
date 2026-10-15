@@ -4,7 +4,7 @@ import os from "node:os";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { configDir } from "@aso/shared";
+import { configDir, UNKNOWN_VERSION } from "@aso/shared";
 
 /**
  * Where the CLI's files live. Two layouts:
@@ -93,11 +93,30 @@ export const layout = {
     return f;
   },
 
+  /** `<version>+<build>`: the package's build id, or the checkout's commit (what workers report to the Hub). */
   version(): string {
     const p = this.packageJson;
-    return p.asoBuild ? `${p.version}+${p.asoBuild}` : p.version;
+    const build = p.asoBuild ?? (sourceRoot ? gitBuildId(sourceRoot) : undefined);
+    return build ? `${p.version}+${build}` : p.version;
   },
 };
+
+const buildIds = new Map<string, string>();
+
+/** Commit of a source checkout, `-dirty` with uncommitted changes, or `unknown` without git. */
+export function gitBuildId(root: string): string {
+  const known = buildIds.get(root);
+  if (known) return known;
+  const git = (...args: string[]) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  let id: string;
+  try {
+    id = git("rev-parse", "--short", "HEAD") + (git("status", "--porcelain") ? "-dirty" : "");
+  } catch {
+    id = UNKNOWN_VERSION;
+  }
+  buildIds.set(root, id);
+  return id;
+}
 
 /** For diagnostics: the files under a directory, shallow. */
 export function list(dir: string): string[] {

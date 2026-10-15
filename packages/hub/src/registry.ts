@@ -124,3 +124,11 @@ export class NodeRegistry {
     return entry;
   }
 }
+
+/**
+ * Whether a node runs a different aso build than the one this Hub serves (`aso update` on it
+ * would change it). Unknown when the Hub has no package to compare with.
+ */
+export function isOutdated(nodeVersion: string, hubVersion: string | undefined): boolean {
+  return hubVersion !== undefined && nodeVersion !== hubVersion;
+}

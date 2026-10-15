@@ -62,12 +62,20 @@ export function Home() {
                     <Link href={`/tasks/${w.taskId}`}>
                       <Badge label="Busy" tone="active" />
                     </Link>
+                  ) : w.outdated ? (
+                    <Badge label="Update" tone="waiting" />
                   ) : (
                     <Badge label="Idle" tone="muted" />
                   )}
                 </div>
               ))}
             </div>
+          )}
+          {workers.some((w) => w.outdated) && (
+            <p className="muted small">
+              Workers marked Update run an older aso than the Hub. On each, run <code>aso update --hub &lt;hub address&gt;</code> and
+              restart its worker.
+            </p>
           )}
           {nodes.data && !architect && <p className="muted small">The Architect is not connected, so new plans will wait.</p>}
         </Section>

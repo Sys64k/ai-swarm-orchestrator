@@ -82,6 +82,10 @@ export interface HubNode {
   heartbeat: { memoryAvailableBytes: number; cpuLoadPercent: number } | null;
   currentTaskId: string | null;
   lastSeenAt: string;
+  /** aso build the node runs (`0.1.0+<commit>`). Optional: Hubs older than the console don't send it. */
+  version?: string;
+  /** Runs another build than the Hub serves: `aso update` on that machine. */
+  outdated?: boolean;
 }
 
 export interface Project {

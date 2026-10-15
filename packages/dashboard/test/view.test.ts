@@ -14,6 +14,7 @@ import {
   terminalLines,
   timeAgo,
   workerViews,
+  buildOf,
 } from "../lib/view.ts";
 import type { HubNode, Plan, Project, Task, TranscriptEntry } from "../lib/types.ts";
 
@@ -191,7 +192,16 @@ describe("formatting", () => {
         lastSeenAt: "",
       },
     ];
-    assert.deepEqual(workerViews(nodes), [{ nodeId: "avalon-1", name: "avalon", busy: true, taskId: "api", detail: "backend, qa · CPU 37%" }]);
+    assert.deepEqual(workerViews(nodes), [{ nodeId: "avalon-1", name: "avalon", busy: true, taskId: "api", detail: "backend, qa · CPU 37%", outdated: false }]);
+  });
+
+  it("shows each worker's build and whether it needs updating", () => {
+    const node = (version: string | undefined, outdated?: boolean): HubNode => ({ nodeId: "w", nodeKind: "worker", heartbeat: null, currentTaskId: null, lastSeenAt: "", version, outdated });
+    assert.deepEqual(
+      workerViews([node("0.1.0+e422cd7", false), node("0.1.0", true), node(undefined)]).map((w) => [w.detail, w.outdated]),
+      [["build e422cd7", false], ["build 0.1.0", true], ["", false]],
+    );
+    assert.equal(buildOf("0.1.0+abc-dirty"), "abc-dirty");
   });
 });
 

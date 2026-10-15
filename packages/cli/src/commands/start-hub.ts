@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { ARCHITECT_TMUX_SESSION, createLogger, resolveToken } from "@aso/shared";
 import { startHub, type Effort } from "@aso/hub";
-import { layout } from "../layout.js";
+import { gitBuildId, layout } from "../layout.js";
 
 const log = createLogger("cli");
 
@@ -90,7 +90,7 @@ async function startHubInDocker(root: string, opts: StartHubOptions, token: stri
       ASO_PROJECTS_ROOT_DISPLAY: root,
       ASO_TOKEN: token,
       // The image has no .git; label the package it builds with the host's commit.
-      ASO_BUILD: gitBuildId(),
+      ASO_BUILD: gitBuildId(layout.root),
       ASO_UID: String(process.getuid?.() ?? 1000),
       ASO_GID: String(process.getgid?.() ?? 1000),
       ASO_BIND: opts.host,
@@ -150,17 +150,6 @@ function onShutdown(handler: (signal: NodeJS.Signals) => Promise<void>): void {
       log.info(`${signal} received, shutting down`);
       void handler(signal);
     });
-  }
-}
-
-function gitBuildId(): string {
-  try {
-    const root = layout.root;
-    const sha = execFileSync("git", ["-C", root, "rev-parse", "--short", "HEAD"], { encoding: "utf8" }).trim();
-    const dirty = execFileSync("git", ["-C", root, "status", "--porcelain"], { encoding: "utf8" }).trim() ? "-dirty" : "";
-    return sha + dirty;
-  } catch {
-    return "unknown";
   }
 }
 

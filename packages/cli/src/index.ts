@@ -149,7 +149,7 @@ program
   .option("--hub <address>", "Hub address", "127.0.0.1")
   .option("--work-dir <path>", "read-only checkout for exploring the project")
   .action((opts: { hub: string; workDir?: string }) => {
-    const architect = startArchitect({ hub: opts.hub, workDir: opts.workDir, token: resolveToken()?.token });
+    const architect = startArchitect({ hub: opts.hub, workDir: opts.workDir, token: resolveToken()?.token, version: layout.version() });
     for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, () => (architect.stop(), process.exit(0)));
   });
 

@@ -31,7 +31,7 @@ import { type DependencyInstaller } from "./git/hub-repo.js";
 import type { GitSync } from "./git/sync.js";
 import { PlanError, type PlanRecord } from "./plans.js";
 import { ProjectError, ProjectSet, type Project } from "./projects.js";
-import { NodeRegistry, type NodeTransport } from "./registry.js";
+import { isOutdated, NodeRegistry, type NodeTransport } from "./registry.js";
 import type { RoutingPolicies } from "./routing.js";
 import { Notifier, TEST_NOTIFICATION } from "./push/notifier.js";
 import type { sendPush } from "./push/web-push.js";
@@ -175,6 +175,9 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   });
   await conversations.restore();
 
+  /** The aso build this Hub serves to other machines; nodes on another build are flagged. */
+  const hubVersion = () => (opts.dist?.tarball() ? opts.dist.version() : undefined);
+
   /** Idempotent: safe to call from both the timeout sweep and the socket close event. */
   const dropNode = (nodeId: string, transport: NodeTransport) => {
     if (!registry.unregister(nodeId, transport)) return;
@@ -210,11 +213,13 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       const p = msg.payload;
       log.info(
         p.nodeKind === "worker"
-          ? `worker ${msg.from} registered from ${p.hardware.hostname} (roles: ${p.roles.join(", ")}, ` +
+          ? `worker ${msg.from} registered from ${p.hardware.hostname} (aso ${p.version}, roles: ${p.roles.join(", ")}, ` +
               `${(p.hardware.memory.totalBytes / 1024 ** 3).toFixed(1)} GiB, ${p.hardware.storage.writeMBps} MB/s, ` +
               `docker ${p.hardware.docker.available ? "yes" : "no"})`
           : `architect ${msg.from} registered`,
       );
+      const current = hubVersion();
+      if (isOutdated(p.version, current)) log.warn(`${msg.from} runs aso ${p.version}, this Hub serves ${current}: run \`aso update\` on it`);
       registry.send(msg.from, "REGISTRATION_ACK", { nodeId: msg.from });
       for (const project of projects.list()) project.tasks.nodeRegistered(msg.from, p.nodeKind === "worker" ? p.resume : undefined);
       return projects.dispatchAll();
@@ -352,7 +357,10 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     });
   });
 
-  app.get("/api/nodes", (c) => c.json(registry.list()));
+  app.get("/api/nodes", (c) => {
+    const current = hubVersion();
+    return c.json(registry.list().map((n) => ({ ...n, outdated: isOutdated(n.version, current) })));
+  });
 
   // One-time console sign-in links (the console redeems them for a session; both need the token).
   const signInCodes = new SignInCodes();

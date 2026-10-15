@@ -12,6 +12,7 @@ import {
   resolveHubUrl,
   type AgentMessageType,
   type PayloadInput,
+  UNKNOWN_VERSION,
 } from "@aso/shared";
 import { ModelChannel } from "@aso/worker";
 import { Planner } from "./planner.js";
@@ -27,6 +28,8 @@ export interface ArchitectOptions {
   retryDelaysMs?: number[];
   /** Shared ASO token (required unless the Hub runs without authentication). */
   token?: string;
+  /** The aso build this Architect runs (`0.1.0+<commit>`). */
+  version?: string;
 }
 
 export interface ArchitectHandle {
@@ -70,7 +73,7 @@ export function startArchitect(opts: ArchitectOptions): ArchitectHandle {
     registered = false;
     socket.on("open", () => {
       attempt = 0;
-      socket.send(JSON.stringify(createMessage("NODE_REGISTRATION", nodeId, { nodeKind: "architect", version: "0.1.0" })));
+      socket.send(JSON.stringify(createMessage("NODE_REGISTRATION", nodeId, { nodeKind: "architect", version: opts.version ?? UNKNOWN_VERSION })));
     });
     socket.on("message", (data) => {
       const parsed = parseAgentMessage(data.toString());

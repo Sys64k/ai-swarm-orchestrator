@@ -140,18 +140,31 @@ export interface WorkerView {
   busy: boolean;
   taskId: string | null;
   detail: string;
+  outdated: boolean;
 }
 
 export function workerViews(nodes: readonly HubNode[]): WorkerView[] {
   return nodes
     .filter((n) => n.nodeKind === "worker")
-    .map((n) => ({
-      nodeId: n.nodeId,
-      name: n.hardware?.hostname ?? n.nodeId,
-      busy: n.currentTaskId !== null,
-      taskId: n.currentTaskId,
-      detail: [n.roles?.join(", "), n.heartbeat ? `CPU ${Math.round(n.heartbeat.cpuLoadPercent)}%` : undefined].filter(Boolean).join(" · "),
-    }));
+    .map((n) => {
+      const roles = n.roles?.join(", ");
+      const cpu = n.heartbeat ? `CPU ${Math.round(n.heartbeat.cpuLoadPercent)}%` : undefined;
+      const build = n.version ? `build ${buildOf(n.version)}` : undefined;
+      return {
+        nodeId: n.nodeId,
+        name: n.hardware?.hostname ?? n.nodeId,
+        busy: n.currentTaskId !== null,
+        taskId: n.currentTaskId,
+        detail: [roles, cpu, build].filter(Boolean).join(" · "),
+        outdated: n.outdated === true,
+      };
+    });
+}
+
+/** The build part of a version (`0.1.0+e422cd7` → `e422cd7`); older nodes report only `0.1.0`. */
+export function buildOf(version: string): string {
+  const plus = version.indexOf("+");
+  return plus === -1 ? version : version.slice(plus + 1);
 }
 
 /** One line of the terminal view. */
