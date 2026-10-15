@@ -17,6 +17,10 @@ import {
   createMessage,
   isAuthorized,
   parseAgentMessage,
+  parseBody,
+  PushEndpointSchema,
+  PushSubscriptionSchema,
+  PushTestSchema,
   type AgentMessage,
 } from "@aso/shared";
 import { AnthropicApiAdapter, type Effort, type LlmAdapter } from "./llm/adapter.js";
@@ -29,6 +33,8 @@ import { PlanError, type PlanRecord } from "./plans.js";
 import { ProjectError, ProjectSet, type Project } from "./projects.js";
 import { NodeRegistry, type NodeTransport } from "./registry.js";
 import type { RoutingPolicies } from "./routing.js";
+import { Notifier, TEST_NOTIFICATION } from "./push/notifier.js";
+import type { sendPush } from "./push/web-push.js";
 import { SignInCodes } from "./sign-in-codes.js";
 import { StateStore } from "./state-store.js";
 import { TaskError, type QaOptions, type TaskRecord } from "./tasks.js";
@@ -79,6 +85,8 @@ export interface HubOptions {
   dist?: { version: () => string | undefined; tarball: () => string | undefined };
   /** Push main to the target repo's remote after merges. Default: on when an `origin` remote exists. */
   sync?: { enabled?: boolean; remote?: string; token?: string; retryMs?: number };
+  /** Push notifications. `send` replaces real delivery (tests); the contact defaults to ASO_PUSH_CONTACT. */
+  push?: { send?: typeof sendPush; contact?: string };
   llm?: {
     /** Defaults to the Anthropic API adapter when ANTHROPIC_API_KEY is set; otherwise no LLM. */
     adapter?: LlmAdapter;
@@ -120,6 +128,8 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   const connections = new Map<string, Connection>();
   if (!opts.projectsRoot && !opts.targetDir) throw new Error("startHub needs projectsRoot or targetDir");
   const registry = new NodeRegistry();
+  // Set once the Hub-wide state folder is known; changes made while projects load notify nobody.
+  let notifier: Notifier | undefined;
   const projects = await ProjectSet.open(registry, {
     root: opts.projectsRoot,
     single: opts.targetDir,
@@ -128,10 +138,11 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     tasks: { policies: opts.policies, reclaimGraceMs: opts.reclaimGraceMs, qa: opts.qa },
     deps: { installer: opts.dependencyInstaller, allow: opts.allowDependencies },
     sync: { enabled: opts.sync?.enabled, remote: opts.sync?.remote, token: opts.sync?.token, retryMs: opts.sync?.retryMs },
+    onChange: (p) => notifier?.observe({ id: p.id, tasks: p.tasks.list(), plans: p.plans.list() }),
   });
   const tasks = projects.tasks;
   const plans = projects.plans;
-  // Agent conversations are Hub-wide (one model gateway for all projects).
+  // Agent conversations and push notification keys are Hub-wide (one gateway for all projects).
   const conversationDir =
     opts.stateDir === null
       ? undefined
@@ -139,6 +150,9 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
         ? path.join(opts.projectsRoot, ".aso")
         : path.join(await projects.get("project")!.repo.gitDir(), "aso");
   const store = conversationDir ? new StateStore(conversationDir) : undefined;
+  notifier = await Notifier.open({ dir: conversationDir, subject: opts.push?.contact ?? (process.env.ASO_PUSH_CONTACT || undefined), send: opts.push?.send });
+  // Remember every record's current state, so only what changes from now on notifies.
+  for (const p of projects.list()) notifier.observe({ id: p.id, tasks: p.tasks.list(), plans: p.plans.list() });
   const llm = opts.llm ?? {};
   const model = llm.model ?? "claude-opus-5-5";
   const adapter =
@@ -365,6 +379,35 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     const data = (await c.req.json().catch(() => undefined)) as unknown;
     return data && typeof data === "object" && !Array.isArray(data) ? (data as Record<string, unknown>) : undefined;
   };
+
+  // Push notifications: devices subscribe from the console; the Hub notifies them of plans to
+  // approve, failed tasks and finished plans.
+  const parsed = async <T>(c: Context, schema: Parameters<typeof parseBody<T>>[0]) => parseBody(schema, await c.req.json().catch(() => undefined));
+  app.get("/api/push", (c) => c.json({ publicKey: notifier!.publicKey, devices: notifier!.subscriptionCount }));
+  app.post("/api/push/subscriptions", async (c) => {
+    const req = await parsed(c, PushSubscriptionSchema);
+    if (!req.ok) return c.json({ error: req.error }, 400);
+    await notifier!.subscribe(req.data);
+    return c.json({ subscribed: true, devices: notifier!.subscriptionCount }, 201);
+  });
+  app.post("/api/push/subscriptions/check", async (c) => {
+    const req = await parsed(c, PushEndpointSchema);
+    return req.ok ? c.json({ subscribed: notifier!.has(req.data.endpoint) }) : c.json({ error: req.error }, 400);
+  });
+  app.post("/api/push/subscriptions/delete", async (c) => {
+    const req = await parsed(c, PushEndpointSchema);
+    if (!req.ok) return c.json({ error: req.error }, 400);
+    return c.json({ removed: await notifier!.unsubscribe(req.data.endpoint), devices: notifier!.subscriptionCount });
+  });
+  app.post("/api/push/test", async (c) => {
+    const req = await parsed(c, PushTestSchema);
+    if (!req.ok) return c.json({ error: req.error }, 400);
+    const { endpoint } = req.data;
+    if (endpoint !== undefined && !notifier!.has(endpoint)) return c.json({ error: "this device is not subscribed" }, 404);
+    if (!notifier!.subscriptionCount) return c.json({ error: "no device has notifications turned on" }, 404);
+    const result = await notifier!.send(TEST_NOTIFICATION, endpoint);
+    return c.json(result, result.sent ? 200 : 502);
+  });
 
   const projectView = (p: Project) => {
     const list = p.tasks.list();

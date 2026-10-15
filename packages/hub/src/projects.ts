@@ -49,6 +49,8 @@ export interface ProjectSetOptions {
   tasks: Pick<TaskManagerOptions, "policies" | "reclaimGraceMs" | "qa">;
   deps: Pick<DependencyManagerOptions, "installer" | "allow">;
   sync: { enabled?: boolean; remote?: string; token?: string; retryMs?: number };
+  /** Called after any task or plan of a project changed (notifications). */
+  onChange?: (project: Project) => void;
 }
 
 /**
@@ -202,7 +204,12 @@ export class ProjectSet {
     const sync = await GitSync.create(repo, { ...this.opts.sync, enabled: this.opts.sync.enabled ?? true });
     // Filled in below; the managers' callbacks only run after construction.
     const project = { id, dir, repo, sync, transcripts, store } as Project;
-    const persist = () => store?.scheduleSave(() => ({ tasks: project.tasks.list(), plans: project.plans.list() }));
+    /** The managers report changes while they are still being constructed; listeners wait for both. */
+    const ready = () => project.tasks !== undefined && project.plans !== undefined;
+    const persist = () => {
+      store?.scheduleSave(() => ({ tasks: project.tasks.list(), plans: project.plans.list() }));
+      if (ready()) this.opts.onChange?.(project);
+    };
     /** Merged tasks waiting for their commits to reach the remote. */
     const unpushed = new Set<string>();
 

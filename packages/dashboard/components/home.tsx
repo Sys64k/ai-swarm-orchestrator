@@ -73,6 +73,8 @@ export function Home() {
         </Section>
 
         <p className="footer-links">
+          <Link href="/notifications">Notifications</Link>
+          <span aria-hidden> · </span>
           <Link href="/devices">Sign in another device</Link>
         </p>
       </main>

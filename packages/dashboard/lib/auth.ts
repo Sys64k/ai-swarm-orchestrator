@@ -106,6 +106,9 @@ export function isPublicPath(pathname: string): boolean {
     pathname === "/api/session" ||
     pathname === "/manifest.webmanifest" ||
     pathname === "/icon.svg" ||
+    // Service worker and the icons notifications and the home screen use (no data in them).
+    pathname === "/sw.js" ||
+    /^\/(icon-192|icon-512|icon-maskable-512|badge-96)\.png$/.test(pathname) ||
     pathname.startsWith("/_next/")
   );
 }
