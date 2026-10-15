@@ -7,6 +7,9 @@ const RULES: ReadonlyArray<{ method: "GET" | "POST"; pattern: RegExp }> = [
   { method: "GET", pattern: /^health$/ },
   // Signed-in devices may create sign-in links for other devices; redeeming is server-side only.
   { method: "POST", pattern: /^sign-in-codes$/ },
+  // Push notifications: this device's subscription and a test message.
+  { method: "GET", pattern: /^push$/ },
+  { method: "POST", pattern: /^push\/(subscriptions|subscriptions\/check|subscriptions\/delete|test)$/ },
   { method: "GET", pattern: /^projects$/ },
   { method: "POST", pattern: /^projects$/ },
   { method: "GET", pattern: new RegExp(`^projects/${ID}$`) },

@@ -133,6 +133,7 @@ flowchart LR
 | | `protocol.ts` | `AgentMessageSchema`, task and hardware schemas, `PROTECTED_FILENAMES`, `TASK_REF_PATTERN` |
 | | `hub-address.ts` | `resolveHubUrl` (ws URL), `hubGitUrl` (Git URL from the same host and port) |
 | `@aso/hub` | `dependencies.ts` | `DependencyManager` (ownership, allowlist, limits, dedup) and `npmInstaller` |
+| | `push/notifier.ts`, `push/web-push.ts` | `Notifier` (subscriptions, `notableChanges`) and Web Push delivery (RFC 8291 encryption, VAPID) with `node:crypto` |
 | | `server.ts` | HTTP API, WebSocket validation pipeline, Git route, liveness and reclaim sweep |
 | | `registry.ts` | `NodeRegistry`: connected nodes, heartbeats, busy state |
 | | `routing.ts` | `selectNode()`: a pure, deterministic routing function |
@@ -155,7 +156,7 @@ flowchart LR
 | | `hardware.ts` | `systeminformation` profile and disk write benchmark |
 | | `git/agent-git-client.ts` | The only Git interface agents get |
 | `@aso/cli` | `index.ts`, `commands/*` | Argument parsing and process orchestration (native or Docker) |
-| `@aso/dashboard` | `app/**`, `components/*` | The console: home, task (live transcript), plan (approve/reject), new plan, sign-in. Client pages poll the Hub through `app/api/hub/[...path]` |
+| `@aso/dashboard` | `app/**`, `components/*` | The console: home, task (live transcript), plan (approve/reject), new plan, sign-in, notifications (`public/sw.js`). Client pages poll the Hub through `app/api/hub/[...path]` |
 | | `lib/view.ts` | Pure view logic: home grouping, badges, transcript → terminal lines |
 | | `lib/auth.ts`, `lib/hub-routes.ts`, `proxy.ts` | Session cookie and Basic auth, browser-origin redirects, the allowlist of Hub endpoints the browser may reach |
 
@@ -496,6 +497,44 @@ flowchart LR
 - **Logic stays out of components.** `lib/view.ts` decides what needs attention, the badges
   and how a transcript entry reads as a terminal line. It is unit-tested with `node --test`
   like the rest of the repo.
+
+### Push notifications
+
+```mermaid
+sequenceDiagram
+  participant C as Console (phone)
+  participant SW as Service worker (sw.js)
+  participant H as Hub (Notifier)
+  participant PS as Push service (FCM / Apple / Mozilla)
+  C->>H: GET /api/push → VAPID public key
+  C->>PS: pushManager.subscribe(key)
+  C->>H: POST /api/push/subscriptions (endpoint, p256dh, auth)
+  Note over H: task or plan state changes
+  H->>PS: POST endpoint (aes128gcm body, VAPID JWT)
+  PS->>SW: push event
+  SW->>C: showNotification; tap opens /plans/:id or /tasks/:id
+```
+
+- **What notifies.** `ProjectSet` calls back on every task or plan change. `notableChanges()`
+  (pure, `hub/src/push/notifier.ts`) compares each record's state with the last one seen and
+  picks the transitions worth interrupting someone for:
+  - a plan becomes `proposed`
+  - a plan or task becomes `failed`
+  - a task becomes `merged`, either as the last task of its plan ("plan done") or as a task
+    that isn't part of any plan
+- **No replays.** A record seen for the first time (Hub start, a restored task) never notifies,
+  so restarts don't repeat old news.
+- **No push library.** `hub/src/push/web-push.ts` implements RFC 8291 payload encryption
+  (aes128gcm) and RFC 8292 VAPID with `node:crypto`. It is tested against the RFC's example
+  vector and by decrypting as a browser would.
+- **Storage.** The key pair and subscriptions are Hub-wide, in `push.json` next to the
+  conversations (`<root>/.aso/`, mode 0600). An unreadable file is moved aside and new keys
+  are made. Subscriptions the push service answers `404`/`410` for are dropped; other
+  failures are logged and kept.
+- **Console side.** `public/sw.js` only shows notifications and opens console paths (it
+  caches nothing). It is public, like the icons, and served `no-store` so phones pick up
+  changes. `lib/push.ts` decides whether a device can subscribe (https, iOS home-screen
+  install, permission) and turns browser errors into advice.
 
 ## 8. Git flow
 

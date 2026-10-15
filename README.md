@@ -276,6 +276,30 @@ the same account. The console works from anywhere at `https://<machine>.<tailnet
 
 `tailscale serve --bg` survives reboots. `tailscale serve --https=443 off` stops it.
 
+## Notifications on your phone
+
+The Hub can notify your phone when:
+- a plan is ready for your approval,
+- a task fails, or planning fails,
+- all of a plan's tasks are merged (or a task submitted on its own is merged).
+
+Tapping a notification opens that plan or task in the console. To turn them on, open the console
+at its **https** address (Tailscale, above), tap **Notifications** at the bottom of the home
+page, then **Turn on notifications**, and **Send a test**. Do this on each device you want
+notified.
+
+- **Browsers need https for push,** so the plain LAN address (`http://<hub>:7421`) can't
+  turn them on.
+- **Android (Chrome):** works in the browser. Installing the console ("Add to home screen")
+  is optional.
+- **iPhone/iPad:** add the console to the home screen first and open it from there; Safari
+  allows push only for installed web apps.
+- **Delivery goes through the browser's push service** (Google's for Chrome on Android,
+  Apple's for Safari). The message is end-to-end encrypted to your device; the push service
+  only sees that a message was sent. The Hub needs outbound internet access to reach it.
+- **Keys and subscriptions** are kept in `<projects root>/.aso/push.json` (owner-only
+  permissions). Deleting it signs every device out of notifications.
+
 ## How a task flows
 
 1. **Route.** The Hub picks the best idle worker for the task's role and hardware needs.
@@ -537,6 +561,9 @@ Options:
 | `GET` | `/api/tasks/:id/transcript`, `/api/plans/:id/transcript` | What the agent said and did: text, tool calls, command output, events, QA verdicts. `?after=<seq>` returns only newer entries |
 | `POST` | `/api/tasks/:id/cancel` | Stop a task that isn't finished; a worker still on it is cut off at its next model turn |
 | `POST` | `/api/tasks/:id/retry` | Queue a failed or cancelled task again with fresh limits and budget |
+| `GET` | `/api/push` | Push notifications: the Hub's public key (`applicationServerKey`) and how many devices are subscribed |
+| `POST` | `/api/push/subscriptions`, `/check`, `/delete` | Add a device's `PushSubscription` (https endpoint, `p256dh`, `auth`), ask whether one is subscribed, remove one |
+| `POST` | `/api/push/test` | Send a test notification, to `{ "endpoint" }` or every device |
 | `POST` | `/api/sign-in-codes`, `/api/sign-in-codes/redeem` | Create a one-time console sign-in code (10 minutes, single use) / use one up. The console redeems codes server-side |
 | `POST` | `/api/plans` | Start a plan: `{ "requirement": "..." }` → `201` with `planId` |
 | `GET` | `/api/plans`, `/api/plans/:id` | Plans with state, summary, proposed tasks, cost |
@@ -597,6 +624,7 @@ For the scoring formula, see [ARCHITECTURE.md](ARCHITECTURE.md#6-hardware-aware-
 | `ANTHROPIC_API_KEY` | *(none)* | Hub only. Without it, agents fail tasks with "no LLM configured" |
 | *(file)* `.env` | — | Loaded on start: the shell's variables win, then `ASO_ENV_FILE`, then `~/.config/aso/.env`, then a source checkout's `.env`. See `.env.example` |
 | `ASO_MODEL`, `ASO_EFFORT`, `ASO_TASK_BUDGET`, `ASO_LLM_CONCURRENCY` | see flags | Defaults for the LLM flags (also passed into the container) |
+| `ASO_PUSH_CONTACT` | project URL | Contact (`mailto:` or `https:`) sent to push services with notifications (VAPID `sub`) |
 | `ASO_UPDATE_SPEC` | `@aso/cli@latest` | Default source for `aso update` |
 
 ## Security notes
