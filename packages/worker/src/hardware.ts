@@ -1,13 +1,16 @@
+import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdir, open, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import si from "systeminformation";
 import { MAX_WORKER_SLOTS, type HardwareProfile } from "@aso/shared";
 
 const BENCH_BYTES = 64 * 1024 * 1024;
 const BENCH_CHUNK = 4 * 1024 * 1024;
 
+const exec = promisify(execFile);
 const GiB = 1024 ** 3;
 /** What one job needs: an agent's npm installs and builds, or a headless browser for e2e tests. */
 const THREADS_PER_SLOT = 2;
@@ -41,7 +44,7 @@ export async function profileHardware(workDir: string): Promise<HardwareProfile>
     si.mem(),
     si.osInfo(),
     si.diskLayout().catch(() => []),
-    si.dockerInfo().catch(() => null),
+    dockerServerVersion(),
     measureWriteMBps(workDir),
   ]);
 
@@ -52,10 +55,7 @@ export async function profileHardware(workDir: string): Promise<HardwareProfile>
     cpu: { brand: cpu.brand, physicalCores: cpu.physicalCores, logicalCores: cpu.cores },
     memory: { totalBytes: mem.total, availableBytes: mem.available },
     disks: disks.map((d) => ({ name: d.name, type: d.type, sizeBytes: d.size })),
-    // dockerInfo() resolves with empty fields when the daemon is unreachable.
-    docker: docker?.serverVersion
-      ? { available: true, version: docker.serverVersion }
-      : { available: false },
+    docker: docker ? { available: true, version: docker } : { available: false },
     storage: { workDir, writeMBps },
   };
 }
@@ -67,20 +67,26 @@ export interface LoadMetrics {
 }
 
 export async function sampleLoad(): Promise<LoadMetrics> {
-  const [mem, load, dockerAvailable] = await Promise.all([si.mem(), si.currentLoad(), isDockerAvailable()]);
+  const [mem, load, docker] = await Promise.all([si.mem(), si.currentLoad(), dockerServerVersion()]);
   return {
     memoryAvailableBytes: mem.available,
     cpuLoadPercent: Math.min(100, Math.max(0, Math.round(load.currentLoad * 10) / 10)),
-    dockerAvailable,
+    dockerAvailable: docker !== undefined,
   };
 }
 
-/** True when the Docker daemon answers (not merely when the CLI is installed). */
-async function isDockerAvailable(): Promise<boolean> {
+/**
+ * The Docker daemon's version, or undefined when none answers (not merely when the CLI is
+ * installed). Asks the `docker` CLI, as the sandbox does, so it follows the current Docker
+ * context and DOCKER_HOST: rootless Docker and Docker Desktop do not listen on
+ * /var/run/docker.sock, the only socket systeminformation checks.
+ */
+export async function dockerServerVersion(docker = "docker"): Promise<string | undefined> {
   try {
-    return Boolean((await si.dockerInfo()).serverVersion);
+    const { stdout } = await exec(docker, ["version", "--format", "{{.Server.Version}}"], { timeout: 10_000 });
+    return stdout.trim() || undefined;
   } catch {
-    return false;
+    return undefined;
   }
 }
 
