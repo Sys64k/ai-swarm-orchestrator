@@ -123,3 +123,42 @@ describe("selectNode", () => {
     assert.ok(!d.ok && d.reason === "no worker nodes connected");
   });
 });
+
+describe("spreading jobs over the fleet", () => {
+  /** A machine with `slots` desks, `running` of them busy. */
+  const machine = (nodeId: string, cores: number, slots: number, running: number): NodeSnapshot => ({ ...node(nodeId, { cores }), slots, freeSlots: slots - running });
+  const feature = { role: "frontend" as const, kind: "feature" as const };
+
+  it("gives a job to an idle machine over a stronger busy one", () => {
+    const d = selectNode(feature, [machine("big", 12, 4, 1), machine("small", 8, 2, 0)]);
+    assert.equal(chosen(d), "small");
+    assert.ok(d.ok && d.reasons.includes("over big, which is busier"), d.ok ? d.reasons.join("; ") : "");
+  });
+
+  it("lets strength decide between machines equally busy", () => {
+    assert.equal(chosen(selectNode(feature, [machine("small", 8, 2, 0), machine("big", 12, 4, 0)])), "big", "both idle");
+    assert.equal(chosen(selectNode(feature, [machine("small", 8, 2, 1), machine("big", 12, 4, 1)])), "big", "one job each");
+    const d = selectNode(feature, [machine("small", 8, 2, 0), machine("big", 12, 4, 0)]);
+    assert.ok(d.ok && !d.reasons.some((r) => r.includes("busier")), "nothing busier was passed over");
+  });
+
+  it("fills the fleet evenly, whatever its shape", () => {
+    // Three machines, one strong: four jobs in a row go strong, then the others, then strong again.
+    const fleet = [machine("strong", 16, 4, 0), machine("a", 8, 2, 0), machine("b", 8, 2, 0)];
+    const order: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      const id = chosen(selectNode(feature, fleet));
+      order.push(id);
+      const m = fleet.find((n) => n.nodeId === id)!;
+      m.freeSlots--;
+    }
+    assert.deepEqual(order.slice(0, 3).sort(), ["a", "b", "strong"], "one job per machine first");
+    assert.equal(order[0], "strong", "the strongest gets the first");
+    assert.equal(order[3], "strong", "then the strongest again");
+  });
+
+  it("still keeps QA off the machine that wrote the code", () => {
+    const d = selectNode({ role: "qa", kind: "unit_test", avoid: "big" }, [machine("big", 12, 4, 0), machine("small", 8, 2, 1)]);
+    assert.equal(chosen(d), "small", "busier, but not the author");
+  });
+});
