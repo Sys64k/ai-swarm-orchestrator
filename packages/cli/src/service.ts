@@ -1,8 +1,11 @@
 import os from "node:os";
 import path from "node:path";
+import type { Command } from "commander";
 
 /** systemd user unit name of the worker service. */
 export const WORKER_SERVICE = "aso-worker.service";
+/** systemd user unit name of the Hub service. */
+export const HUB_SERVICE = "aso-hub.service";
 
 /** The `start-worker` options a service can carry: keep in step with `workerOptions` in index.ts and `workerArgs` below. */
 export interface WorkerServiceOptions {
@@ -41,15 +44,25 @@ function environment(name: string, value: string): string {
 }
 
 /**
- * The worker's systemd user unit. It runs the same `aso` this command ran from (so `aso update`
- * plus a restart moves it to the new version), restarts on failure, and keeps the PATH it was
- * installed with so it finds docker and git like the person's shell does.
+ * A systemd user unit for `aso <args>` (the worker's or the Hub's). It runs the same `aso` this
+ * command ran from (so `aso update` plus a restart moves it to the new version), restarts on
+ * failure, and keeps the PATH it was installed with so it finds docker and git like the
+ * person's shell does.
  */
-export function workerUnit(opts: { node: string; script: string; args: string[]; path: string; envFile?: string; hub: string }): string {
+export function serviceUnit(opts: {
+  description: string;
+  /** The command that installed it, e.g. `aso service` (for the header comment). */
+  installedBy: string;
+  node: string;
+  script: string;
+  args: string[];
+  path: string;
+  envFile?: string;
+}): string {
   const exec = [opts.node, opts.script, ...opts.args].map(systemdQuote).join(" ");
-  return `# Installed by \`aso service install\`; remove with \`aso service uninstall\`.
+  return `# Installed by \`${opts.installedBy} install\`; remove with \`${opts.installedBy} uninstall\`.
 [Unit]
-Description=ASO worker (Hub ${opts.hub})
+Description=${opts.description}
 Wants=network-online.target
 After=network-online.target
 
@@ -63,6 +76,34 @@ ${opts.envFile ? `EnvironmentFile=${systemdQuote(opts.envFile)}\n` : ""}
 [Install]
 WantedBy=default.target
 `;
+}
+
+/**
+ * The arguments to run `cmd` again with the options given on its command line: the service
+ * keeps those, and takes the rest from where the command found them (defaults, `.env` files).
+ * `always` names options to pass even when they came from a default or the environment, and
+ * `map` rewrites an option's value (by its attribute name) before it is passed.
+ */
+export function explicitArgs(
+  cmd: Command,
+  opts: { always?: readonly string[]; map?: Record<string, (value: string) => string> } = {},
+): string[] {
+  const args: string[] = [];
+  const values = cmd.opts();
+  for (const option of cmd.options) {
+    const key = option.attributeName();
+    const value: unknown = values[key];
+    const flag = option.long ?? option.short;
+    if (!flag || value === undefined || (cmd.getOptionValueSource(key) !== "cli" && !opts.always?.includes(key))) continue;
+    if (typeof value === "boolean") {
+      // `--no-push` sets false, `--docker` sets true.
+      if (option.negate ? !value : value) args.push(flag);
+    } else {
+      const text = String(value);
+      args.push(flag, opts.map?.[key]?.(text) ?? text);
+    }
+  }
+  return args;
 }
 
 /**

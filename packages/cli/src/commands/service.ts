@@ -1,44 +1,113 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { Command } from "commander";
 import { createLogger, DEFAULT_HUB_PORT, resolveToken, tokenFile } from "@aso/shared";
 import { layout } from "../layout.js";
-import { needsTokenEnvFile, userUnitDir, WORKER_SERVICE, workerArgs, workerUnit, type WorkerServiceOptions } from "../service.js";
-import { requireSystemd, userTool, workerEnvFile, workerUnitFile } from "../systemd.js";
+import { explicitArgs, HUB_SERVICE, needsTokenEnvFile, serviceUnit, userUnitDir, WORKER_SERVICE, workerArgs, type WorkerServiceOptions } from "../service.js";
+import { requireSystemd, serviceActive, systemctlOrThrow, unitFile, userTool, workerEnvFile } from "../systemd.js";
 
 const log = createLogger("cli");
+
+/** The two services: `aso service` runs a worker, `aso hub-service` the Hub. */
+interface ServiceKind {
+  unit: string;
+  /** What runs, for messages. */
+  what: string;
+  /** The aso command that manages it. */
+  command: string;
+  /** What to add to `<command> install`, for the hint when it is not installed. */
+  installHint: string;
+  /** Files the service owns besides its unit, removed with it (a function: their paths depend on the environment). */
+  extraFiles: () => string[];
+}
+
+const WORKER: ServiceKind = {
+  unit: WORKER_SERVICE,
+  what: "worker",
+  command: "aso service",
+  installHint: "--hub <hub>",
+  extraFiles: () => [workerEnvFile()],
+};
+const HUB: ServiceKind = { unit: HUB_SERVICE, what: "Hub", command: "aso hub-service", installHint: "[start-hub options]", extraFiles: () => [] };
+
+/** The `start-hub` options `hub-service install` reads itself; the rest pass through `explicitArgs`. */
+export interface HubServiceOptions {
+  root: string;
+  port: number;
+}
 
 export function installServiceCommand(opts: WorkerServiceOptions & { token?: string }): void {
   requireSystemd();
   const token = opts.token ? { token: opts.token, source: "--token" } : resolveToken();
   if (!token) throw new Error("no ASO token: pass --token or set ASO_TOKEN (run `aso token` on the Hub machine to see it)");
+  install(WORKER, `ASO worker (Hub ${opts.hub})`, workerArgs(opts, DEFAULT_HUB_PORT), syncTokenEnvFile(token));
+}
 
-  const unit = workerUnit({
+/**
+ * Install the Hub as a service with the `start-hub` options given here. The projects folder is
+ * always passed (as an absolute path); other options come from where `start-hub` finds them.
+ */
+export async function installHubServiceCommand(opts: HubServiceOptions, cmd: Command): Promise<void> {
+  requireSystemd();
+  if (!serviceActive(HUB_SERVICE) && (await hubAnswers(opts.port))) {
+    throw new Error(`a Hub already answers on port ${opts.port}; stop it first (Ctrl+C where it runs), then install the service`);
+  }
+  warnIfOnlyInShell("ANTHROPIC_API_KEY");
+  install(HUB, "ASO Hub", ["start-hub", ...explicitArgs(cmd, { always: ["root"], map: { root: (dir) => path.resolve(dir) } })]);
+}
+
+/** A service reads the `.env` files aso loads, not the shell that installed it. */
+function warnIfOnlyInShell(name: string): void {
+  if (!process.env[name] || envFilesSet(name)) return;
+  log.warn(
+    `${name} is set in your shell but in no .env file aso reads, so the service will not see it: ` +
+      `add it to ${layout.envFiles()[0] ?? "~/.config/aso/.env"} (mode 600)`,
+  );
+}
+
+function install(kind: ServiceKind, description: string, args: string[], envFile?: string): void {
+  const file = unitFile(kind.unit);
+  const unit = serviceUnit({
+    description,
+    installedBy: kind.command,
     node: process.execPath,
     script: path.resolve(process.argv[1]),
-    args: workerArgs(opts, DEFAULT_HUB_PORT),
+    args,
     path: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
-    envFile: syncTokenEnvFile(token),
-    hub: opts.hub,
+    envFile,
   });
   mkdirSync(userUnitDir(), { recursive: true });
-  writeFileSync(workerUnitFile(), unit);
-  log.info(`wrote ${workerUnitFile()}`);
+  writeFileSync(file, unit);
+  log.info(`wrote ${file}`);
 
-  for (const args of [["daemon-reload"], ["enable", WORKER_SERVICE], ["restart", WORKER_SERVICE]]) {
-    const r = userTool("systemctl", args);
-    if (!r.ok) throw new Error(`systemctl --user ${args.join(" ")} failed: ${r.output}`);
+  for (const step of [["daemon-reload"], ["enable", kind.unit], ["restart", kind.unit]]) systemctlOrThrow(step);
+  log.info(`${kind.unit} is running and starts with your user session`);
+  ensureLinger(kind);
+  console.log(`\nStatus: ${kind.command} status    Logs: ${kind.command} logs -f    Remove: ${kind.command} uninstall`);
+}
+
+async function hubAnswers(port: number): Promise<boolean> {
+  try {
+    return (await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(2000) })).ok;
+  } catch {
+    return false;
   }
-  log.info(`${WORKER_SERVICE} is running and starts with your user session`);
-  ensureLinger();
-  console.log(`\nStatus: aso service status    Logs: aso service logs -f    Remove: aso service uninstall`);
+}
+
+/** The contents of the `.env` files the CLI loads on start (a service finds what they set). */
+function envFileContents(): string[] {
+  return layout.envFiles().filter((f) => existsSync(f)).map((f) => readFileSync(f, "utf8"));
+}
+
+function envFilesSet(name: string): boolean {
+  return envFileContents().some((text) => new RegExp(`^\\s*(?:export\\s+)?${name}\\s*=\\s*\\S`, "m").test(text));
 }
 
 /** Write the service's private token file when it needs one (else remove a stale one). Returns its path if used. */
 function syncTokenEnvFile(token: { token: string; source: string }): string | undefined {
-  const envContents = layout.envFiles().filter((f) => existsSync(f)).map((f) => readFileSync(f, "utf8"));
   const file = workerEnvFile();
-  if (!needsTokenEnvFile(token, tokenFile(), envContents)) {
+  if (!needsTokenEnvFile(token, tokenFile(), envFileContents())) {
     if (existsSync(file)) rmSync(file);
     return undefined;
   }
@@ -48,43 +117,63 @@ function syncTokenEnvFile(token: { token: string; source: string }): string | un
 }
 
 /** Without lingering, user services stop at logout and only start once you log in. */
-function ensureLinger(): void {
+function ensureLinger(kind: ServiceKind): void {
   const user = os.userInfo().username;
   if (userTool("loginctl", ["show-user", user, "--property=Linger"]).output === "Linger=yes") return;
   if (userTool("loginctl", ["enable-linger", user]).ok) {
-    log.info("enabled lingering: the worker starts at boot and keeps running after you log out");
+    log.info(`enabled lingering: the ${kind.what} starts at boot and keeps running after you log out`);
     return;
   }
   log.warn(
-    `the worker only runs while you are logged in. To start it at boot and keep it running after logout, run once:\n` +
+    `the ${kind.what} only runs while you are logged in. To start it at boot and keep it running after logout, run once:\n` +
       `    sudo loginctl enable-linger ${user}`,
   );
 }
 
-export function uninstallServiceCommand(): void {
+function uninstall(kind: ServiceKind): void {
   requireSystemd();
-  if (!existsSync(workerUnitFile())) {
-    log.info(`${WORKER_SERVICE} is not installed`);
+  if (!installed(kind)) {
+    log.info(`${kind.unit} is not installed`);
     return;
   }
+  const file = unitFile(kind.unit);
   // Best effort: a unit that is already stopped or disabled is fine; the files go either way.
-  userTool("systemctl", ["disable", "--now", WORKER_SERVICE]);
-  rmSync(workerUnitFile());
-  if (existsSync(workerEnvFile())) rmSync(workerEnvFile());
+  userTool("systemctl", ["disable", "--now", kind.unit]);
+  rmSync(file);
+  for (const extra of kind.extraFiles()) if (existsSync(extra)) rmSync(extra);
   userTool("systemctl", ["daemon-reload"]);
-  log.info(`removed ${WORKER_SERVICE}`);
+  log.info(`removed ${kind.unit}`);
 }
 
-export function statusServiceCommand(): void {
-  requireSystemd();
-  if (!existsSync(workerUnitFile())) {
-    console.log(`${WORKER_SERVICE} is not installed (aso service install --hub <hub>)`);
-    return;
-  }
-  userTool("systemctl", ["status", "--no-pager", "--lines=15", WORKER_SERVICE], { show: true });
+function installed(kind: ServiceKind): boolean {
+  return existsSync(unitFile(kind.unit));
 }
 
-export function logsServiceCommand(opts: { follow: boolean; lines: string }): void {
+const notInstalled = (kind: ServiceKind) => `${kind.unit} is not installed (${kind.command} install ${kind.installHint})`;
+
+function status(kind: ServiceKind): void {
   requireSystemd();
-  userTool("journalctl", ["--unit", WORKER_SERVICE, "--no-pager", "--lines", opts.lines, ...(opts.follow ? ["--follow"] : [])], { show: true });
+  if (!installed(kind)) return console.log(notInstalled(kind));
+  userTool("systemctl", ["status", "--no-pager", "--lines=15", kind.unit], { show: true });
 }
+
+function restart(kind: ServiceKind): void {
+  requireSystemd();
+  if (!installed(kind)) throw new Error(notInstalled(kind));
+  systemctlOrThrow(["restart", kind.unit]);
+  log.info(`restarted ${kind.unit}`);
+}
+
+function logs(kind: ServiceKind, opts: { follow: boolean; lines: string }): void {
+  requireSystemd();
+  userTool("journalctl", ["--unit", kind.unit, "--no-pager", "--lines", opts.lines, ...(opts.follow ? ["--follow"] : [])], { show: true });
+}
+
+export const uninstallServiceCommand = () => uninstall(WORKER);
+export const statusServiceCommand = () => status(WORKER);
+export const logsServiceCommand = (opts: { follow: boolean; lines: string }) => logs(WORKER, opts);
+
+export const uninstallHubServiceCommand = () => uninstall(HUB);
+export const statusHubServiceCommand = () => status(HUB);
+export const restartHubServiceCommand = () => restart(HUB);
+export const logsHubServiceCommand = (opts: { follow: boolean; lines: string }) => logs(HUB, opts);

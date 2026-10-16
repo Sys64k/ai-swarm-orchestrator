@@ -19,7 +19,17 @@ import { syncCommand } from "./commands/sync.js";
 import { layout } from "./layout.js";
 import { approvePlanCommand, planCommand, rejectPlanCommand, replyPlanCommand } from "./commands/plan.js";
 import { startHubCommand } from "./commands/start-hub.js";
-import { installServiceCommand, logsServiceCommand, statusServiceCommand, uninstallServiceCommand } from "./commands/service.js";
+import {
+  installHubServiceCommand,
+  installServiceCommand,
+  logsHubServiceCommand,
+  logsServiceCommand,
+  restartHubServiceCommand,
+  statusHubServiceCommand,
+  statusServiceCommand,
+  uninstallHubServiceCommand,
+  uninstallServiceCommand,
+} from "./commands/service.js";
 import { startWorkerCommand } from "./commands/start-worker.js";
 import { updateCommand } from "./commands/update.js";
 
@@ -67,36 +77,35 @@ const program = new Command()
   .description("AI Swarm Orchestrator - local-network multi-agent development swarm")
   .version(layout.version());
 
-program
-  .command("start-hub")
-  .description("Start the Hub: API/WebSocket server, dashboard and Architect tmux session")
-  .option(
-    "-r, --root <dir>",
-    "folder of projects: each git repository in it is a project, and new ones are created there",
-    process.env.ASO_PROJECTS_ROOT || path.join(os.homedir(), DEFAULT_PROJECTS_DIR),
-  )
-  .option("-p, --port <port>", "Hub API/WebSocket port", parsePort, DEFAULT_HUB_PORT)
-  .option("--host <host>", "interface to bind", "0.0.0.0")
-  .option("--dashboard-port <port>", "dashboard port", parsePort, DEFAULT_DASHBOARD_PORT)
-  .option("--no-dashboard", "do not launch the Next.js dashboard")
-  .option("--no-architect", "do not launch the Architect tmux session")
-  .option("--docker", "run the Hub and dashboard in Docker (Architect stays on the host)", false)
-  .option(
-    "--test-command <cmd>",
-    "QA test command, split on spaces, run without a shell",
-    process.env.ASO_TEST_COMMAND || "npm test",
-  )
-  .option("--no-qa", "merge verified work without a QA run")
-  .option("--no-push", "keep merges local instead of pushing main to the target repo's origin")
-  .option(
-    "--allow-deps <list>",
-    "comma-separated npm packages agents may request (`@scope/*` allows a scope); default: any",
-    process.env.ASO_ALLOW_DEPS || undefined,
-  )
-  .option("--model <id>", "Claude model for agents", process.env.ASO_MODEL || "claude-opus-5-5")
-  .option("--effort <level>", `model effort: ${EFFORTS.join(", ")}`, parseEffort, (process.env.ASO_EFFORT as Effort) || "high")
-  .option("--task-budget <usd>", "estimated LLM spend cap per task", parseUsd, Number(process.env.ASO_TASK_BUDGET) || 5)
-  .option("--llm-concurrency <n>", "concurrent model requests", parsePort, Number(process.env.ASO_LLM_CONCURRENCY) || 4)
+/** Options shared by `start-hub` and `hub-service install` (the service runs start-hub with the ones given). */
+function hubOptions(cmd: Command): Command {
+  return cmd
+    .option(
+      "-r, --root <dir>",
+      "folder of projects: each git repository in it is a project, and new ones are created there",
+      process.env.ASO_PROJECTS_ROOT || path.join(os.homedir(), DEFAULT_PROJECTS_DIR),
+    )
+    .option("-p, --port <port>", "Hub API/WebSocket port", parsePort, DEFAULT_HUB_PORT)
+    .option("--host <host>", "interface to bind", "0.0.0.0")
+    .option("--dashboard-port <port>", "dashboard port", parsePort, DEFAULT_DASHBOARD_PORT)
+    .option("--no-dashboard", "do not launch the Next.js dashboard")
+    .option("--no-architect", "do not launch the Architect")
+    .option("--docker", "run the Hub and dashboard in Docker (Architect stays on the host)", false)
+    .option("--test-command <cmd>", "QA test command, split on spaces, run without a shell", process.env.ASO_TEST_COMMAND || "npm test")
+    .option("--no-qa", "merge verified work without a QA run")
+    .option("--no-push", "keep merges local instead of pushing main to the target repo's origin")
+    .option(
+      "--allow-deps <list>",
+      "comma-separated npm packages agents may request (`@scope/*` allows a scope); default: any",
+      process.env.ASO_ALLOW_DEPS || undefined,
+    )
+    .option("--model <id>", "Claude model for agents", process.env.ASO_MODEL || "claude-opus-5-5")
+    .option("--effort <level>", `model effort: ${EFFORTS.join(", ")}`, parseEffort, (process.env.ASO_EFFORT as Effort) || "high")
+    .option("--task-budget <usd>", "estimated LLM spend cap per task", parseUsd, Number(process.env.ASO_TASK_BUDGET) || 5)
+    .option("--llm-concurrency <n>", "concurrent model requests", parsePort, Number(process.env.ASO_LLM_CONCURRENCY) || 4);
+}
+
+hubOptions(program.command("start-hub").description("Start the Hub: API/WebSocket server, dashboard and Architect"))
   .action(startHubCommand);
 
 /**
@@ -121,6 +130,22 @@ function workerOptions(cmd: Command): Command {
 }
 
 workerOptions(program.command("start-worker").description("Start a Worker node: scan hardware and connect to the Hub")).action(startWorkerCommand);
+
+const hubServiceCmd = program
+  .command("hub-service")
+  .description("Run this machine's Hub as a systemd user service (starts at boot, restarts on failure)");
+hubOptions(hubServiceCmd.command("install").description("Install and start the Hub service with these start-hub options")).action(
+  installHubServiceCommand,
+);
+hubServiceCmd.command("uninstall").description("Stop and remove the Hub service").action(uninstallHubServiceCommand);
+hubServiceCmd.command("status").description("Show whether the Hub service is running").action(statusHubServiceCommand);
+hubServiceCmd.command("restart").description("Restart the Hub service (after rebuilding or updating aso)").action(restartHubServiceCommand);
+hubServiceCmd
+  .command("logs")
+  .description("Show the Hub service's log")
+  .option("-f, --follow", "keep printing new lines", false)
+  .option("-n, --lines <n>", "lines to show", "100")
+  .action(logsHubServiceCommand);
 
 const serviceCmd = program.command("service").description("Run this machine's worker as a systemd user service (starts at boot, restarts on failure)");
 workerOptions(serviceCmd.command("install").description("Install and start the worker service with these start-worker options")).action(installServiceCommand);
