@@ -21,6 +21,7 @@ import { syncCommand } from "./commands/sync.js";
 import { layout } from "./layout.js";
 import { approvePlanCommand, planCommand, rejectPlanCommand, replyPlanCommand } from "./commands/plan.js";
 import { startHubCommand } from "./commands/start-hub.js";
+import { installServiceCommand, logsServiceCommand, statusServiceCommand, uninstallServiceCommand } from "./commands/service.js";
 import { startWorkerCommand } from "./commands/start-worker.js";
 import { updateCommand } from "./commands/update.js";
 
@@ -101,23 +102,39 @@ program
   .option("--llm-concurrency <n>", "concurrent model requests", parsePort, Number(process.env.ASO_LLM_CONCURRENCY) || 2)
   .action(startHubCommand);
 
-program
-  .command("start-worker")
-  .description("Start a Worker node: scan hardware and connect to the Hub")
-  .requiredOption("--hub <ip_address>", "Hub address (IP, host:port, or ws:// URL)")
-  .option("-p, --port <port>", "Hub port if not given in --hub", parsePort, DEFAULT_HUB_PORT)
-  .option("-r, --roles <roles>", `roles to accept (default: ${WORKER_ROLES.join(",")})`, parseRoles)
-  .option("-w, --work-dir <path>", "directory for task checkouts (default: ~/.aso/work)")
-  .option("--token <token>", "ASO token from the Hub (default: ASO_TOKEN or the local token file)")
-  .option(
-    "--sandbox <mode>",
-    "where job commands run: docker (a container per command that sees only the checkout) or none (directly on this machine)",
-    parseSandbox,
-    "docker",
-  )
-  .option("--sandbox-image <image>", "Docker image for job commands (default: built on first start)")
-  .option("--sandbox-network <name>", "docker network for job commands (default: bridge; `none` blocks network access)")
-  .action(startWorkerCommand);
+/**
+ * Options shared by `start-worker` and `service install` (the service runs start-worker with
+ * them). A new option here also needs `WorkerServiceOptions` and `workerArgs` in service.ts.
+ */
+function workerOptions(cmd: Command): Command {
+  return cmd
+    .requiredOption("--hub <ip_address>", "Hub address (IP, host:port, or ws:// URL)")
+    .option("-p, --port <port>", "Hub port if not given in --hub", parsePort, DEFAULT_HUB_PORT)
+    .option("-r, --roles <roles>", `roles to accept (default: ${WORKER_ROLES.join(",")})`, parseRoles)
+    .option("-w, --work-dir <path>", "directory for task checkouts (default: ~/.aso/work)")
+    .option("--token <token>", "ASO token from the Hub (default: ASO_TOKEN or the local token file)")
+    .option(
+      "--sandbox <mode>",
+      "where job commands run: docker (a container per command that sees only the checkout) or none (directly on this machine)",
+      parseSandbox,
+      "docker",
+    )
+    .option("--sandbox-image <image>", "Docker image for job commands (default: built on first start)")
+    .option("--sandbox-network <name>", "docker network for job commands (default: bridge; `none` blocks network access)");
+}
+
+workerOptions(program.command("start-worker").description("Start a Worker node: scan hardware and connect to the Hub")).action(startWorkerCommand);
+
+const serviceCmd = program.command("service").description("Run this machine's worker as a systemd user service (starts at boot, restarts on failure)");
+workerOptions(serviceCmd.command("install").description("Install and start the worker service with these start-worker options")).action(installServiceCommand);
+serviceCmd.command("uninstall").description("Stop and remove the worker service").action(uninstallServiceCommand);
+serviceCmd.command("status").description("Show whether the worker service is running").action(statusServiceCommand);
+serviceCmd
+  .command("logs")
+  .description("Show the worker service's log")
+  .option("-f, --follow", "keep printing new lines", false)
+  .option("-n, --lines <n>", "lines to show", "100")
+  .action(logsServiceCommand);
 
 program
   .command("plan")
