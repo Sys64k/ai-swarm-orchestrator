@@ -7,6 +7,7 @@ import {
   NODE_TO_HUB_TYPES,
   createMessage,
   parseAgentMessage,
+  hubHttpBase,
   resolveHubUrl,
   taskBranchName,
 } from "@aso/shared";
@@ -191,5 +192,12 @@ describe("resolveHubUrl", () => {
     assert.equal(resolveHubUrl("hub.lan:9000").href, "ws://hub.lan:9000/ws");
     assert.equal(resolveHubUrl("wss://hub.lan/custom").href, "wss://hub.lan:7420/custom");
     assert.throws(() => resolveHubUrl("  "));
+  });
+
+  it("gives the Hub's HTTP base URL for an address", () => {
+    assert.equal(hubHttpBase("192.168.101.127"), "http://192.168.101.127:7420");
+    assert.equal(hubHttpBase("hub.example:8000"), "http://hub.example:8000");
+    assert.equal(hubHttpBase("10.0.0.2", 7500), "http://10.0.0.2:7500");
+    assert.equal(hubHttpBase("wss://hub.example"), "https://hub.example:7420");
   });
 });

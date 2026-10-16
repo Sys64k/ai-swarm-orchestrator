@@ -1,9 +1,8 @@
-import { authorizationHeader, resolveHubUrl, resolveToken } from "@aso/shared";
+import { authorizationHeader, hubHttpBase, resolveToken } from "@aso/shared";
 
 /** Show push status; POST retries (useful after resolving a conflict in the Hub checkout). */
 export async function syncCommand(opts: { hub: string; project?: string }): Promise<void> {
-  const url = resolveHubUrl(opts.hub);
-  const base = `${url.protocol === "wss:" ? "https" : "http"}://${url.host}`;
+  const base = hubHttpBase(opts.hub);
   const token = resolveToken()?.token;
   const query = opts.project ? `?project=${encodeURIComponent(opts.project)}` : "";
   const res = await fetch(`${base}/api/sync${query}`, {

@@ -135,7 +135,7 @@ flowchart LR
 | `@aso/hub` | `dependencies.ts` | `DependencyManager` (ownership, allowlist, limits, dedup) and `npmInstaller` |
 | | `push/notifier.ts`, `push/web-push.ts` | `Notifier` (subscriptions, `notableChanges`) and Web Push delivery (RFC 8291 encryption, VAPID) with `node:crypto` |
 | | `server.ts` | HTTP API, WebSocket validation pipeline, Git route, liveness and reclaim sweep |
-| | `registry.ts` | `NodeRegistry`: connected nodes, heartbeats, the jobs each runs (up to its slots), drain/restart |
+| | `registry.ts` | `NodeRegistry`: connected nodes, heartbeats, the jobs each runs (up to its slots), drain/restart, automatic updates |
 | | `routing.ts` | `selectNode()`: a pure, deterministic routing function |
 | | `tasks.ts` | `TaskManager`: queue, dispatch, verification, QA, rework, merge, node-loss handling |
 | | `git/http-backend.ts` | Git smart-HTTP via a `git http-backend` CGI bridge, with the push policy |
@@ -197,7 +197,8 @@ keys are rejected.
 | `PROMPT_RESULT` | hub → node | 5 | The model's visible text and tool calls for that turn, plus usage/cost; or an error marked retryable or not |
 | `PLAN_REQUEST` | hub → architect | 6 | Plan this requirement (`planId`, `requirement`); carries the `project` |
 | `PLAN_RESULT` | architect → hub | 6 | `proposed` (summary + planned tasks with plan-local keys and `dependsOn`) or `failed` |
-| `NODE_CONTROL` | hub → worker | 1 | `restart`: exit so systemd starts the worker again. Sent only to workers that registered with `supervisor: "systemd"` (their pid is the unit's `SYSTEMD_EXEC_PID`), and only once idle |
+| `NODE_CONTROL` | hub → worker | 1 | `restart`: exit so systemd starts the worker again. `update` (with `version`): install the package the Hub serves, then exit the same way. Sent only to workers that registered with `supervisor: "systemd"` (their pid is the unit's `SYSTEMD_EXEC_PID`), `update` only to those that also registered `updates: "package"`, and only once idle |
+| `UPDATE_FAILED` | worker → hub | 1 | The update could not be installed (`version`, `reason`); the worker carries on with its build |
 | `PROTOCOL_ERROR` | hub → node | 1 | Why a message was rejected, with the offending message id |
 
 ### Validation pipeline (Hub)
@@ -480,6 +481,17 @@ stateDiagram-v2
   connection, so a worker that reconnects comes back undrained. `nodeActions` in
   `registry.ts` is the one place these rules live: the API refuses what it disallows (409 with
   its `why`), and `/api/nodes` sends it as `actions`, which the console turns into buttons.
+- **Automatic updates.** When a worker registers on another build than the package the Hub
+  serves (after the jobs it still runs are handed back), `requestUpdate` treats it like a
+  restart with `updateTo` set: drained, then `NODE_CONTROL update` once idle. Only workers that
+  registered `updates: "package"` and a `supervisor` qualify: the CLI sets `onUpdate` for a
+  package install run by systemd, which calls the same `installHubPackage` as `aso update`
+  (download, SHA-256 check, `npm install --global`, run asynchronously so heartbeats go on)
+  and then exits. A failed install sends `UPDATE_FAILED` and the worker keeps running; the Hub
+  undrains it. Attempts are kept per hostname and build, since a worker comes back under a new
+  node id: after a reported failure, or after `MAX_UPDATE_ATTEMPTS` (2) updates that brought it
+  back on its old build, the Hub stops asking and shows `updateError`. A registration on the
+  Hub's build clears the record. `ASO_AUTO_UPDATE=0` turns it off.
 - **Retry.** `POST /api/tasks/:id/retry` requeues a `failed` or `cancelled` task with fresh
   limits: rework rounds, node drops, QA attempts and budget. The budget counts from the retry
   (`budgetBaseUsd`), while `llm.costUsd` keeps the total. The branch keeps the previous

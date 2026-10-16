@@ -49,7 +49,7 @@ export function WorkerPage({ id }: { id: string }) {
             ))}
           </div>
           <p className="muted small">{w.detail}</p>
-          {w.outdated && <Banner tone="waiting">This worker runs an older aso than the Hub: run aso update on it.</Banner>}
+          {w.updateNote && <Banner tone="waiting">{w.updateNote}</Banner>}
           <div className="actions">
             {w.actions.restart && (
               <ActionButton label="Restart" confirm={w.actions.restartConfirm} run={act("restart")} />

@@ -20,6 +20,12 @@ export function resolveHubUrl(input: string, defaultPort = DEFAULT_HUB_PORT): UR
   return url;
 }
 
+/** The Hub's HTTP base URL (`http://host:port`, `https` for `wss`) for an address as `--hub` takes it. */
+export function hubHttpBase(input: string, defaultPort = DEFAULT_HUB_PORT): string {
+  const url = resolveHubUrl(input, defaultPort);
+  return `${url.protocol === "wss:" ? "https" : "http"}://${url.host}`;
+}
+
 /** Path of a project's repository on the Hub's Git endpoint. */
 export function gitRepoPath(project: string): string {
   return `${GIT_PATH}/${project}.git`;

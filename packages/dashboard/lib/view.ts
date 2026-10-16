@@ -152,6 +152,8 @@ export interface WorkerView {
   taskIds: string[];
   detail: string;
   outdated: boolean;
+  /** About its aso build, when it is not the Hub's: an update under way, or what to do. */
+  updateNote?: string;
   status: { label: string; tone: Tone };
   actions: WorkerActions;
 }
@@ -185,6 +187,7 @@ export function workerView(n: HubNode): WorkerView {
     taskIds,
     detail: [size, slots > 1 ? `${slots} job slots` : undefined, cpu, build].filter(Boolean).join(" · "),
     outdated: n.outdated === true,
+    updateNote: updateNote(n, taskIds.length),
     status: workerStatus(n, taskIds.length, slots),
     actions: workerActions(n, name, taskIds.length),
   };
@@ -196,9 +199,12 @@ function runningTasks(n: HubNode): string[] {
 
 const jobs = (n: number) => (n === 1 ? "job" : "jobs");
 
+/** Whether the worker's pending or running restart is an automatic update. */
+const updating = (n: HubNode) => !!n.updateTo;
+
 function workerStatus(n: HubNode, running: number, slots: number): { label: string; tone: Tone } {
-  if (n.restart === "sent") return { label: "Restarting", tone: "active" };
-  if (n.restart === "pending") return { label: `Restart after ${jobs(running)}`, tone: "waiting" };
+  if (n.restart === "sent") return { label: updating(n) ? "Updating" : "Restarting", tone: "active" };
+  if (n.restart === "pending") return { label: `${updating(n) ? "Update" : "Restart"} after ${jobs(running)}`, tone: "waiting" };
   if (running > 0) {
     const busy = running < slots ? `${running} of ${slots} jobs` : "Busy";
     return { label: n.draining ? `${busy}, draining` : busy, tone: "active" };
@@ -208,9 +214,29 @@ function workerStatus(n: HubNode, running: number, slots: number): { label: stri
   return { label: "Idle", tone: "muted" };
 }
 
+const CANNOT_UPDATE =
+  "This worker runs another aso build than the Hub and cannot update itself (a source checkout, or not run by aso service install): run aso update on it.";
+
+function updateNote(n: HubNode, running: number): string | undefined {
+  if (n.updateTo && n.restart === "sent") return `Installing build ${buildOf(n.updateTo)} from the Hub, then restarting.`;
+  if (n.updateTo && n.restart === "pending") {
+    const when = running === 0 ? "now" : `once ${currentJobs(running)} ${running === 1 ? "is" : "are"} done, and takes no new jobs meanwhile`;
+    return `Updates itself to build ${buildOf(n.updateTo)} from the Hub ${when}.`;
+  }
+  if (!n.outdated) return undefined;
+  if (n.updateError) return `The automatic update to build ${buildOf(n.updateError.version)} failed: ${n.updateError.reason}. Run aso update on it.`;
+  if (n.updates !== "package") return CANNOT_UPDATE;
+  return "This worker runs another aso build than the Hub: run aso update on it.";
+}
+
+/** "its current job" / "its 2 current jobs", for `running` > 0. */
+function currentJobs(running: number): string {
+  return running === 1 ? "its current job" : `its ${running} current jobs`;
+}
+
 function restartWhen(running: number): string {
   if (running === 0) return "It restarts now.";
-  return `It finishes its ${running === 1 ? "" : `${running} `}current ${jobs(running)} first and takes no new ones meanwhile.`;
+  return `It finishes ${currentJobs(running)} first and takes no new ones meanwhile.`;
 }
 
 function workerActions(n: HubNode, name: string, running: number): WorkerActions {
@@ -219,7 +245,7 @@ function workerActions(n: HubNode, name: string, running: number): WorkerActions
     drain: allowed?.drain === true,
     resume: allowed?.resume === true,
     restart: allowed?.restart === true,
-    resumeLabel: n.restart === "pending" ? "Cancel restart" : "Resume",
+    resumeLabel: n.restart === "pending" ? (updating(n) ? "Cancel update" : "Cancel restart") : "Resume",
     restartConfirm: `Restart ${name}? ${restartWhen(running)}`,
     restartNote: allowed?.why.restart,
   };

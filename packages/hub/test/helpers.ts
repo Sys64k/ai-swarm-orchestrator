@@ -157,6 +157,9 @@ export async function worker(
     mbps?: number;
     resume?: { taskId: string; job: "implement" | "test" };
     supervisor?: "systemd";
+    updates?: "package";
+    version?: string;
+    hostname?: string;
     slots?: number;
     running?: Array<{ taskId: string; job: "implement" | "test" }>;
   } = {},
@@ -165,10 +168,11 @@ export async function worker(
   c.send(
     createMessage("NODE_REGISTRATION", nodeId, {
       nodeKind: "worker",
-      version: "test",
-      hardware: hardware(opts),
+      version: opts.version ?? "test",
+      hardware: { ...hardware(opts), hostname: opts.hostname ?? "test" },
       resume: opts.resume,
       supervisor: opts.supervisor,
+      updates: opts.updates,
       slots: opts.slots,
       running: opts.running,
     }),

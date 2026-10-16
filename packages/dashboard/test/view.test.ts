@@ -248,6 +248,27 @@ describe("formatting", () => {
     const oldHub = view({}).actions;
     assert.deepEqual([oldHub.drain, oldHub.resume, oldHub.restart, oldHub.restartNote], [false, false, false, undefined], "a Hub without actions gets no buttons");
   });
+
+  it("explains a worker's update: under way, waiting for jobs, failed, or by hand", () => {
+    const base: HubNode = { nodeId: "w", nodeKind: "worker", heartbeat: null, currentTaskId: null, lastSeenAt: "", version: "0.1.0+old", outdated: true };
+    const view = (n: Partial<HubNode>) => workerView({ ...base, ...n });
+    const updating = { updates: "package" as const, updateTo: "0.1.0+f262197", draining: true };
+
+    const sent = view({ ...updating, restart: "sent" });
+    assert.deepEqual([sent.status.label, sent.updateNote], ["Updating", "Installing build f262197 from the Hub, then restarting."]);
+    const waiting = view({ ...updating, restart: "pending", currentTaskIds: ["a", "b"], currentTaskId: "a", slots: 4 });
+    assert.equal(waiting.status.label, "Update after jobs");
+    assert.equal(waiting.updateNote, "Updates itself to build f262197 from the Hub once its 2 current jobs are done, and takes no new jobs meanwhile.");
+    assert.equal(waiting.actions.resumeLabel, "Cancel update");
+    assert.match(view({ ...updating, restart: "pending", currentTaskId: "a" }).updateNote!, /once its current job is done/);
+    assert.match(view({ ...updating, restart: "pending" }).updateNote!, /from the Hub now\.$/);
+
+    const failed = view({ updates: "package", updateError: { version: "0.1.0+f262197", reason: "npm install exited with code 1" } });
+    assert.deepEqual([failed.status.label, failed.updateNote], ["Update", "The automatic update to build f262197 failed: npm install exited with code 1. Run aso update on it."]);
+    assert.match(view({}).updateNote!, /cannot update itself \(a source checkout/);
+    assert.equal(view({ updates: "package" }).updateNote, "This worker runs another aso build than the Hub: run aso update on it.");
+    assert.equal(view({ outdated: false, updateError: { version: "x", reason: "y" } }).updateNote, undefined, "current: nothing to say");
+  });
 });
 
 describe("projects", () => {

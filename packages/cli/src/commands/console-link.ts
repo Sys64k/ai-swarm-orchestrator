@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import os from "node:os";
 import { promisify } from "node:util";
 import QRCode from "qrcode";
-import { authorizationHeader, resolveHubUrl, resolveToken } from "@aso/shared";
+import { authorizationHeader, hubHttpBase, resolveToken } from "@aso/shared";
 
 const exec = promisify(execFile);
 
@@ -50,11 +50,11 @@ export async function consoleLinkCommand(opts: { hub: string; url?: string; dash
     lanConsoleUrl(os.networkInterfaces(), opts.dashboardPort) ??
     `http://localhost:${opts.dashboardPort}`;
 
-  const hub = resolveHubUrl(opts.hub);
-  const api = `${hub.protocol === "wss:" ? "https" : "http"}://${hub.host}/api/sign-in-codes`;
+  const hub = hubHttpBase(opts.hub);
+  const api = `${hub}/api/sign-in-codes`;
   const token = resolveToken()?.token;
   const res = await fetch(api, { method: "POST", headers: token ? { authorization: authorizationHeader(token) } : {} }).catch(() => {
-    throw new Error(`cannot reach the Hub at ${hub.host} (is it running? use --hub)`);
+    throw new Error(`cannot reach the Hub at ${hub} (is it running? use --hub)`);
   });
   if (res.status === 401) throw new Error("the Hub rejected the ASO token (run this on the Hub machine, or set ASO_TOKEN)");
   if (!res.ok) throw new Error(`the Hub returned HTTP ${res.status}`);

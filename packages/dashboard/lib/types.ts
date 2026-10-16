@@ -108,6 +108,12 @@ export interface HubNode {
   version?: string;
   /** Runs another build than the Hub serves: `aso update` on that machine. */
   outdated?: boolean;
+  /** "package": updates itself when the Hub asks (a package install run as a service). */
+  updates?: "package";
+  /** Set when the restart in `restart` is an automatic update: the build it installs. */
+  updateTo?: string | null;
+  /** Why the Hub stopped updating this machine to `version` automatically. */
+  updateError?: { version: string; reason: string } | null;
 }
 
 export interface Project {
