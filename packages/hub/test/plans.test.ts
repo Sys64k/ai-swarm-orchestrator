@@ -114,7 +114,7 @@ describe("plans (fake Architect)", () => {
 
       const arch = await fakeArchitect(ctx);
       const req = planRequest(await arch.next());
-      assert.deepEqual(req, { planId, project: "project", requirement: "Build a todo app" });
+      assert.deepEqual(req, { planId, project: "project", requirement: "Build a todo app", round: 0 });
       assert.equal((await api(ctx, `/api/plans/${planId}`)).body.state, "planning");
 
       arch.send(
@@ -171,6 +171,106 @@ describe("plans (fake Architect)", () => {
       assert.equal((await api(ctx, "/api/plans/plan-nope00/approve", { method: "POST" })).status, 404);
       b.ws.close();
       stranger.ws.close();
+    }));
+});
+
+describe("talking with the Architect", () => {
+  it("asks questions, plans with the answers, and revises a proposal on request", () => {
+    const firstPrompt = (req: { messages: Array<{ content: unknown }> }) => String(req.messages[0].content);
+    const model = new ScriptedModel((req) => {
+      const prompt = firstPrompt(req);
+      if (!prompt.includes("# Conversation so far")) {
+        return reply([toolUse("q1", "ask_questions", { questions: ["Which database?", "Who can see notes?"], context: "The project is empty." })]);
+      }
+      if (!prompt.includes("## You proposed")) {
+        return reply([toolUse("p1", "submit_plan", { summary: "One task with SQLite", tasks: [planned("notes", { title: "Notes on SQLite" })] })]);
+      }
+      return reply([
+        toolUse("p2", "submit_plan", {
+          summary: "Split: storage, then API",
+          tasks: [planned("storage", { title: "SQLite storage" }), planned("api", { title: "Notes API", dependsOn: ["storage"] })],
+        }),
+      ]);
+    });
+    return withHub(
+      async (ctx) => {
+        const dir = tempDir("aso-arch-");
+        const architect = startArchitect({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "arch", workDir: dir });
+        const state = (planId: string, s: string) => waitFor(() => ctx.hub.plans.get(planId)?.state === s && ctx.hub.plans.get(planId)!, 15_000, s);
+        const replyTo = (planId: string, message: unknown) => api(ctx, `/api/plans/${planId}/reply`, { method: "POST", body: JSON.stringify({ message }) });
+        try {
+          const planId = (await api(ctx, "/api/plans", { method: "POST", body: JSON.stringify({ requirement: "Add notes" }) })).body.planId;
+
+          // Round 1: questions instead of a guess.
+          const asked = await state(planId, "awaiting_input");
+          assert.deepEqual(asked.questions, ["Which database?", "Who can see notes?"]);
+          assert.equal((await api(ctx, `/api/plans/${planId}/approve`, { method: "POST" })).status, 409, "nothing to approve yet");
+          assert.equal((await replyTo(planId, "  ")).status, 400);
+
+          const answered = await replyTo(planId, "SQLite. Only the author.");
+          assert.equal(answered.status, 200);
+          assert.ok(["pending", "planning"].includes(answered.body.state));
+
+          // Round 2: the answers reach the Architect; it proposes.
+          const proposed = await state(planId, "proposed").catch((e) => assert.fail(`${e.message}\n${ctx.hub.plans.get(planId)!.history.map((h) => h.event).join("\n")}`));
+          assert.equal(proposed.summary, "One task with SQLite");
+          const round2 = firstPrompt(model.requests.find((r) => firstPrompt(r).includes("# Conversation so far"))!);
+          assert.match(round2, /## You asked\nThe project is empty\.\n\n1\. Which database\?\n2\. Who can see notes\?/);
+          assert.match(round2, /## The human replied\nSQLite\. Only the author\./);
+          assert.match(round2, /Plan with these answers/);
+
+          // Round 3: asking for changes revises the proposal.
+          assert.equal((await replyTo(planId, "Split storage and API")).status, 200);
+          const revised = await waitFor(() => ctx.hub.plans.get(planId)?.summary === "Split: storage, then API" && ctx.hub.plans.get(planId)!, 15_000, "revised");
+          assert.equal(revised.state, "proposed");
+          const round3 = firstPrompt(model.requests.at(-1)!);
+          assert.match(round3, /## You proposed\nOne task with SQLite\n\n- notes \[backend, feature\]: Notes on SQLite/);
+          assert.match(round3, /## The human replied\nSplit storage and API\n\nRevise your proposed plan/);
+          assert.deepEqual(revised.dialogue!.map((d) => d.kind), ["questions", "reply", "proposal", "reply"]);
+          assert.ok(revised.budgetBaseUsd! > 0, "each round gets its own budget");
+
+          const ids = (await api(ctx, `/api/plans/${planId}/approve`, { method: "POST" })).body.taskIds;
+          assert.deepEqual(Object.keys(ids).sort(), ["api", "storage"]);
+          assert.equal((await replyTo(planId, "more")).status, 409, "approved plans are final");
+        } finally {
+          architect.stop();
+          await architect.idle();
+          rmSync(dir, { recursive: true, force: true });
+        }
+      },
+      { llm: { adapter: model } },
+    );
+  });
+
+  it("limits replies, refuses them while planning, and lets a plan with questions be rejected", () =>
+    withHub(async (ctx) => {
+      const arch = await fakeArchitect(ctx);
+      const planId = (await api(ctx, "/api/plans", { method: "POST", body: JSON.stringify({ requirement: "x" }) })).body.planId;
+      let round = 0;
+      const ask = async () => {
+        assert.equal(planRequest(await arch.next()).round, round++, "each reply is a new round");
+        arch.send(createMessage("PLAN_RESULT", "arch", { planId, outcome: "questions", questions: ["Why?"] }));
+        await waitFor(() => ctx.hub.plans.get(planId)?.state === "awaiting_input");
+      };
+      await ask();
+      assert.equal((await api(ctx, `/api/plans/${planId}/reply`, { method: "POST", body: JSON.stringify({ message: "x".repeat(10_001) }) })).status, 400);
+      for (let i = 0; i < 10; i++) {
+        assert.equal((await api(ctx, `/api/plans/${planId}/reply`, { method: "POST", body: JSON.stringify({ message: `answer ${i}` }) })).status, 200);
+        await ask();
+      }
+      const limit = await api(ctx, `/api/plans/${planId}/reply`, { method: "POST", body: JSON.stringify({ message: "one more" }) });
+      assert.equal(limit.status, 409);
+      assert.match(limit.body.error, /already has 10 replies/);
+
+      assert.throws(() => createMessage("PLAN_RESULT", "arch", { planId, outcome: "questions", questions: ["1", "2", "3", "4", "5", "6"] }), /<=5 items/);
+
+      // No replies while the plan waits for (or is with) the Architect.
+      const queued = (await api(ctx, "/api/plans", { method: "POST", body: JSON.stringify({ requirement: "y" }) })).body.planId;
+      planRequest(await arch.next());
+      assert.equal((await api(ctx, `/api/plans/${queued}/reply`, { method: "POST", body: JSON.stringify({ message: "hi" }) })).status, 409);
+
+      assert.equal((await api(ctx, `/api/plans/${planId}/reject`, { method: "POST" })).body.state, "rejected");
+      arch.ws.close();
     }));
 });
 
@@ -232,7 +332,7 @@ describe("Architect → plan → workers (real nodes, scripted model)", () => {
           assert.equal(plan.llm.calls, 3);
           assert.deepEqual(plan.agentLog.map((t) => t.actions.join(", ")), ["list_files, write_file x.md", "submit_plan", "submit_plan"]);
           assert.match(model.requests[0].system, /You are the Architect/);
-          assert.deepEqual(model.requests[0].tools.map((t) => t.name), ["list_files", "read_file", "search", "submit_plan"]);
+          assert.deepEqual(model.requests[0].tools.map((t) => t.name), ["list_files", "read_file", "search", "submit_plan", "ask_questions"]);
 
           const ids = (await api(ctx, `/api/plans/${planId}/approve`, { method: "POST" })).body.taskIds;
           await waitFor(() => ctx.hub.tasks.get(ids.tests)?.state === "merged", 20_000, "both tasks merged");

@@ -172,6 +172,7 @@ export class ProjectSet {
     list: (): PlanRecord[] => this.list().flatMap((p) => p.plans.list()),
     get: (planId: string): PlanRecord | undefined => this.planOwner(planId)?.plans.get(planId),
     isPlanning: (nodeId: string, planId: string): boolean => !!this.planOwner(planId)?.plans.isPlanning(nodeId, planId),
+    spentSinceReply: (planId: string): number => this.planOwner(planId)?.plans.spentSinceReply(planId) ?? 0,
     recordLlmUsage: (planId: string, usage: LlmUsage): void => this.planOwner(planId)?.plans.recordLlmUsage(planId, usage),
     recordAgentTurn: (planId: string, turn: Omit<AgentTurn, "at">): void => this.planOwner(planId)?.plans.recordAgentTurn(planId, turn),
     recordEvent: (planId: string, event: string): void => this.planOwner(planId)?.plans.recordEvent(planId, event),

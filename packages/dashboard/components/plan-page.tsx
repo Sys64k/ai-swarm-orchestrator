@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { useState } from "react";
 import { hubAction, usePoll } from "./use-poll.ts";
+import { PlanThread, ReplyBox } from "./plan-thread.tsx";
 import { Terminal } from "./terminal.tsx";
 import { ActionButton, Badge, Banner, LoadingPage, Section, TopBar } from "./ui.tsx";
 import type { Plan, Task } from "../lib/types.ts";
-import { firstLine, formatUsd, planBadge, planProgress, taskBadge } from "../lib/view.ts";
+import { firstLine, formatUsd, planBadge, planProgress, planThread, replyMode, taskBadge } from "../lib/view.ts";
 
 export function PlanPage({ id }: { id: string }) {
   const { data: plan, error, refresh } = usePoll<Plan>(`plans/${id}`);
@@ -21,6 +22,12 @@ export function PlanPage({ id }: { id: string }) {
     tasks.refresh();
     return err;
   };
+  const reply = async (message: string) => {
+    const err = await hubAction(`plans/${id}/reply`, { message });
+    refresh();
+    return err;
+  };
+  const mode = replyMode(plan);
   const progress = planProgress(plan, tasks.data ?? []);
   const taskFor = (key: string) => {
     const taskId = plan.taskIds?.[key];
@@ -43,12 +50,19 @@ export function PlanPage({ id }: { id: string }) {
           {plan.error && <Banner tone="bad">{plan.error}</Banner>}
         </div>
 
-        <Section title="Requirement">
-          <p className="prose">{plan.requirement}</p>
+        <Section title="Conversation">
+          <PlanThread items={planThread(plan)} />
+          {mode === "answer" && <ReplyBox mode="answer" send={reply} />}
         </Section>
 
         {plan.state === "pending" && <p className="muted">Waiting for the Architect to pick this up.</p>}
         {plan.state === "planning" && <p className="muted">The Architect is exploring the project and writing the plan.</p>}
+        {plan.state === "awaiting_input" && (
+          <div className="stack">
+            <p className="muted small">Answer what you can. The Architect plans with your answers, and may ask again if something important is still open.</p>
+            <ActionButton label="Reject the plan" variant="plain" confirm="Reject this plan?" run={decide("reject")} />
+          </div>
+        )}
 
         {plan.summary && (
           <Section title="Approach">
@@ -100,6 +114,12 @@ export function PlanPage({ id }: { id: string }) {
                 );
               })}
             </ol>
+          </Section>
+        )}
+
+        {mode === "changes" && (
+          <Section title="Not quite right?">
+            <ReplyBox mode="changes" send={reply} />
           </Section>
         )}
 

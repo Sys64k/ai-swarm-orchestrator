@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   MAX_PACKAGES_PER_REQUEST,
   NpmPackageNameSchema,
+  PLAN_QUESTIONS_MAX,
   PlannedTaskSchema,
   RepoPathSchema,
   ScriptCommandSchema,
@@ -117,6 +118,15 @@ export const AGENT_TOOLS = {
     input: z.strictObject({
       summary: z.string().min(1).max(10_000).describe("The approach, key design decisions and how the tasks fit together"),
       tasks: z.array(PlannedTaskSchema).min(1).max(25),
+    }),
+  },
+  ask_questions: {
+    description:
+      "Architect only. Ask the human questions before planning, when the answers would change the plan substantially " +
+      "(scope, behaviour, data, which of several reasonable approaches). Planning stops here; it continues with their answers.",
+    input: z.strictObject({
+      questions: z.array(z.string().min(1).max(1000)).min(1).max(PLAN_QUESTIONS_MAX).describe("Short, specific questions, one per item"),
+      context: z.string().max(2000).optional().describe("What you found so far, so the questions make sense"),
     }),
   },
 } as const;

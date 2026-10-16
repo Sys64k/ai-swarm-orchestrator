@@ -409,20 +409,31 @@ const PromptResultPayload = z.discriminatedUnion("outcome", [
   }),
 ]);
 
+/** Questions the Architect may ask in one round. */
+export const PLAN_QUESTIONS_MAX = 5;
+
 /** Hub → Architect: turn a requirement into a plan. */
 const PlanRequestPayload = z.strictObject({
   planId: PlanIdSchema,
   project: ProjectIdSchema,
   requirement: z.string().min(1).max(50_000),
+  /** Planning round: 0, then one more after each reply from the person. */
+  round: z.number().int().min(0).optional(),
 });
 
-/** Architect → Hub: the proposed tasks, or why planning failed. */
+/** Architect → Hub: the proposed tasks, questions for the human, or why planning failed. */
 const PlanResultPayload = z.discriminatedUnion("outcome", [
   z.strictObject({
     planId: PlanIdSchema,
     outcome: z.literal("proposed"),
     summary: z.string().min(1).max(10_000),
     tasks: z.array(PlannedTaskSchema).min(1).max(25),
+  }),
+  z.strictObject({
+    planId: PlanIdSchema,
+    outcome: z.literal("questions"),
+    questions: z.array(z.string().min(1).max(1000)).min(1).max(PLAN_QUESTIONS_MAX),
+    context: z.string().max(2000).optional(),
   }),
   z.strictObject({ planId: PlanIdSchema, outcome: z.literal("failed"), error: z.string().min(1).max(5000) }),
 ]);

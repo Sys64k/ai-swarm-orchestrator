@@ -12,7 +12,13 @@ export type TaskState =
   | "failed"
   | "cancelled";
 
-export type PlanState = "pending" | "planning" | "proposed" | "approved" | "rejected" | "failed";
+export type PlanState = "pending" | "planning" | "awaiting_input" | "proposed" | "approved" | "rejected" | "failed";
+
+/** The back-and-forth between the Architect and the person, oldest first (mirrors the Hub). */
+export type PlanDialogueEntry =
+  | { kind: "questions"; at: string; questions: string[]; context?: string }
+  | { kind: "proposal"; at: string; summary: string; tasks: PlannedTask[] }
+  | { kind: "reply"; at: string; text: string };
 
 export interface HistoryEntry {
   at: string;
@@ -67,6 +73,9 @@ export interface Plan {
   summary?: string;
   tasks?: PlannedTask[];
   taskIds?: Record<string, string>;
+  /** Open questions while `awaiting_input`. */
+  questions?: string[];
+  dialogue?: PlanDialogueEntry[];
   error?: string;
   llm: { calls: number; costUsd: number };
   createdAt: string;
@@ -93,6 +102,8 @@ export interface Project {
   dir: string;
   tasks: { total: number; running: number; queued: number; failed: number; merged: number };
   plansAwaitingApproval: number;
+  /** Plans whose Architect is waiting for answers (absent from Hubs before plan conversations). */
+  plansWithQuestions?: number;
 }
 
 export interface Health {

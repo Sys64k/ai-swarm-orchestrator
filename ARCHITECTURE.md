@@ -516,9 +516,9 @@ sequenceDiagram
 ```
 
 - **What notifies.** `ProjectSet` calls back on every task or plan change. `notableChanges()`
-  (pure, `hub/src/push/notifier.ts`) compares each record's state with the last one seen and
+  (pure, `hub/src/push/changes.ts`) compares each record's state with the last one seen and
   picks the transitions worth interrupting someone for:
-  - a plan becomes `proposed`
+  - a plan becomes `proposed`, or `awaiting_input` (the Architect has questions)
   - a plan or task becomes `failed`
   - a task becomes `merged`, either as the last task of its plan ("plan done") or as a task
     that isn't part of any plan
@@ -1003,9 +1003,19 @@ sequenceDiagram
     A->>A: run read-only tools, validate submit_plan with orderPlan
     Note over A: invalid plan (cycle, unknown key) goes back to the model as a tool error
   end
+  alt the requirement leaves something important open
+    A->>H: PLAN_RESULT questions {questions}
+    H->>H: state awaiting_input (notifies your phone)
+    U->>H: POST /api/plans/:id/reply {answers}
+    H->>A: PLAN_REQUEST {planId, round + 1}; the prompt now holds the conversation
+  end
   A->>H: PLAN_RESULT proposed {summary, tasks}
   H->>H: validate again → state proposed
-  U->>H: GET /api/plans/:id (aso plan shows it)
+  U->>H: GET /api/plans/:id (console or aso plan shows it)
+  opt you ask for changes
+    U->>H: POST /api/plans/:id/reply {changes}
+    H->>A: PLAN_REQUEST {round + 1}: the Architect revises its proposal
+  end
   U->>H: POST /api/plans/:id/approve
   H->>T: submit tasks in dependency order (keys → task ids)
   T->>T: dispatch tasks whose dependencies are merged
@@ -1017,6 +1027,21 @@ sequenceDiagram
   Architect disconnects mid-plan, the plan returns to the queue. An Architect that reconnects
   and receives a plan it already answered re-sends its stored answer instead of planning
   again.
+- **Talking with the Architect.** The Architect has an `ask_questions` tool next to
+  `submit_plan`. When the answers would change the plan, it asks (at most five per round)
+  instead of guessing; small details it decides itself and states in the summary. Your
+  answers and change requests are replies (`POST /api/plans/:id/reply`), at most 10 per plan.
+  - **Each reply is a new planning round.** It is a fresh Architect run, not a resumed model
+    conversation: `planPrompt()` puts the requirement plus the whole dialogue (questions,
+    answers, superseded proposals, change requests) in the first message.
+  - **Why fresh runs.** Live conversations are bound to one Architect node, and are dropped
+    when idle or when their plan stops planning. Someone may answer hours later, after a Hub
+    restart, to a different Architect. A fresh run only costs re-reading the project.
+  - **Budget per round.** Each round gets the full planning budget (`budgetBaseUsd` resets on
+    reply).
+  - **Cached answers carry the round.** `PLAN_REQUEST` carries `round`, so an Architect's
+    cache of answered plans (for requeued duplicates after a reconnect) is keyed by plan and
+    round.
 - **Plan-local keys.** Proposed tasks use keys (`api`, `login-page`), and `dependsOn` refers
   to keys. Approval submits tasks in dependency order and maps keys to the generated task ids.
 - **Linking.** Each created task records its `planId`.

@@ -1,7 +1,12 @@
 import { randomBytes } from "node:crypto";
 import {
+  countReplies,
   createLogger,
+  MAX_PLAN_REPLIES,
+  MAX_PLAN_REPLY_LENGTH,
   orderPlan,
+  replyMode,
+  type PlanDialogueEntry,
   type LlmUsage,
   type MessageOf,
   type PlannedTask,
@@ -14,10 +19,18 @@ const log = createLogger("plans");
 
 /**
  * pending → planning → proposed → approved (tasks created)
- *                              ↘ rejected
+ *                   ↘          ↘ rejected
+ *                    awaiting_input (the Architect asked questions)
+ * A reply to questions or to a proposal (asking for changes) → pending: the Architect plans
+ * again with the whole conversation.
  * planning → failed (Architect error) · planning → pending (Architect lost)
  */
-export type PlanState = "pending" | "planning" | "proposed" | "approved" | "rejected" | "failed";
+export type PlanState = "pending" | "planning" | "awaiting_input" | "proposed" | "approved" | "rejected" | "failed";
+
+/** 0 for the first planning run, then one more per reply. */
+export function planRound(plan: Pick<PlanRecord, "dialogue">): number {
+  return countReplies(plan.dialogue);
+}
 
 export interface PlanRecord {
   planId: string;
@@ -30,6 +43,11 @@ export interface PlanRecord {
   tasks?: PlannedTask[];
   /** Plan key → created task id, once approved. */
   taskIds?: Record<string, string>;
+  /** Open questions while `awaiting_input`. */
+  questions?: string[];
+  dialogue?: PlanDialogueEntry[];
+  /** Spend before the latest reply; each planning round gets the full plan budget. */
+  budgetBaseUsd?: number;
   error?: string;
   llm: { calls: number } & LlmUsage;
   agentLog: AgentTurn[];
@@ -126,7 +144,7 @@ export class PlanManager {
       plan.state = "planning";
       plan.architectNodeId = architect.nodeId;
       this.note(plan, `planning on ${architect.nodeId}`);
-      this.registry.send(architect.nodeId, "PLAN_REQUEST", { planId: plan.planId, project: this.project, requirement: plan.requirement });
+      this.registry.send(architect.nodeId, "PLAN_REQUEST", { planId: plan.planId, project: this.project, requirement: plan.requirement, round: planRound(plan) });
     }
   }
 
@@ -145,6 +163,11 @@ export class PlanManager {
       plan.state = "failed";
       plan.error = result.error;
       this.note(plan, `failed: ${result.error}`);
+    } else if (result.outcome === "questions") {
+      plan.state = "awaiting_input";
+      plan.questions = result.questions;
+      (plan.dialogue ??= []).push({ kind: "questions", at: new Date().toISOString(), questions: result.questions, context: result.context });
+      this.note(plan, `the Architect asked ${result.questions.length} question(s); waiting for your answer`);
     } else {
       const ordered = orderPlan(result.tasks);
       if (typeof ordered === "string") {
@@ -189,10 +212,47 @@ export class PlanManager {
     return plan;
   }
 
+  /**
+   * The person answers the Architect's questions, or asks for changes to a proposed plan. The
+   * plan is planned again, with the whole conversation in the Architect's prompt.
+   */
+  reply(planId: string, message: unknown): PlanRecord {
+    const plan = this.require(planId);
+    if (plan.state !== "awaiting_input" && plan.state !== "proposed") {
+      throw new PlanError(`plan ${planId} is ${plan.state}; you can reply while it has questions or a proposal`, "conflict");
+    }
+    if (!replyMode(plan.state, plan.dialogue)) {
+      throw new PlanError(`plan ${planId} already has ${MAX_PLAN_REPLIES} replies; approve it, or reject it and start a new plan`, "conflict");
+    }
+    if (typeof message !== "string" || !message.trim()) throw new PlanError("message must be a non-empty string", "invalid");
+    if (message.length > MAX_PLAN_REPLY_LENGTH) throw new PlanError(`message is too long (max ${MAX_PLAN_REPLY_LENGTH} characters)`, "invalid");
+    const dialogue = (plan.dialogue ??= []);
+    const at = new Date().toISOString();
+    if (plan.state === "proposed") {
+      dialogue.push({ kind: "proposal", at: plan.updatedAt, summary: plan.summary!, tasks: plan.tasks! });
+      plan.summary = undefined;
+      plan.tasks = undefined;
+    }
+    dialogue.push({ kind: "reply", at, text: message.trim() });
+    const answered = plan.state === "awaiting_input";
+    plan.questions = undefined;
+    plan.state = "pending";
+    plan.budgetBaseUsd = plan.llm.costUsd;
+    this.note(plan, answered ? "you answered; planning again" : "you asked for changes; planning again");
+    this.kick();
+    return plan;
+  }
+
+  /** Spend in the current planning round (the budget applies per round). */
+  spentSinceReply(planId: string): number {
+    const plan = this.plans.get(planId);
+    return plan ? plan.llm.costUsd - (plan.budgetBaseUsd ?? 0) : 0;
+  }
+
   reject(planId: string): PlanRecord {
     const plan = this.require(planId);
-    if (plan.state !== "proposed" && plan.state !== "pending") {
-      throw new PlanError(`plan ${planId} is ${plan.state}; only pending or proposed plans can be rejected`, "conflict");
+    if (plan.state !== "proposed" && plan.state !== "pending" && plan.state !== "awaiting_input") {
+      throw new PlanError(`plan ${planId} is ${plan.state}; only pending, questioning or proposed plans can be rejected`, "conflict");
     }
     plan.state = "rejected";
     this.note(plan, "rejected");

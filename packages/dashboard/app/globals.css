@@ -765,3 +765,64 @@ select.input {
   gap: 10px;
   margin: 4px 0 14px;
 }
+
+/* Plan conversation: the person's messages on the right, the Architect's on the left. */
+.thread {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.bubble {
+  max-width: 88%;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  overflow-wrap: anywhere;
+}
+
+.bubble-you {
+  align-self: flex-end;
+  background: var(--active-bg);
+  border-color: transparent;
+  border-bottom-right-radius: 4px;
+}
+
+.bubble-architect {
+  align-self: flex-start;
+  border-bottom-left-radius: 4px;
+}
+
+.bubble-who {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.bubble .prose,
+.bubble .list {
+  margin: 0;
+}
+
+.bubble .list {
+  padding-left: 1.2em;
+}
+
+.reply-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}

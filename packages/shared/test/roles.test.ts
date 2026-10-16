@@ -35,11 +35,11 @@ describe("role policies", () => {
     assert.equal(writeDenial("frontend", "app/page.tsx"), undefined);
   });
 
-  it("gives the Architect only exploration tools and submit_plan", () => {
-    assert.deepEqual(ROLE_POLICIES.architect.tools, ["list_files", "read_file", "search", "submit_plan"]);
+  it("gives the Architect only exploration tools, submit_plan and ask_questions", () => {
+    assert.deepEqual(ROLE_POLICIES.architect.tools, ["list_files", "read_file", "search", "submit_plan", "ask_questions"]);
     for (const role of ["backend", "frontend", "qa", "devops"] as const) {
       assert.ok(ROLE_POLICIES[role].tools.includes("finish"));
-      assert.ok(!ROLE_POLICIES[role].tools.includes("submit_plan"));
+      assert.ok(!ROLE_POLICIES[role].tools.includes("submit_plan") && !ROLE_POLICIES[role].tools.includes("ask_questions"));
     }
   });
 });

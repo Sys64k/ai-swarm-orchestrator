@@ -1,4 +1,4 @@
-import type { HubNode, Plan, Project, Task, TaskState, TranscriptEntry } from "./types.ts";
+import type { HubNode, Plan, PlannedTask, Project, Task, TaskState, TranscriptEntry } from "./types.ts";
 
 /** Colour family of a state badge. */
 export type Tone = "active" | "waiting" | "good" | "bad" | "muted";
@@ -42,6 +42,8 @@ export function planBadge(plan: Pick<Plan, "state">): { label: string; tone: Ton
       return { label: "Queued", tone: "waiting" };
     case "planning":
       return { label: "Planning", tone: "active" };
+    case "awaiting_input":
+      return { label: "Has questions", tone: "waiting" };
     case "proposed":
       return { label: "Needs approval", tone: "waiting" };
     case "approved":
@@ -90,11 +92,20 @@ export interface HomeView {
   done: Task[];
 }
 
+/** Plan states that wait for a person, and how "Needs you" words them. */
+const PLAN_ASKS = {
+  proposed: { reason: "Plan ready for your approval", label: "Approve?" },
+  awaiting_input: { reason: "The Architect has questions", label: "Answer?" },
+} as const;
+
 export function homeView(tasks: readonly Task[], plans: readonly Plan[]): HomeView {
   const attention: AttentionItem[] = [
     ...plans
-      .filter((p) => p.state === "proposed")
-      .map((p) => ({ kind: "plan" as const, id: p.planId, project: p.project, title: firstLine(p.requirement), reason: "Plan ready for your approval", href: `/plans/${p.planId}`, badge: { label: "Approve?", tone: "waiting" as Tone } })),
+      .filter((p) => p.state in PLAN_ASKS)
+      .map((p) => {
+        const ask = PLAN_ASKS[p.state as keyof typeof PLAN_ASKS];
+        return { kind: "plan" as const, id: p.planId, project: p.project, title: firstLine(p.requirement), reason: ask.reason, href: `/plans/${p.planId}`, badge: { label: ask.label, tone: "waiting" as Tone } };
+      }),
     ...tasks
       .filter((t) => t.state === "failed")
       .map((t) => ({ kind: "task" as const, id: t.spec.taskId, project: t.project, title: t.spec.title, reason: t.detail ?? "Failed", href: `/tasks/${t.spec.taskId}`, badge: { label: "Failed", tone: "bad" as Tone } })),
@@ -264,14 +275,16 @@ export function projectNameProblem(name: string): string | undefined {
 
 /** A project's one-line status, for lists. */
 export function projectSummary(p: Project): { text: string; needsYou: boolean } {
+  const questions = p.plansWithQuestions ?? 0;
   const parts = [
     p.plansAwaitingApproval ? `${p.plansAwaitingApproval} to approve` : "",
+    questions ? `${questions} with questions` : "",
     p.tasks.failed ? `${p.tasks.failed} failed` : "",
     p.tasks.running ? `${p.tasks.running} running` : "",
     p.tasks.queued ? `${p.tasks.queued} queued` : "",
   ].filter(Boolean);
   const idle = p.tasks.total ? `${p.tasks.merged} of ${p.tasks.total} tasks merged` : "No tasks yet";
-  return { text: parts.join(" · ") || idle, needsYou: p.plansAwaitingApproval > 0 || p.tasks.failed > 0 };
+  return { text: parts.join(" · ") || idle, needsYou: p.plansAwaitingApproval > 0 || questions > 0 || p.tasks.failed > 0 };
 }
 
 export function formatUsd(usd: number): string {
@@ -292,3 +305,47 @@ export function firstLine(text: string, max = 120): string {
   const line = text.trim().split("\n")[0] ?? "";
   return line.length > max ? `${line.slice(0, max - 1)}…` : line;
 }
+
+/** One message in a plan's conversation, as the plan page shows it. */
+export type ThreadItem =
+  | { who: "you"; kind: "requirement" | "reply"; text: string; at: string }
+  | { who: "architect"; kind: "questions"; questions: string[]; context?: string; at: string }
+  | { who: "architect"; kind: "earlier-proposal"; summary: string; tasks: PlannedTask[]; at: string };
+
+/** The requirement, then every question, answer, superseded proposal and change request. */
+export function planThread(plan: Pick<Plan, "requirement" | "createdAt" | "dialogue">): ThreadItem[] {
+  return [
+    { who: "you", kind: "requirement", text: plan.requirement, at: plan.createdAt },
+    ...(plan.dialogue ?? []).map((d): ThreadItem => {
+      switch (d.kind) {
+        case "questions":
+          return { who: "architect", kind: "questions", questions: d.questions, context: d.context, at: d.at };
+        case "proposal":
+          return { who: "architect", kind: "earlier-proposal", summary: d.summary, tasks: d.tasks, at: d.at };
+        case "reply":
+          return { who: "you", kind: "reply", text: d.text, at: d.at };
+      }
+    }),
+  ];
+}
+
+/** Mirrors MAX_PLAN_REPLIES in @aso/shared (plan-dialogue.ts): every reply is another planning round. */
+export const MAX_PLAN_REPLIES = 10;
+
+/** What a reply means right now: answering questions, asking for changes, or nothing (can't reply). */
+export type ReplyMode = "answer" | "changes";
+
+/** Mirrors replyMode in @aso/shared (the console doesn't depend on it). */
+export function replyMode(plan: Pick<Plan, "state" | "dialogue">): ReplyMode | undefined {
+  const replies = plan.dialogue?.filter((d) => d.kind === "reply").length ?? 0;
+  if (replies >= MAX_PLAN_REPLIES) return undefined;
+  if (plan.state === "awaiting_input") return "answer";
+  if (plan.state === "proposed") return "changes";
+  return undefined;
+}
+
+/** Words of the reply box, per kind of reply. */
+export const REPLY_COPY: Record<ReplyMode, { label: string; placeholder: string; button: string; rows: number; primary: boolean }> = {
+  answer: { label: "Your answers", placeholder: "Your answers", button: "Send answers", rows: 5, primary: true },
+  changes: { label: "What should change", placeholder: "What should change? e.g. Use SQLite instead, and split the UI into its own task", button: "Ask for changes", rows: 3, primary: false },
+};

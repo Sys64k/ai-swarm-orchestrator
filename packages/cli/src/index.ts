@@ -19,7 +19,7 @@ import { consoleLinkCommand } from "./commands/console-link.js";
 import { llmCheckCommand } from "./commands/llm-check.js";
 import { syncCommand } from "./commands/sync.js";
 import { layout } from "./layout.js";
-import { approvePlanCommand, planCommand, rejectPlanCommand } from "./commands/plan.js";
+import { approvePlanCommand, planCommand, rejectPlanCommand, replyPlanCommand } from "./commands/plan.js";
 import { startHubCommand } from "./commands/start-hub.js";
 import { startWorkerCommand } from "./commands/start-worker.js";
 import { updateCommand } from "./commands/update.js";
@@ -137,8 +137,16 @@ program
   .action(approvePlanCommand);
 
 program
+  .command("plan-reply")
+  .description("Answer the Architect's questions, or ask for changes to a proposed plan (it plans again)")
+  .argument("<planId>")
+  .argument("<message...>", "your answers or the changes you want")
+  .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
+  .action(replyPlanCommand);
+
+program
   .command("plan-reject")
-  .description("Reject a proposed plan")
+  .description("Reject a plan that is proposed or has questions")
   .argument("<planId>")
   .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
   .action(rejectPlanCommand);
