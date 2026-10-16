@@ -1,4 +1,4 @@
-import { DEVOPS_WRITABLE, lastReplyAsksForChanges, QA_WRITABLE, type PlannedTask, type WorkerRole } from "@aso/shared";
+import { DEVOPS_WRITABLE, describeWritable, lastReplyAsksForChanges, QA_WRITABLE, type PlannedTask, type WorkerRole } from "@aso/shared";
 import type { PlanRecord } from "../plans.js";
 import type { TaskRecord } from "../tasks.js";
 
@@ -32,6 +32,9 @@ Constraints (enforced by the system, so don't try to work around them):
 }
 
 /** Architect: plans, never codes. Byte-stable for caching. */
+/** Each worker role's write scope, for the Architect (the same rules the worker and Hub enforce). */
+const ARCHITECT_ROLE_SCOPES = (["backend", "frontend", "qa", "devops"] as const).map((role) => `  - ${role}: ${describeWritable(role)}`).join("\n");
+
 export function architectSystemPrompt(): string {
   return `You are the Architect of a team of AI software engineers. You turn a project requirement into a plan of tasks that other agents implement. You do not write code yourself.
 
@@ -49,6 +52,9 @@ How to plan:
 - Use dependsOn when a task needs another task's code merged first (e.g. a page that calls an API). Tasks without dependencies run in parallel on different machines, so make shared contracts explicit in both tasks' descriptions.
 - Choose kind: feature for normal work; db_migration for schema changes; container_build for Docker work; e2e_test for browser tests; unit_test for test-only tasks.
 - Each task runs QA (the project's test command) before it is merged, so tasks should leave the test suite passing.
+- A task's role decides which files its agent may change, and anything outside is refused:
+${ARCHITECT_ROLE_SCOPES}
+  Give every task a role that may change all the files it must change. A qa or devops task that needs a change elsewhere (a shared fixture or helper in src/, a feature fix) gets that part moved into a test or config path it may write, or split into a backend/frontend task it depends on. Never put a file outside the role's scope in its description or acceptance criteria.
 - Agents cannot edit package.json directly; they request dependencies and npm scripts through the Hub themselves. Mention needed packages and scripts in the description. If the project has no package.json or no "test" script yet, make the first task set one up (QA runs \`npm test\` on every task).
 
 When the plan is ready, call submit_plan with a summary of the approach and the tasks. A human reviews it before any work starts: they approve it, or reply asking for changes.

@@ -33,6 +33,7 @@ export const QA_WRITABLE = [
   "**/tests/**",
   "**/e2e/**",
   "**/fixtures/**",
+  "**/__fixtures__/**",
   "**/vitest.config.*",
   "**/vitest.workspace.*",
   "**/playwright.config.*",
@@ -97,6 +98,17 @@ export function globToRegExp(glob: string): RegExp {
 
 export function matchesAny(repoPath: string, globs: readonly string[]): boolean {
   return globs.some((g) => globToRegExp(g).test(repoPath));
+}
+
+/**
+ * What a role may change, in words and the exact patterns, for the Architect's instructions:
+ * generated from ROLE_POLICIES, so the plan and the enforcement can't disagree.
+ */
+export function describeWritable(role: AgentRole): string {
+  const { writable } = ROLE_POLICIES[role];
+  if (writable === "none") return "nothing (read-only)";
+  if (writable === "any") return "any file except package.json and lockfiles (those change through dependency and script requests)";
+  return `only files matching ${writable.join(", ")}`;
 }
 
 /** Why `role` may not modify `repoPath`, or undefined if it may. */
