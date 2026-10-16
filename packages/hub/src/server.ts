@@ -32,7 +32,7 @@ import { type DependencyInstaller } from "./git/hub-repo.js";
 import type { GitSync } from "./git/sync.js";
 import { PlanError, type PlanRecord } from "./plans.js";
 import { ProjectError, ProjectSet, type Project } from "./projects.js";
-import { isOutdated, NodeError, NodeRegistry, type NodeEntry, type NodeTransport } from "./registry.js";
+import { isOutdated, NodeError, NodeRegistry, type NodeEntry, type NodeTransport, type Registration } from "./registry.js";
 import type { RoutingPolicies } from "./routing.js";
 import { Notifier, TEST_NOTIFICATION } from "./push/notifier.js";
 import type { sendPush } from "./push/web-push.js";
@@ -82,6 +82,11 @@ export interface HubOptions {
    * authentication (only for tests and fully trusted setups); the CLI always sets one.
    */
   token: string | null;
+  /**
+   * Have outdated workers install the package this Hub serves and restart, once idle (only
+   * workers that can: package installs run by `aso service install`). Default: on.
+   */
+  autoUpdate?: boolean;
   /** The `aso` package this Hub serves to other machines (`aso update`, first installs). */
   dist?: { version: () => string | undefined; tarball: () => string | undefined };
   /** Push main to the target repo's remote after merges. Default: on when an `origin` remote exists. */
@@ -188,6 +193,19 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     }
   };
 
+  /** A node on another build than the Hub serves: have a worker update itself, or say to run `aso update`. */
+  const checkVersion = (nodeId: string, p: Registration) => {
+    const current = hubVersion();
+    if (current === undefined || !isOutdated(p.version, current)) {
+      if (p.nodeKind === "worker") registry.workerCurrent(nodeId);
+      return;
+    }
+    const why =
+      p.nodeKind !== "worker" ? undefined : opts.autoUpdate === false ? "automatic updates are off" : registry.requestUpdate(nodeId, current);
+    if (p.nodeKind === "worker" && why === undefined) log.info(`${nodeId} runs aso ${p.version}: updating it to ${current} once it is idle`);
+    else log.warn(`${nodeId} runs aso ${p.version}, this Hub serves ${current}: run \`aso update\` on it${why ? ` (${why})` : ""}`);
+  };
+
   const reject = (conn: Connection, reason: string, issues: string[] = [], refId?: string) => {
     log.warn(`rejected message from ${conn.nodeId ?? conn.connId}: ${reason}`, issues.length ? issues : undefined);
     conn.ws.send(JSON.stringify(createMessage("PROTOCOL_ERROR", HUB_NODE_ID, { reason, issues, refId })));
@@ -219,10 +237,10 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
               `docker ${p.hardware.docker.available ? "yes" : "no"})`
           : `architect ${msg.from} registered`,
       );
-      const current = hubVersion();
-      if (isOutdated(p.version, current)) log.warn(`${msg.from} runs aso ${p.version}, this Hub serves ${current}: run \`aso update\` on it`);
       registry.send(msg.from, "REGISTRATION_ACK", { nodeId: msg.from });
       for (const project of projects.list()) project.tasks.nodeRegistered(msg.from, runningJobsOf(p));
+      // After the jobs it still runs are handed back: an update waits for them.
+      checkVersion(msg.from, p);
       return projects.dispatchAll();
     }
 
@@ -233,6 +251,10 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     registry.touch(conn.nodeId);
 
     switch (msg.type) {
+      case "UPDATE_FAILED":
+        log.warn(`${conn.nodeId} could not update to ${msg.payload.version}: ${msg.payload.reason}`);
+        registry.updateFailed(conn.nodeId, msg.payload.version, msg.payload.reason);
+        return projects.dispatchAll();
       case "NODE_HEARTBEAT": {
         const docker = registry.setHeartbeat(conn.nodeId, msg.payload);
         if (docker !== undefined) log.info(`${conn.nodeId}: Docker ${docker ? "now available" : "no longer available"}`);

@@ -161,3 +161,175 @@ describe("draining and restarting workers from the console", () => {
       }
     }));
 });
+
+describe("automatic worker updates", () => {
+  const HUB = "0.1.0+new";
+  /** The Hub serves build HUB (the package file is never read here). */
+  const dist = { version: () => HUB, tarball: () => "/nonexistent/aso.tgz" };
+  const updatable = { supervisor: "systemd" as const, updates: "package" as const, version: "0.1.0+old" };
+  /** `id` reconnects as an updatable worker while still running "greet" (as after a Hub restart). */
+  const reconnectBusy = async (ctx: HubContext, id: string, hostname: string) => {
+    const first = await worker(ctx.port, id, { hostname });
+    await busyWith(ctx, first, id, "greet");
+    first.ws.close();
+    await first.closed;
+    await waitFor(() => ctx.hub.tasks.get("greet")?.detachedAt !== undefined, 5000, "detached");
+    // Two slots, so only the update (not a full worker) keeps new jobs away.
+    return worker(ctx.port, id, { ...updatable, hostname, slots: 2, running: [{ taskId: "greet", job: "implement" }] });
+  };
+  const view = async (ctx: HubContext, id: string) => ((await call(ctx.port, "/api/nodes", "GET")).body as unknown as Json[]).find((n) => n.nodeId === id)!;
+
+  it("updates an idle outdated worker at once, and a busy one after its job, giving it no new work", () =>
+    withHub(
+      async (ctx) => {
+        const idle = await worker(ctx.port, "idle", { ...updatable, hostname: "a" });
+        const control = await idle.next();
+        assert.ok(control.type === "NODE_CONTROL" && control.payload.action === "update" && control.payload.version === HUB);
+        const v = await view(ctx, "idle");
+        assert.deepEqual([v.restart, v.updateTo, v.draining, v.updateError], ["sent", HUB, true, null]);
+        idle.ws.close();
+
+        // A worker that reconnects with a job still running finishes it first.
+        const busy = await reconnectBusy(ctx, "busy", "b");
+        assert.equal((await view(ctx, "busy")).restart, "pending");
+        await postTask(ctx.port, task("other"));
+        assert.ok(await busy.quiet(300), "no update and no new job while the job runs");
+        await finish(ctx, busy, "busy", "greet");
+        const later = await busy.next();
+        assert.ok(later.type === "NODE_CONTROL" && later.payload.action === "update");
+        busy.ws.close();
+      },
+      { dist, reclaimGraceMs: 10_000 },
+    ));
+
+  it("leaves current, hand-started and source-checkout workers alone", () =>
+    withHub(
+      async (ctx) => {
+        const current = await worker(ctx.port, "current", { ...updatable, version: HUB, hostname: "a" });
+        const manual = await worker(ctx.port, "manual", { updates: "package", version: "0.1.0+old", hostname: "b" });
+        const source = await worker(ctx.port, "source", { supervisor: "systemd", version: "0.1.0+old", hostname: "c" });
+        for (const w of [current, manual, source]) assert.ok(await w.quiet(), "no NODE_CONTROL");
+        await postTask(ctx.port, task("greet"));
+        await waitFor(() => ctx.hub.tasks.get("greet")?.nodeId, 5000, "an outdated worker still gets jobs");
+        const v = await view(ctx, "source");
+        assert.deepEqual([v.restart, v.updateTo, v.draining], [null, null, false]);
+        for (const w of [current, manual, source]) w.ws.close();
+      },
+      { dist },
+    ));
+
+  it("does nothing with automatic updates off, or when the Hub serves no package", async () => {
+    for (const opts of [{ dist, autoUpdate: false }, {}]) {
+      await withHub(async (ctx) => {
+        const w = await worker(ctx.port, "dev", updatable);
+        assert.ok(await w.quiet());
+        assert.equal((await view(ctx, "dev")).restart, null);
+        w.ws.close();
+      }, opts);
+    }
+  });
+
+  it("gives a worker work again when its update fails, and does not ask that machine again for the build", () =>
+    withHub(
+      async (ctx) => {
+        const w = await worker(ctx.port, "dev", { ...updatable, hostname: "avalon" });
+        assert.equal((await w.next()).type, "NODE_CONTROL");
+        w.send(createMessage("UPDATE_FAILED", "dev", { version: HUB, reason: "npm install exited with code 1" }));
+        await waitFor(async () => (await view(ctx, "dev")).updateError !== null, 5000, "failure recorded");
+        const v = await view(ctx, "dev");
+        assert.deepEqual([v.restart, v.updateTo, v.draining], [null, null, false]);
+        assert.deepEqual(v.updateError, { version: HUB, reason: "npm install exited with code 1" });
+        await postTask(ctx.port, task("greet"));
+        assert.equal((await w.next()).type, "TASK_ASSIGNMENT", "back to work");
+        w.ws.close();
+        await waitFor(() => !ctx.hub.registry.has("dev"));
+
+        const again = await worker(ctx.port, "dev2", { ...updatable, hostname: "avalon" });
+        assert.equal((await again.next()).type, "TASK_ASSIGNMENT", "same machine, same build: not asked again, given work");
+        assert.match(String(((await view(ctx, "dev2")).updateError as Json).reason), /npm install/);
+        again.ws.close();
+      },
+      { dist },
+    ));
+
+  it("stops after a machine keeps coming back on its old build, and forgets once it is current", () =>
+    withHub(
+      async (ctx) => {
+        for (let i = 1; i <= 2; i++) {
+          const w = await worker(ctx.port, `try${i}`, { ...updatable, hostname: "avalon" });
+          assert.equal((await w.next()).type, "NODE_CONTROL", `attempt ${i}`);
+          w.ws.close();
+          await waitFor(() => !ctx.hub.registry.has(`try${i}`));
+        }
+        const stuck = await worker(ctx.port, "try3", { ...updatable, hostname: "avalon" });
+        assert.ok(await stuck.quiet(), "no third attempt");
+        assert.match(String(((await view(ctx, "try3")).updateError as Json).reason), /came back on 0\.1\.0\+old after 2 updates/);
+        stuck.ws.close();
+        await waitFor(() => !ctx.hub.registry.has("try3"));
+
+        // Updated by hand: the record goes, so a later build is tried again.
+        const current = await worker(ctx.port, "now", { ...updatable, version: HUB, hostname: "avalon" });
+        assert.equal((await view(ctx, "now")).updateError, null);
+        current.ws.close();
+      },
+      { dist },
+    ));
+
+  it("cancels a pending update on resume", () =>
+    withHub(
+      async (ctx) => {
+        const w = await reconnectBusy(ctx, "dev", "a");
+        const resumed = await call(ctx.port, "/api/nodes/dev/resume");
+        assert.deepEqual([resumed.status, resumed.body.restart, resumed.body.updateTo], [200, null, null]);
+        await finish(ctx, w, "dev", "greet");
+        assert.equal((await w.next()).type, "TEST_EXECUTION", "no update after the job");
+        w.ws.close();
+      },
+      { dist, reclaimGraceMs: 10_000 },
+    ));
+
+  it("a real worker runs its update hook once idle, and reports a failed install", () =>
+    withHub(
+      async (ctx) => {
+        const calls: Array<string | undefined> = [];
+        let fail = true;
+        const w = await startWorker({
+          hub: `127.0.0.1:${ctx.port}`,
+          token: TOKEN,
+          nodeId: "svc",
+          workDir: tempDir(),
+          hardware: hardware(),
+          sandbox: "none",
+          version: "0.1.0+old",
+          supervisor: "systemd",
+          onUpdate: async (version) => {
+            calls.push(version);
+            if (fail) throw new Error("npm install exited with code 1");
+          },
+        });
+        try {
+          await waitFor(async () => ((await view(ctx, "svc"))?.updateError as Json | null)?.reason === "npm install exited with code 1", 5000, "failure reported");
+          assert.deepEqual(calls, [HUB]);
+          assert.equal((await view(ctx, "svc")).updates, "package");
+          // A later request is not swallowed by the failed one.
+          fail = false;
+          ctx.hub.registry.send("svc", "NODE_CONTROL", { action: "update", version: HUB });
+          await waitFor(() => calls.length === 2, 5000, "second update");
+        } finally {
+          w.stop();
+        }
+
+        const manual = await startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "manual", workDir: tempDir(), hardware: { ...hardware(), hostname: "m" }, sandbox: "none", version: "0.1.0+old" });
+        try {
+          await waitFor(() => ctx.hub.registry.has("manual"));
+          ctx.hub.registry.send("manual", "NODE_CONTROL", { action: "update", version: HUB }); // the Hub would not; answer it anyway
+          await waitFor(async () => (await view(ctx, "manual"))?.updateError !== null, 5000, "refusal reported");
+          assert.match(String(((await view(ctx, "manual")).updateError as Json).reason), /cannot update itself/);
+          assert.ok(ctx.hub.registry.has("manual"), "still running");
+        } finally {
+          manual.stop();
+        }
+      },
+      { dist },
+    ));
+});

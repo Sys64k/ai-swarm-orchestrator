@@ -54,6 +54,13 @@ export interface WorkerOptions {
   supervisor?: Supervisor;
   /** Called when the Hub asks for a restart, once no job runs: stop and exit (the CLI does). */
   onRestart?: () => void;
+  /**
+   * Called when the Hub asks for an update, once no job runs: install the build the Hub serves,
+   * then stop and exit for the service manager to start it (the CLI does, for a package install
+   * run as a service). Rejects when the install fails: the worker reports it and carries on.
+   * When set, the worker tells the Hub it can update itself.
+   */
+  onUpdate?: (version: string) => Promise<void>;
 }
 
 export const DEFAULT_WORK_DIR = path.join(os.homedir(), ".aso", "work");
@@ -99,7 +106,7 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
   let attempt = 0;
   let stopped = false;
   let retryTimer: NodeJS.Timeout | undefined;
-  let restartTimer: NodeJS.Timeout | undefined;
+  let idleTimer: NodeJS.Timeout | undefined;
   let heartbeatTimer: NodeJS.Timeout | undefined;
   /** Last Docker state logged, so a heartbeat logs only a change. */
   let dockerAvailable = profile.docker.available;
@@ -137,6 +144,7 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
             nodeKind: "worker",
             version: opts.version ?? UNKNOWN_VERSION,
             supervisor: opts.supervisor,
+            updates: opts.onUpdate ? "package" : undefined,
             hardware: profile,
             slots,
             running: runner.running,
@@ -189,12 +197,8 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
           runner.handleDependencyResponse(msg.payload);
           break;
         case "NODE_CONTROL":
-          if (!opts.onRestart) {
-            log.warn("the Hub asked for a restart, but this worker has no service to start it again; ignoring");
-            break;
-          }
-          log.info("restart requested from the console");
-          restartWhenIdle(opts.onRestart);
+          if (msg.payload.action === "update") update(msg.payload.version);
+          else restart();
           break;
         case "PROTOCOL_ERROR":
           log.error(`hub rejected message: ${msg.payload.reason}`, msg.payload.issues);
@@ -220,20 +224,46 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
   };
 
   /**
-   * The Hub only asks while no job runs, but a job's last messages may still be on their way:
+   * Run a restart or update once no job runs. The Hub only asks while no job runs, but a job's last messages may still be on their way:
    * check every second until the runner is empty. A repeated request joins the waiting one.
    */
-  const restartWhenIdle = (restart: () => void) => {
-    if (restartTimer) return;
+  const whenIdle = (action: () => void | Promise<void>) => {
+    if (idleTimer) return;
     const check = () => {
       if (stopped) return;
       if (!runner.isIdle) {
-        restartTimer = setTimeout(check, 1000);
+        idleTimer = setTimeout(check, 1000);
         return;
       }
-      restart();
+      // A restart or update that worked exits the process. One that failed leaves the worker
+      // running, so a later request must not be taken for this one.
+      Promise.resolve(action()).catch(() => (idleTimer = undefined));
     };
-    restartTimer = setTimeout(check, 0);
+    idleTimer = setTimeout(check, 0);
+  };
+
+  const restart = () => {
+    if (!opts.onRestart) return log.warn("the Hub asked for a restart, but this worker has no service to start it again; ignoring");
+    log.info("restart requested from the console");
+    whenIdle(opts.onRestart);
+  };
+
+  /** Install the build the Hub serves and exit; on failure tell the Hub, which gives this worker jobs again. */
+  const update = (version: string) => {
+    const { onUpdate } = opts;
+    if (!onUpdate) {
+      log.warn(`the Hub asked for an update to ${version}, but this worker cannot update itself; run aso update`);
+      send("UPDATE_FAILED", { version, reason: "this worker cannot update itself; run aso update on it" });
+      return;
+    }
+    log.info(`updating to ${version}, as the Hub asks`);
+    whenIdle(() =>
+      onUpdate(version).catch((err: Error) => {
+        log.error(`update to ${version} failed: ${err.message}`);
+        send("UPDATE_FAILED", { version, reason: err.message.slice(0, 2000) || "unknown error" });
+        throw err;
+      }),
+    );
   };
 
   connect();
@@ -245,7 +275,7 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
     stop() {
       stopped = true;
       clearTimeout(retryTimer);
-      clearTimeout(restartTimer);
+      clearTimeout(idleTimer);
       clearInterval(heartbeatTimer);
       ws?.close(1000, "worker stopping");
       lock.release();

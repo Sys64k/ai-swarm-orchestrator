@@ -34,7 +34,21 @@ export interface NodeEntry {
   draining?: boolean;
   /** Restart once idle: "pending" until the restart is sent, then "sent" until the node disconnects. */
   restart?: "pending" | "sent";
+  /** Set when that restart is an automatic update: the build to install first. */
+  updateTo?: string;
 }
+
+/** Automatic updates to one build, per machine (a worker comes back under a new node id). */
+interface UpdateRecord {
+  version: string;
+  /** Updates sent to this machine for `version`. */
+  attempts: number;
+  /** Why the machine is left alone for `version`: the install failed, or it kept coming back on its old build. */
+  error?: string;
+}
+
+/** Updates sent to one machine for one build before the Hub stops trying (a worker that comes back unchanged). */
+export const MAX_UPDATE_ATTEMPTS = 2;
 
 export class NodeError extends Error {
   constructor(
@@ -48,6 +62,8 @@ export class NodeError extends Error {
 /** Live registry of connected nodes (workers and the Architect). */
 export class NodeRegistry {
   private readonly nodes = new Map<string, NodeEntry>();
+  /** By hostname. */
+  private readonly updates = new Map<string, UpdateRecord>();
 
   has(nodeId: string): boolean {
     return this.nodes.has(nodeId);
@@ -133,11 +149,10 @@ export class NodeRegistry {
     return entry;
   }
 
-  /** Give a drained worker jobs again. This also cancels a restart that is still waiting for a job. */
+  /** Give a drained worker jobs again. This also cancels a restart (or update) that is still waiting for a job. */
   resume(nodeId: string): NodeEntry {
     const entry = this.requireActionable(nodeId, "resume");
-    entry.draining = undefined;
-    entry.restart = undefined;
+    clearRestart(entry);
     return entry;
   }
 
@@ -154,11 +169,58 @@ export class NodeRegistry {
     return entry;
   }
 
-  /** Sends NODE_CONTROL to a worker with a pending restart once it has no job. Called on every release. */
+  /**
+   * A worker registered on another build than `version`, the one this Hub serves: have it update
+   * itself like a restart (no new jobs, then NODE_CONTROL update once idle). Returns why not,
+   * or undefined when the update is on its way.
+   */
+  requestUpdate(nodeId: string, version: string): string | undefined {
+    const entry = this.nodes.get(nodeId);
+    const reg = entry?.registration;
+    if (!entry || reg?.nodeKind !== "worker") return "it is not a connected worker";
+    if (reg.updates !== "package" || reg.supervisor === undefined) {
+      return "it cannot update itself (it runs from a source checkout, or was not started by aso service install)";
+    }
+    if (entry.restart !== undefined) return "it is already restarting";
+    const host = reg.hardware.hostname;
+    let record = this.updates.get(host);
+    if (record?.version !== version) record = { version, attempts: 0 };
+    if (!record.error && record.attempts >= MAX_UPDATE_ATTEMPTS) {
+      record.error = `it came back on ${reg.version} after ${record.attempts} updates`;
+    }
+    this.updates.set(host, record);
+    if (record.error) return `the update to ${version} failed: ${record.error}`;
+    record.attempts++;
+    entry.draining = true;
+    entry.restart = "pending";
+    entry.updateTo = version;
+    this.restartIfIdle(entry);
+    return undefined;
+  }
+
+  /**
+   * A worker reports that installing the update failed: its machine is not asked again for this
+   * build (recorded even if the Hub did not ask: the worker cannot install it either way), and a
+   * worker the update drained takes jobs again.
+   */
+  updateFailed(nodeId: string, version: string, reason: string): void {
+    const entry = this.nodes.get(nodeId);
+    if (!entry || entry.registration.nodeKind !== "worker") return;
+    this.updates.set(entry.registration.hardware.hostname, { version, attempts: MAX_UPDATE_ATTEMPTS, error: reason });
+    if (entry.updateTo !== undefined) clearRestart(entry);
+  }
+
+  /** A worker registered on the build the Hub serves: forget its machine's update attempts. */
+  workerCurrent(nodeId: string): void {
+    const reg = this.nodes.get(nodeId)?.registration;
+    if (reg?.nodeKind === "worker") this.updates.delete(reg.hardware.hostname);
+  }
+
+  /** Sends NODE_CONTROL to a worker with a pending restart or update once it has no job. Called on every release. */
   private restartIfIdle(entry: NodeEntry): void {
     if (entry.restart !== "pending" || entry.jobs.size > 0) return;
     try {
-      this.send(entry.nodeId, "NODE_CONTROL", { action: "restart" });
+      this.send(entry.nodeId, "NODE_CONTROL", entry.updateTo ? { action: "update", version: entry.updateTo } : { action: "restart" });
       entry.restart = "sent";
     } catch {
       // The socket is closing; the node is about to drop, and its entry with it. Never let this break the release.
@@ -219,9 +281,19 @@ export class NodeRegistry {
       heartbeat: n.heartbeat ?? null,
       draining: n.draining === true,
       restart: n.restart ?? null,
+      /** The build an automatic update installs (the restart above is that update). */
+      updateTo: n.updateTo ?? null,
+      /** Why this machine is not updated automatically to the build named in it. */
+      updateError: this.updateErrorOf(n),
       actions: nodeActions(n),
       ...publicRegistration(n.registration),
     };
+  }
+
+  private updateErrorOf(n: NodeEntry): { version: string; reason: string } | null {
+    if (n.registration.nodeKind !== "worker") return null;
+    const record = this.updates.get(n.registration.hardware.hostname);
+    return record?.error ? { version: record.version, reason: record.error } : null;
   }
 
   private require(nodeId: string): NodeEntry {
@@ -229,6 +301,13 @@ export class NodeRegistry {
     if (!entry) throw new Error(`unknown node ${nodeId}`);
     return entry;
   }
+}
+
+/** Undo a pending restart or update, and the draining that came with it. */
+function clearRestart(entry: NodeEntry): void {
+  entry.draining = undefined;
+  entry.restart = undefined;
+  entry.updateTo = undefined;
 }
 
 function freeSlotsOf(n: NodeEntry): number {

@@ -48,6 +48,7 @@ export async function startHubCommand(opts: StartHubOptions): Promise<void> {
     qa: { enabled: qaEnabled, command: testCommand },
     allowDependencies: parseList(opts.allowDeps),
     dist: { version: () => layout.distVersion(), tarball: () => layout.distTarball() },
+    autoUpdate: process.env.ASO_AUTO_UPDATE !== "0",
     llm: {
       model: opts.model,
       effort: opts.effort,

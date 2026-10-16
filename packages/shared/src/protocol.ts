@@ -143,6 +143,11 @@ const NodeRegistrationPayload = z.discriminatedUnion("nodeKind", [
     roles: z.array(WorkerRoleSchema).optional(),
     /** Set when a service manager starts the worker again after it exits, so the Hub can restart it. */
     supervisor: SupervisorSchema.optional(),
+    /**
+     * Set when the worker can update itself on NODE_CONTROL update: `package` installs the
+     * package the Hub serves, then exits for its service manager to start the new build.
+     */
+    updates: z.enum(["package"]).optional(),
     hardware: HardwareProfileSchema,
     /** Jobs the worker runs at once, each in its own checkout. Absent (older workers): 1. */
     slots: z.number().int().min(1).max(MAX_WORKER_SLOTS).optional(),
@@ -456,9 +461,19 @@ const PlanResultPayload = z.discriminatedUnion("outcome", [
   z.strictObject({ planId: PlanIdSchema, outcome: z.literal("failed"), error: z.string().min(1).max(5000) }),
 ]);
 
-/** The Hub asks a node to act on itself. `restart`: exit so its service manager starts it again (only sent while idle). */
-const NodeControlPayload = z.strictObject({
-  action: z.enum(["restart"]),
+/**
+ * The Hub asks a node to act on itself, only while it is idle. `restart`: exit so its service
+ * manager starts it again. `update`: install the build the Hub serves (`version`), then restart.
+ */
+const NodeControlPayload = z.discriminatedUnion("action", [
+  z.strictObject({ action: z.literal("restart") }),
+  z.strictObject({ action: z.literal("update"), version: z.string().min(1).max(200) }),
+]);
+
+/** A worker could not install the build the Hub asked for; it carries on with the one it has. */
+const UpdateFailedPayload = z.strictObject({
+  version: z.string().min(1).max(200),
+  reason: z.string().min(1).max(2000),
 });
 
 const ProtocolErrorPayload = z.strictObject({
@@ -507,6 +522,7 @@ export const AgentMessageSchema = z.discriminatedUnion("type", [
   message("PLAN_REQUEST", PlanRequestPayload),
   message("PLAN_RESULT", PlanResultPayload),
   message("NODE_CONTROL", NodeControlPayload),
+  message("UPDATE_FAILED", UpdateFailedPayload),
   message("PROTOCOL_ERROR", ProtocolErrorPayload),
 ]);
 
@@ -529,6 +545,7 @@ export const NODE_TO_HUB_TYPES = new Set<AgentMessageType>([
   "DEPENDENCY_REQUEST",
   "PROMPT_EXECUTION",
   "PLAN_RESULT",
+  "UPDATE_FAILED",
 ]);
 
 /** Message types only the Hub may send. */

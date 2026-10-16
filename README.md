@@ -196,14 +196,31 @@ Run `aso update` on any machine:
   SHA-256, and installs it.
 - **Source checkouts:** `git pull`, `npm ci` and a rebuild.
 
-To roll out a new version, update the Hub machine, run `npm run package` there, then run
-`aso update --hub <hub-ip>` on each worker. A worker installed with `aso service install` is
-restarted on the new version automatically; restart others yourself.
+To roll out a new version, update the Hub machine, run `npm run package` there, and restart
+the Hub. Workers then update themselves (below); run `aso update --hub <hub-ip>` on the
+others. A worker installed with `aso service install` is restarted on the new version
+automatically; restart others yourself.
 
 Workers and the Architect report the build they run (`0.1.0+<commit>`; a source checkout
 reports its commit, with `-dirty` for uncommitted changes). When it differs from the package
-the Hub serves, the console marks the worker **Update** and the Hub logs a warning. Restart
-a worker after updating it so it registers with the new build.
+the Hub serves, the console marks the worker **Update**.
+
+#### Automatic worker updates
+
+A worker installed from the Hub's package and run by `aso service install` updates itself.
+When it connects on another build than the one the Hub serves, the Hub gives it no new jobs,
+lets its current ones finish, and then tells it to update. The worker downloads the Hub's
+package, checks its SHA-256, installs it, and exits; systemd starts it on the new build a few
+seconds later. The console shows **Update after job** or **Updating** meanwhile, and
+**Cancel update** stops one that is still waiting for a job.
+
+- **A failed install** (npm error, checksum mismatch) leaves the worker on its old build,
+  taking jobs again. The console shows the error, and the Hub does not try that build on that
+  machine again; run `aso update` there.
+- **A worker that comes back on its old build** after two updates is left alone the same way.
+- **Not updated automatically:** source checkouts (they follow their git remote, not the Hub)
+  and workers started by hand. The console says to run `aso update` on them.
+- **To turn it off,** set `ASO_AUTO_UPDATE=0` for the Hub.
 
 #### Drain and restart from the console
 
@@ -629,7 +646,7 @@ Options:
 | `GET` | `/dist/aso.tgz` | The `aso` package for installing/updating machines (public; contains no secrets) |
 | `GET` / `POST` | `/api/sync` | Push status / retry the push of `main` to `origin` |
 | `GET` | `/api/llm` | LLM status: model, queue, calls and estimated spend since start |
-| `GET` | `/api/nodes` | Registered nodes with hardware, latest heartbeat, current task, the aso build each runs (`version`), `outdated` (a different build than the Hub serves), `supervisor`, `draining`, `restart` and `actions` (what the console may do now, with `why` for a refusal) |
+| `GET` | `/api/nodes` | Registered nodes with hardware, latest heartbeat, current task, the aso build each runs (`version`), `outdated` (a different build than the Hub serves), `supervisor`, `updates` (`package`: it can update itself), `draining`, `restart`, `updateTo` (the build a pending or running update installs), `updateError` (why the Hub stopped updating that machine) and `actions` (what the console may do now, with `why` for a refusal) |
 | `GET` | `/api/tasks` | All tasks with state, nodes, commits, rework round and history |
 | `GET` | `/api/tasks/:id` | A single task (history, agent turn log, LLM cost, files touched) |
 | `GET` | `/api/tasks/:id/transcript`, `/api/plans/:id/transcript` | What the agent said and did: text, tool calls, command output, events, QA verdicts. `?after=<seq>` returns only newer entries |
@@ -707,6 +724,7 @@ For the scoring formula, see [ARCHITECTURE.md](ARCHITECTURE.md#6-hardware-aware-
 | `ASO_ENV_FILE` | *(none)* | An extra `.env` file to load (highest priority after the shell) |
 | `ASO_TEST_COMMAND` | `npm test` | Default for `--test-command` (also passed into the container) |
 | `ASO_QA` | `1` | `0` disables QA (same as `--no-qa`) |
+| `ASO_AUTO_UPDATE` | `1` | `0` stops the Hub from updating outdated workers itself |
 | `ASO_ALLOW_DEPS` | *(any)* | Default for `--allow-deps` (also passed into the container) |
 | `ANTHROPIC_API_KEY` | *(none)* | Hub only. Without it, agents fail tasks with "no LLM configured" |
 | *(file)* `.env` | — | Loaded on start: the shell's variables win, then `ASO_ENV_FILE`, then `~/.config/aso/.env`, then a source checkout's `.env`. See `.env.example` |

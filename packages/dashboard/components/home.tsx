@@ -59,8 +59,8 @@ export function Home() {
           )}
           {workers.some((w) => w.outdated) && (
             <p className="muted small">
-              Workers marked Update run an older aso than the Hub. On each, run <code>aso update --hub &lt;hub address&gt;</code>; it
-              restarts a worker installed as a service.
+              Workers marked Update run another aso build than the Hub. One installed from the Hub&apos;s package as a service
+              updates itself once idle; on any other, run <code>aso update --hub &lt;hub address&gt;</code>.
             </p>
           )}
           {nodes.data && !architect && <p className="muted small">The Architect is not connected, so new plans will wait.</p>}

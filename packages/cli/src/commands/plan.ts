@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
-import { authorizationHeader, resolveHubUrl, resolveToken, type PlanDialogueEntry } from "@aso/shared";
+import { authorizationHeader, hubHttpBase, resolveToken, type PlanDialogueEntry } from "@aso/shared";
 
 interface PlanView {
   planId: string;
@@ -14,11 +14,6 @@ interface PlanView {
   dialogue?: PlanDialogueEntry[];
   llm: { calls: number; costUsd: number };
   agentLog: Array<{ turn: number; actions: string[] }>;
-}
-
-function apiBase(hub: string): string {
-  const url = resolveHubUrl(hub);
-  return `${url.protocol === "wss:" ? "https" : "http"}://${url.host}`;
 }
 
 async function api<T>(base: string, path: string, init?: RequestInit): Promise<T> {
@@ -41,7 +36,7 @@ async function api<T>(base: string, path: string, init?: RequestInit): Promise<T
 export async function planCommand(words: string[], opts: { hub: string; file?: string; yes: boolean; project?: string }): Promise<void> {
   const requirement = opts.file ? await readFile(opts.file, "utf8") : words.join(" ");
   if (!requirement.trim()) throw new Error('give the requirement as text (aso plan "...") or with --file <path>');
-  const base = apiBase(opts.hub);
+  const base = hubHttpBase(opts.hub);
 
   let plan = await api<PlanView>(base, "/api/plans", { method: "POST", body: JSON.stringify({ requirement, project: opts.project }) });
   console.log(`${plan.planId} (${plan.project}): waiting for the Architect...`);
@@ -115,18 +110,18 @@ async function waitForArchitect(base: string, plan: PlanView, shown: { turns: nu
 export async function replyPlanCommand(planId: string, words: string[], opts: { hub: string }): Promise<void> {
   const message = words.join(" ").trim();
   if (!message) throw new Error('give your answer or the changes you want as text: aso plan-reply <planId> "..."');
-  await reply(apiBase(opts.hub), planId, message);
+  await reply(hubHttpBase(opts.hub), planId, message);
   console.log(`follow it in the console, or: aso plan-approve ${planId} once it is proposed again`);
 }
 
 export async function approvePlanCommand(planId: string, opts: { hub: string }): Promise<void> {
-  const plan = await api<PlanView>(apiBase(opts.hub), `/api/plans/${planId}/approve`, { method: "POST" });
+  const plan = await api<PlanView>(hubHttpBase(opts.hub), `/api/plans/${planId}/approve`, { method: "POST" });
   console.log(`approved ${plan.planId}; created tasks:`);
   for (const [key, id] of Object.entries(plan.taskIds ?? {})) console.log(`  ${key} -> ${id}`);
 }
 
 export async function rejectPlanCommand(planId: string, opts: { hub: string }): Promise<void> {
-  await api<PlanView>(apiBase(opts.hub), `/api/plans/${planId}/reject`, { method: "POST" });
+  await api<PlanView>(hubHttpBase(opts.hub), `/api/plans/${planId}/reject`, { method: "POST" });
   console.log(`rejected ${planId}; no tasks were created`);
 }
 
