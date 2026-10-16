@@ -8,6 +8,7 @@ import {
   type TaskKind,
   type LlmUsage,
   type TaskSpec,
+  type TaskState,
 } from "@aso/shared";
 import type { PullRef } from "./git/github.js";
 import type { HubRepository } from "./git/hub-repo.js";
@@ -25,18 +26,7 @@ const log = createLogger("tasks");
  * Verification, QA or merge problems send the task back to pending as a rework round.
  * A person can cancel any task that isn't finished, and retry a failed or cancelled one.
  */
-export type TaskState =
-  | "pending"
-  | "assigned"
-  | "in_progress"
-  | "verifying"
-  | "awaiting_qa"
-  | "testing"
-  | "merging"
-  | "awaiting_review"
-  | "merged"
-  | "failed"
-  | "cancelled";
+export type { TaskState } from "@aso/shared";
 
 type Rework = NonNullable<PayloadInput<"TASK_ASSIGNMENT">["rework"]>;
 type Feedback = MessageOf<"FEEDBACK_LOOP">["payload"];

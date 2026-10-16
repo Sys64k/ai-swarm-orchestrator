@@ -517,6 +517,26 @@ through it. `TaskManager` and `PlanManager` record events and verdicts.
   returns `{entries, last}`. Entries have increasing `seq` numbers, so the console polls for
   only what's new.
 
+### The API contract
+
+The HTTP API is described once, as Zod schemas in `@aso/shared` (`api.ts`): request bodies
+(`CreateTaskBodySchema`...) and answers (`TaskSchema`, `PlanSchema`, `NodeSchema`...), plus the
+task and plan state enums the Hub's own types come from.
+
+- **Requests** are parsed with those schemas in `server.ts` before a manager sees them. A
+  manager's own checks still run, and come first where their status matters more: a reply to
+  a plan that takes none is a 409, whatever the body.
+- **The OpenAPI 3.1 document** (`hub/src/api/openapi.ts`) is built from a table of every route
+  (`API_OPERATIONS`) and `z.toJSONSchema` of the schemas. It is served at `/api/openapi.json`
+  and written to `docs/openapi.json` by `npm run openapi`.
+- **Drift is caught three ways.** A test compares the Hub's Hono routes with the table. A test
+  parses real answers with the schemas and fails on any field they don't name. And
+  `api/contract.ts` fails the build when `TaskRecord`, `PlanRecord` or a node view gains a
+  field the schemas lack. Another test keeps `docs/openapi.json` equal to the generated
+  document.
+- **Answers are open objects:** clients must ignore unknown fields, so adding one is not a
+  breaking change.
+
 ### The console
 
 The console (`packages/dashboard`, Next.js App Router, standalone server on :7421) is a

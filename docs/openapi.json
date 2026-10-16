@@ -1,0 +1,3707 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "ASO Hub API",
+    "version": "0.1.0",
+    "license": {
+      "name": "MIT",
+      "identifier": "MIT"
+    },
+    "description": "The Hub's HTTP API, as the console and the aso CLI use it. Send the ASO token as `Authorization: Bearer <token>` (run `aso token` on the Hub). Answers may carry fields not listed here; ignore what you don't know. Workers and the Architect talk to the Hub over the WebSocket at /ws and Git at /git/<project>.git instead."
+  },
+  "servers": [
+    {
+      "url": "http://{hub}:{port}",
+      "description": "Your Hub",
+      "variables": {
+        "hub": {
+          "default": "127.0.0.1"
+        },
+        "port": {
+          "default": "7420"
+        }
+      }
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "token": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "The ASO token"
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "description": "Why the request failed"
+      },
+      "Version": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "description": "`0.1.0+<build>` of the package this Hub serves",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "package": {
+            "type": "boolean"
+          },
+          "sha256": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "version",
+          "package",
+          "sha256"
+        ],
+        "additionalProperties": false
+      },
+      "Health": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok"
+          },
+          "auth": {
+            "type": "boolean"
+          },
+          "projectsRoot": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "projects": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "targetDir": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "stateDir": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "mainBranch": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sync": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "remote": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "disabled",
+                      "idle",
+                      "pushing",
+                      "error",
+                      "conflict"
+                    ]
+                  },
+                  "lastPushAt": {
+                    "type": "string",
+                    "description": "ISO 8601 time"
+                  },
+                  "lastPushedCommit": {
+                    "type": "string"
+                  },
+                  "lastError": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "enabled",
+                  "remote",
+                  "url",
+                  "state"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "qa": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "command": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "kind": {
+                    "type": "string"
+                  },
+                  "timeoutSec": {
+                    "type": "number"
+                  },
+                  "setup": {
+                    "type": "array",
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "required": [
+                  "enabled",
+                  "command",
+                  "kind",
+                  "timeoutSec"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "allowDependencies": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "connections": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "uptimeSec": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "status",
+          "auth"
+        ],
+        "additionalProperties": false
+      },
+      "Node": {
+        "type": "object",
+        "properties": {
+          "nodeId": {
+            "type": "string"
+          },
+          "nodeKind": {
+            "type": "string",
+            "enum": [
+              "worker",
+              "architect"
+            ]
+          },
+          "version": {
+            "type": "string"
+          },
+          "outdated": {
+            "type": "boolean"
+          },
+          "connectedAt": {
+            "type": "string",
+            "description": "ISO 8601 time"
+          },
+          "lastSeenAt": {
+            "type": "string",
+            "description": "ISO 8601 time"
+          },
+          "currentTaskId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "currentTaskIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "slots": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "heartbeat": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "memoryAvailableBytes": {
+                    "type": "number"
+                  },
+                  "cpuLoadPercent": {
+                    "type": "number"
+                  },
+                  "dockerAvailable": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "memoryAvailableBytes",
+                  "cpuLoadPercent",
+                  "dockerAvailable"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "draining": {
+            "type": "boolean"
+          },
+          "restart": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "sent"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "updateTo": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updateError": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "version": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "version",
+                  "reason"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "actions": {
+            "type": "object",
+            "properties": {
+              "drain": {
+                "type": "boolean"
+              },
+              "resume": {
+                "type": "boolean"
+              },
+              "restart": {
+                "type": "boolean"
+              },
+              "why": {
+                "type": "object",
+                "properties": {
+                  "drain": {
+                    "type": "string"
+                  },
+                  "resume": {
+                    "type": "string"
+                  },
+                  "restart": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "drain",
+              "resume",
+              "restart",
+              "why"
+            ],
+            "additionalProperties": false
+          },
+          "hardware": {
+            "type": "object",
+            "properties": {
+              "hostname": {
+                "type": "string",
+                "minLength": 1
+              },
+              "platform": {
+                "type": "string"
+              },
+              "distro": {
+                "type": "string"
+              },
+              "cpu": {
+                "type": "object",
+                "properties": {
+                  "brand": {
+                    "type": "string"
+                  },
+                  "physicalCores": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "logicalCores": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "brand",
+                  "physicalCores",
+                  "logicalCores"
+                ],
+                "additionalProperties": false
+              },
+              "memory": {
+                "type": "object",
+                "properties": {
+                  "totalBytes": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "availableBytes": {
+                    "type": "number",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "totalBytes",
+                  "availableBytes"
+                ],
+                "additionalProperties": false
+              },
+              "disks": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    },
+                    "sizeBytes": {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "type",
+                    "sizeBytes"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "docker": {
+                "type": "object",
+                "properties": {
+                  "available": {
+                    "type": "boolean"
+                  },
+                  "version": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "available"
+                ],
+                "additionalProperties": false
+              },
+              "storage": {
+                "type": "object",
+                "properties": {
+                  "workDir": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "writeMBps": {
+                    "type": "number",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "workDir",
+                  "writeMBps"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "hostname",
+              "platform",
+              "distro",
+              "cpu",
+              "memory",
+              "disks",
+              "docker",
+              "storage"
+            ],
+            "additionalProperties": false
+          },
+          "supervisor": {
+            "type": "string",
+            "enum": [
+              "systemd"
+            ]
+          },
+          "updates": {
+            "type": "string",
+            "enum": [
+              "package"
+            ]
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "nodeId",
+          "nodeKind",
+          "version",
+          "outdated",
+          "connectedAt",
+          "lastSeenAt",
+          "currentTaskId",
+          "currentTaskIds",
+          "slots",
+          "heartbeat",
+          "draining",
+          "restart",
+          "updateTo",
+          "updateError",
+          "actions"
+        ],
+        "additionalProperties": false
+      },
+      "Project": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+          },
+          "dir": {
+            "type": "string"
+          },
+          "mainBranch": {
+            "type": "string"
+          },
+          "sync": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "remote": {
+                "type": "string"
+              },
+              "url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "reason": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "disabled",
+                  "idle",
+                  "pushing",
+                  "error",
+                  "conflict"
+                ]
+              },
+              "lastPushAt": {
+                "type": "string",
+                "description": "ISO 8601 time"
+              },
+              "lastPushedCommit": {
+                "type": "string"
+              },
+              "lastError": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "enabled",
+              "remote",
+              "url",
+              "state"
+            ],
+            "additionalProperties": false
+          },
+          "pullRequests": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "repo": {
+                "description": "owner/repo on GitHub",
+                "type": "string"
+              },
+              "reason": {
+                "description": "Why work is merged on the Hub instead",
+                "type": "string"
+              }
+            },
+            "required": [
+              "enabled"
+            ],
+            "additionalProperties": false
+          },
+          "tasks": {
+            "type": "object",
+            "properties": {
+              "total": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "running": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "reviewing": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "queued": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "failed": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "merged": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "total",
+              "running",
+              "reviewing",
+              "queued",
+              "failed",
+              "merged"
+            ],
+            "additionalProperties": false
+          },
+          "plansAwaitingApproval": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "plansWithQuestions": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "id",
+          "dir",
+          "mainBranch",
+          "sync",
+          "pullRequests",
+          "tasks",
+          "plansAwaitingApproval",
+          "plansWithQuestions"
+        ],
+        "additionalProperties": false
+      },
+      "SyncStatus": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "remote": {
+            "type": "string"
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "disabled",
+              "idle",
+              "pushing",
+              "error",
+              "conflict"
+            ]
+          },
+          "lastPushAt": {
+            "type": "string",
+            "description": "ISO 8601 time"
+          },
+          "lastPushedCommit": {
+            "type": "string"
+          },
+          "lastError": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled",
+          "remote",
+          "url",
+          "state"
+        ],
+        "additionalProperties": false
+      },
+      "Task": {
+        "type": "object",
+        "properties": {
+          "spec": {
+            "type": "object",
+            "properties": {
+              "taskId": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "backend",
+                  "frontend",
+                  "qa",
+                  "devops"
+                ]
+              },
+              "kind": {
+                "default": "feature",
+                "type": "string",
+                "enum": [
+                  "feature",
+                  "unit_test",
+                  "e2e_test",
+                  "db_migration",
+                  "container_build"
+                ]
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "description": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 20000
+              },
+              "acceptanceCriteria": {
+                "default": [],
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "files": {
+                "default": [],
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1024
+                }
+              },
+              "dependsOn": {
+                "default": [],
+                "maxItems": 20,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                }
+              }
+            },
+            "required": [
+              "taskId",
+              "role",
+              "kind",
+              "title",
+              "description",
+              "acceptanceCriteria",
+              "files",
+              "dependsOn"
+            ],
+            "additionalProperties": false
+          },
+          "project": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "assigned",
+              "in_progress",
+              "verifying",
+              "awaiting_qa",
+              "testing",
+              "merging",
+              "awaiting_review",
+              "merged",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "nodeId": {
+            "type": "string"
+          },
+          "qaNodeId": {
+            "type": "string"
+          },
+          "qaStarted": {
+            "type": "boolean"
+          },
+          "qaSetup": {
+            "description": "Commands run before the tests",
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "detachedAt": {
+            "description": "When its worker dropped off (epoch ms); held for it until the grace period ends",
+            "type": "number"
+          },
+          "attempts": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "qaAttempts": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "drops": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "reworkRound": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "rework": {
+            "type": "object",
+            "properties": {
+              "round": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "reason": {
+                "type": "string"
+              },
+              "failures": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "test": {
+                      "type": "string"
+                    },
+                    "file": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "output": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "round",
+              "reason",
+              "failures"
+            ],
+            "additionalProperties": false,
+            "description": "Why the work came back to an agent, as the agent is told"
+          },
+          "retries": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "budgetBaseUsd": {
+            "description": "Spend before the latest retry; the budget counts from here",
+            "type": "number"
+          },
+          "commit": {
+            "type": "string"
+          },
+          "mainCommit": {
+            "type": "string"
+          },
+          "qaSummary": {
+            "type": "string"
+          },
+          "review": {
+            "type": "object",
+            "properties": {
+              "pr": {
+                "type": "object",
+                "properties": {
+                  "number": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "url": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "number",
+                  "url"
+                ],
+                "additionalProperties": false
+              },
+              "error": {
+                "description": "Why opening or checking the pull request last failed",
+                "type": "string"
+              },
+              "rounds": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991,
+                "description": "Times a reviewer asked for changes"
+              },
+              "handled": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              }
+            },
+            "required": [
+              "rounds",
+              "handled"
+            ],
+            "additionalProperties": false,
+            "description": "The task's GitHub pull request, with pull requests on"
+          },
+          "llm": {
+            "type": "object",
+            "properties": {
+              "inputTokens": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "outputTokens": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "cacheReadTokens": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "cacheWriteTokens": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "costUsd": {
+                "type": "number",
+                "minimum": 0
+              },
+              "calls": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "inputTokens",
+              "outputTokens",
+              "cacheReadTokens",
+              "cacheWriteTokens",
+              "costUsd",
+              "calls"
+            ],
+            "additionalProperties": false
+          },
+          "filesTouched": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "agentLog": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "at": {
+                  "type": "string",
+                  "description": "ISO 8601 time"
+                },
+                "turn": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "actions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "costUsd": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "at",
+                "turn",
+                "actions",
+                "costUsd"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "planId": {
+            "type": "string"
+          },
+          "waitingReason": {
+            "description": "Why a queued task is not running yet",
+            "type": "string"
+          },
+          "routing": {
+            "description": "Why its worker was chosen",
+            "type": "object",
+            "properties": {
+              "nodeId": {
+                "type": "string"
+              },
+              "score": {
+                "type": "number"
+              },
+              "reasons": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "nodeId",
+              "score",
+              "reasons"
+            ],
+            "additionalProperties": false
+          },
+          "detail": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "description": "ISO 8601 time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "description": "ISO 8601 time"
+          },
+          "history": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "at": {
+                  "type": "string",
+                  "description": "ISO 8601 time"
+                },
+                "event": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "at",
+                "event"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "spec",
+          "project",
+          "state",
+          "attempts",
+          "qaAttempts",
+          "drops",
+          "reworkRound",
+          "llm",
+          "filesTouched",
+          "agentLog",
+          "createdAt",
+          "updatedAt",
+          "history"
+        ],
+        "additionalProperties": false
+      },
+      "Plan": {
+        "type": "object",
+        "properties": {
+          "planId": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "requirement": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "planning",
+              "awaiting_input",
+              "proposed",
+              "approved",
+              "rejected",
+              "failed"
+            ]
+          },
+          "architectNodeId": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9-]{0,40}$"
+                },
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "backend",
+                    "frontend",
+                    "qa",
+                    "devops"
+                  ]
+                },
+                "kind": {
+                  "default": "feature",
+                  "type": "string",
+                  "enum": [
+                    "feature",
+                    "unit_test",
+                    "e2e_test",
+                    "db_migration",
+                    "container_build"
+                  ]
+                },
+                "title": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "description": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 20000
+                },
+                "acceptanceCriteria": {
+                  "default": [],
+                  "maxItems": 20,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "files": {
+                  "default": [],
+                  "maxItems": 50,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024
+                  }
+                },
+                "dependsOn": {
+                  "default": [],
+                  "maxItems": 20,
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "key",
+                "role",
+                "kind",
+                "title",
+                "description",
+                "acceptanceCriteria",
+                "files",
+                "dependsOn"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "taskIds": {
+            "description": "Plan key → task id, once approved",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "questions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "dialogue": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "questions"
+                    },
+                    "at": {
+                      "type": "string",
+                      "description": "ISO 8601 time"
+                    },
+                    "questions": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "context": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "at",
+                    "questions"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "proposal"
+                    },
+                    "at": {
+                      "type": "string",
+                      "description": "ISO 8601 time"
+                    },
+                    "summary": {
+                      "type": "string"
+                    },
+                    "tasks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9-]{0,40}$"
+                          },
+                          "role": {
+                            "type": "string",
+                            "enum": [
+                              "backend",
+                              "frontend",
+                              "qa",
+                              "devops"
+                            ]
+                          },
+                          "kind": {
+                            "default": "feature",
+                            "type": "string",
+                            "enum": [
+                              "feature",
+                              "unit_test",
+                              "e2e_test",
+                              "db_migration",
+                              "container_build"
+                            ]
+                          },
+                          "title": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "description": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 20000
+                          },
+                          "acceptanceCriteria": {
+                            "default": [],
+                            "maxItems": 20,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "files": {
+                            "default": [],
+                            "maxItems": 50,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 1024
+                            }
+                          },
+                          "dependsOn": {
+                            "default": [],
+                            "maxItems": 20,
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "role",
+                          "kind",
+                          "title",
+                          "description",
+                          "acceptanceCriteria",
+                          "files",
+                          "dependsOn"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "at",
+                    "summary",
+                    "tasks"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "reply"
+                    },
+                    "at": {
+                      "type": "string",
+                      "description": "ISO 8601 time"
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "at",
+                    "text"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "error": {
+            "type": "string"
+          },
+          "budgetBaseUsd": {
+            "type": "number"
+          },
+          "llm": {
+            "type": "object",
+            "properties": {
+              "inputTokens": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "outputTokens": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "cacheReadTokens": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "cacheWriteTokens": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "costUsd": {
+                "type": "number",
+                "minimum": 0
+              },
+              "calls": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "inputTokens",
+              "outputTokens",
+              "cacheReadTokens",
+              "cacheWriteTokens",
+              "costUsd",
+              "calls"
+            ],
+            "additionalProperties": false
+          },
+          "agentLog": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "at": {
+                  "type": "string",
+                  "description": "ISO 8601 time"
+                },
+                "turn": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "actions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "costUsd": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "at",
+                "turn",
+                "actions",
+                "costUsd"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "history": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "at": {
+                  "type": "string",
+                  "description": "ISO 8601 time"
+                },
+                "event": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "at",
+                "event"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "description": "ISO 8601 time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "description": "ISO 8601 time"
+          }
+        },
+        "required": [
+          "planId",
+          "project",
+          "requirement",
+          "state",
+          "llm",
+          "agentLog",
+          "history",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "Transcript": {
+        "type": "object",
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "seq": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "at": {
+                      "type": "string",
+                      "description": "ISO 8601 time"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "const": "text"
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "seq",
+                    "at",
+                    "kind",
+                    "text"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "seq": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "at": {
+                      "type": "string",
+                      "description": "ISO 8601 time"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "const": "call"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "input": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "seq",
+                    "at",
+                    "kind",
+                    "id",
+                    "name",
+                    "input"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "seq": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "at": {
+                      "type": "string",
+                      "description": "ISO 8601 time"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "const": "result"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "content": {
+                      "type": "string"
+                    },
+                    "isError": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "seq",
+                    "at",
+                    "kind",
+                    "id",
+                    "content",
+                    "isError"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "seq": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "at": {
+                      "type": "string",
+                      "description": "ISO 8601 time"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "const": "event"
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "seq",
+                    "at",
+                    "kind",
+                    "text"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "seq": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "at": {
+                      "type": "string",
+                      "description": "ISO 8601 time"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "const": "qa"
+                    },
+                    "outcome": {
+                      "type": "string",
+                      "enum": [
+                        "pass",
+                        "fail"
+                      ]
+                    },
+                    "summary": {
+                      "type": "string"
+                    },
+                    "output": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "seq",
+                    "at",
+                    "kind",
+                    "outcome",
+                    "summary"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "last": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Highest seq so far; pass it as `after` to get only newer entries"
+          }
+        },
+        "required": [
+          "entries",
+          "last"
+        ],
+        "additionalProperties": false
+      },
+      "LlmStatus": {
+        "type": "object",
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          },
+          "adapter": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "taskBudgetUsd": {
+            "type": "number"
+          },
+          "planBudgetUsd": {
+            "type": "number"
+          },
+          "maxTurns": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "queue": {
+            "type": "object",
+            "properties": {
+              "limit": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "running": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "waiting": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "limit",
+              "running",
+              "waiting"
+            ],
+            "additionalProperties": false,
+            "description": "Model requests at once, now and waiting"
+          },
+          "conversations": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "totals": {
+            "type": "object",
+            "properties": {
+              "calls": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "costUsd": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "calls",
+              "costUsd"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "configured",
+          "adapter",
+          "model",
+          "taskBudgetUsd",
+          "planBudgetUsd",
+          "maxTurns",
+          "queue",
+          "conversations",
+          "totals"
+        ],
+        "additionalProperties": false
+      },
+      "PushStatus": {
+        "type": "object",
+        "properties": {
+          "publicKey": {
+            "type": "string"
+          },
+          "devices": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "publicKey",
+          "devices"
+        ],
+        "additionalProperties": false
+      },
+      "PushSubscribed": {
+        "type": "object",
+        "properties": {
+          "subscribed": {
+            "type": "boolean",
+            "const": true
+          },
+          "devices": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "subscribed",
+          "devices"
+        ],
+        "additionalProperties": false
+      },
+      "PushCheck": {
+        "type": "object",
+        "properties": {
+          "subscribed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "subscribed"
+        ],
+        "additionalProperties": false
+      },
+      "PushRemoved": {
+        "type": "object",
+        "properties": {
+          "removed": {
+            "type": "boolean"
+          },
+          "devices": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "removed",
+          "devices"
+        ],
+        "additionalProperties": false
+      },
+      "PushTestResult": {
+        "type": "object",
+        "properties": {
+          "sent": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Devices that took it"
+          },
+          "failed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "sent",
+          "failed"
+        ],
+        "additionalProperties": false
+      },
+      "SignInCode": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string",
+            "description": "ISO 8601 time"
+          }
+        },
+        "required": [
+          "code",
+          "expiresAt"
+        ],
+        "additionalProperties": false
+      },
+      "SignedIn": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "additionalProperties": false
+      },
+      "CreateProject": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "CreatePlan": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+          },
+          "requirement": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 50000,
+            "description": "What to build, in plain words"
+          }
+        },
+        "required": [
+          "requirement"
+        ]
+      },
+      "PlanReply": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "message"
+        ]
+      },
+      "CreateTask": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "backend",
+              "frontend",
+              "qa",
+              "devops"
+            ]
+          },
+          "kind": {
+            "default": "feature",
+            "type": "string",
+            "enum": [
+              "feature",
+              "unit_test",
+              "e2e_test",
+              "db_migration",
+              "container_build"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20000
+          },
+          "acceptanceCriteria": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "files": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            }
+          },
+          "dependsOn": {
+            "default": [],
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+            }
+          },
+          "project": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+          }
+        },
+        "required": [
+          "role",
+          "title",
+          "description"
+        ],
+        "additionalProperties": false
+      },
+      "Sync": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+          }
+        }
+      },
+      "RedeemSignInCode": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "code"
+        ]
+      },
+      "PushSubscription": {
+        "type": "object",
+        "properties": {
+          "endpoint": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "keys": {
+            "type": "object",
+            "properties": {
+              "p256dh": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]+={0,2}$"
+              },
+              "auth": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]+={0,2}$"
+              }
+            },
+            "required": [
+              "p256dh",
+              "auth"
+            ]
+          }
+        },
+        "required": [
+          "endpoint",
+          "keys"
+        ]
+      },
+      "PushEndpoint": {
+        "type": "object",
+        "properties": {
+          "endpoint": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          }
+        },
+        "required": [
+          "endpoint"
+        ]
+      },
+      "PushTest": {
+        "type": "object",
+        "properties": {
+          "endpoint": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "token": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Hub",
+      "description": "The Hub itself: version, health, model status"
+    },
+    {
+      "name": "Projects",
+      "description": "Projects (one git repository each), and pushing their main"
+    },
+    {
+      "name": "Plans",
+      "description": "Requirements the Architect turns into tasks, and the conversation about them"
+    },
+    {
+      "name": "Tasks",
+      "description": "Units of work an agent implements, QA tests and a person (or the Hub) merges"
+    },
+    {
+      "name": "Workers",
+      "description": "The machines that run jobs, and draining or restarting them"
+    },
+    {
+      "name": "Console",
+      "description": "Signing browsers in and phone notifications"
+    }
+  ],
+  "paths": {
+    "/api/version": {
+      "get": {
+        "operationId": "getVersion",
+        "tags": [
+          "Hub"
+        ],
+        "summary": "The aso build this Hub serves to other machines",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Version"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dist/aso.tgz": {
+      "get": {
+        "operationId": "getPackage",
+        "tags": [
+          "Hub"
+        ],
+        "summary": "The aso package, for installing and updating machines",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The npm package (gzipped tarball)",
+            "content": {
+              "application/gzip": {
+                "schema": {
+                  "type": "string",
+                  "contentMediaType": "application/gzip"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "This Hub serves no package",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/health": {
+      "get": {
+        "operationId": "getHealth",
+        "tags": [
+          "Hub"
+        ],
+        "summary": "Liveness, plus details with the token",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/openapi.json": {
+      "get": {
+        "operationId": "getOpenapi",
+        "tags": [
+          "Hub"
+        ],
+        "summary": "This description (OpenAPI 3.1)",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OpenAPI 3.1 document"
+          }
+        }
+      }
+    },
+    "/api/llm": {
+      "get": {
+        "operationId": "getLlm",
+        "tags": [
+          "Hub"
+        ],
+        "summary": "Model configuration, queue and spend",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          }
+        }
+      }
+    },
+    "/api/projects": {
+      "get": {
+        "operationId": "getProjects",
+        "tags": [
+          "Projects"
+        ],
+        "summary": "All projects",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Project"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postProjects",
+        "tags": [
+          "Projects"
+        ],
+        "summary": "Create an empty project (a git repository with one commit)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProject"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Project"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid name, or the Hub has no projects root",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "409": {
+            "description": "It exists already",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}": {
+      "get": {
+        "operationId": "getProject",
+        "tags": [
+          "Projects"
+        ],
+        "summary": "One project",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Project"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "No such project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sync": {
+      "get": {
+        "operationId": "getSync",
+        "tags": [
+          "Projects"
+        ],
+        "summary": "Push status of a project's main",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "query",
+            "required": false,
+            "description": "Only this project's (default: all)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Several projects and none named",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "No such project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "postSync",
+        "tags": [
+          "Projects"
+        ],
+        "summary": "Push main now, and check pull requests now",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "query",
+            "required": false,
+            "description": "Only this project's (default: all)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Sync"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Several projects and none named",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "No such project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plans": {
+      "get": {
+        "operationId": "getPlans",
+        "tags": [
+          "Plans"
+        ],
+        "summary": "All plans",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "query",
+            "required": false,
+            "description": "Only this project's (default: all)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Plan"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postPlans",
+        "tags": [
+          "Plans"
+        ],
+        "summary": "Ask the Architect to plan a requirement",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePlan"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Queued for the Architect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Plan"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body, or several projects and none named",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "No such project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plans/{id}": {
+      "get": {
+        "operationId": "getPlan",
+        "tags": [
+          "Plans"
+        ],
+        "summary": "One plan",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Plan"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "No such plan",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plans/{id}/approve": {
+      "post": {
+        "operationId": "postPlanApprove",
+        "tags": [
+          "Plans"
+        ],
+        "summary": "Approve a proposed plan: its tasks are queued",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Plan"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "No such plan",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not proposed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plans/{id}/reject": {
+      "post": {
+        "operationId": "postPlanReject",
+        "tags": [
+          "Plans"
+        ],
+        "summary": "Reject a plan",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Plan"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "No such plan",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Already decided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plans/{id}/reply": {
+      "post": {
+        "operationId": "postPlanReply",
+        "tags": [
+          "Plans"
+        ],
+        "summary": "Answer the Architect's questions, or ask for changes to a proposal",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanReply"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Plan"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "No such plan",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not waiting for a reply, or too many replies",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plans/{id}/transcript": {
+      "get": {
+        "operationId": "getPlanTranscript",
+        "tags": [
+          "Plans"
+        ],
+        "summary": "The Architect's work on a plan, as it happens",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "description": "Only entries after this seq",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Transcript"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "No such plan",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks": {
+      "get": {
+        "operationId": "getTasks",
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "All tasks",
+        "parameters": [
+          {
+            "name": "project",
+            "in": "query",
+            "required": false,
+            "description": "Only this project's (default: all)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Task"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postTasks",
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Queue a task directly (without a plan)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTask"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Task"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid task, or several projects and none named",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "No such project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The task id is taken",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}": {
+      "get": {
+        "operationId": "getTask",
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "One task",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Task"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "No such task",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}/cancel": {
+      "post": {
+        "operationId": "postTaskCancel",
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Stop a task (closes its pull request)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Task"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "No such task",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Finished, or merging right now",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}/retry": {
+      "post": {
+        "operationId": "postTaskRetry",
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Queue a failed or cancelled task again with fresh limits",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Task"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "No such task",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not failed or cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}/transcript": {
+      "get": {
+        "operationId": "getTaskTranscript",
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "The agent's and QA's work on a task, as it happens",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "description": "Only entries after this seq",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Transcript"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "No such task",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/nodes": {
+      "get": {
+        "operationId": "getNodes",
+        "tags": [
+          "Workers"
+        ],
+        "summary": "Connected workers and the Architect",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Node"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          }
+        }
+      }
+    },
+    "/api/nodes/{id}/drain": {
+      "post": {
+        "operationId": "postNodeDrain",
+        "tags": [
+          "Workers"
+        ],
+        "summary": "Give a worker no new jobs; current ones finish",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Node"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "No such worker",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not allowed now (see actions.why)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/nodes/{id}/resume": {
+      "post": {
+        "operationId": "postNodeResume",
+        "tags": [
+          "Workers"
+        ],
+        "summary": "Give a drained worker jobs again (cancels a waiting restart or update)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Node"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "No such worker",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not allowed now",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/nodes/{id}/restart": {
+      "post": {
+        "operationId": "postNodeRestart",
+        "tags": [
+          "Workers"
+        ],
+        "summary": "Restart a service-run worker once its jobs are done",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Node"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "No such worker",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not allowed now (e.g. started by hand)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sign-in-codes": {
+      "post": {
+        "operationId": "postSignInCodes",
+        "tags": [
+          "Console"
+        ],
+        "summary": "A one-time code that signs a browser in to the console",
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignInCode"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          }
+        }
+      }
+    },
+    "/api/sign-in-codes/redeem": {
+      "post": {
+        "operationId": "postSignInCodesRedeem",
+        "tags": [
+          "Console"
+        ],
+        "summary": "Use a sign-in code (the console's server does this)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RedeemSignInCode"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignedIn"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "410": {
+            "description": "Used up or expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/push": {
+      "get": {
+        "operationId": "getPush",
+        "tags": [
+          "Console"
+        ],
+        "summary": "Web Push key and the number of subscribed devices",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PushStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          }
+        }
+      }
+    },
+    "/api/push/subscriptions": {
+      "post": {
+        "operationId": "postPushSubscriptions",
+        "tags": [
+          "Console"
+        ],
+        "summary": "Turn notifications on for a device",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PushSubscription"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Subscribed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PushSubscribed"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid subscription",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          }
+        }
+      }
+    },
+    "/api/push/subscriptions/check": {
+      "post": {
+        "operationId": "postPushSubscriptionsCheck",
+        "tags": [
+          "Console"
+        ],
+        "summary": "Whether a device has notifications on",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PushEndpoint"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PushCheck"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          }
+        }
+      }
+    },
+    "/api/push/subscriptions/delete": {
+      "post": {
+        "operationId": "postPushSubscriptionsDelete",
+        "tags": [
+          "Console"
+        ],
+        "summary": "Turn notifications off for a device",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PushEndpoint"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PushRemoved"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          }
+        }
+      }
+    },
+    "/api/push/test": {
+      "post": {
+        "operationId": "postPushTest",
+        "tags": [
+          "Console"
+        ],
+        "summary": "Send a test notification to one device or all",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PushTest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PushTestResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "No (such) subscribed device",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "No device took it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PushTestResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -695,10 +695,21 @@ Options:
 
 ## Hub endpoints
 
+The full description is **OpenAPI 3.1**: every Hub serves it at `/api/openapi.json` (no token
+needed), and [`docs/openapi.json`](docs/openapi.json) is the same document in this repository.
+Point a client generator or an API viewer at either to build on the Hub, for example a UI of
+your own. The request and answer shapes come from the Zod schemas in `@aso/shared`
+(`packages/shared/src/api.ts`), which the Hub validates request bodies with. Tests check that
+every route is described and that real answers match. After changing the API, run
+`npm run openapi` to update `docs/openapi.json`; a test fails until you do.
+
+Answers can gain fields over time: clients should ignore fields they don't know.
+
 **Authentication:**
 
-- **Protected endpoints:** everything except `/api/health`, `/api/version` and
-  `/dist/aso.tgz` requires the ASO token, as `Authorization: Bearer <token>`.
+- **Protected endpoints:** everything except `/api/health`, `/api/version`,
+  `/api/openapi.json` and `/dist/aso.tgz` requires the ASO token, as
+  `Authorization: Bearer <token>`.
 - **Git and browsers:** these use HTTP Basic auth with any user name and the token as the
   password.
 
@@ -706,6 +717,7 @@ Options:
 |---|---|---|
 | `GET` | `/api/health` | Without a token: `{status, auth}`. With it: also target, state directory, main branch, QA, sync status, connections, uptime |
 | `GET` | `/api/version` | Version and SHA-256 of the `aso` package this Hub serves (public) |
+| `GET` | `/api/openapi.json` | This API as an OpenAPI 3.1 document (public) |
 | `GET` | `/dist/aso.tgz` | The `aso` package for installing/updating machines (public; contains no secrets) |
 | `GET` / `POST` | `/api/sync` | Push status / retry the push of `main` to `origin` |
 | `GET` | `/api/llm` | LLM status: model, queue, calls and estimated spend since start |

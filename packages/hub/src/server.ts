@@ -13,6 +13,7 @@ import {
   NODE_TIMEOUT_MS,
   NODE_TO_HUB_TYPES,
   WS_PATH,
+  UNKNOWN_VERSION,
   createLogger,
   createMessage,
   isAuthorized,
@@ -22,8 +23,16 @@ import {
   PushEndpointSchema,
   PushSubscriptionSchema,
   PushTestSchema,
+  CreatePlanBodySchema,
+  CreateProjectBodySchema,
+  CreateTaskBodySchema,
+  PlanReplyBodySchema,
+  RedeemSignInCodeBodySchema,
+  SyncBodySchema,
   type AgentMessage,
 } from "@aso/shared";
+import { openApiDocument } from "./api/openapi.js";
+import type { z } from "zod";
 import { AnthropicApiAdapter, type Effort, type LlmAdapter } from "./llm/adapter.js";
 import { ConversationManager } from "./llm/conversations.js";
 import { hasPrice } from "./llm/pricing.js";
@@ -121,6 +130,8 @@ export interface HubHandle {
   plans: ProjectSet["plans"];
   /** Push status of the only project (single-project Hubs). */
   sync: GitSync;
+  /** The HTTP routes it answers (method and path), to check them against the API description. */
+  routes(): Array<{ method: string; path: string }>;
   close(): Promise<void>;
 }
 
@@ -354,7 +365,8 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   });
 
   // Health stays public (minimal) so tools can check liveness; everything else needs the token.
-  app.use("/api/*", async (c, next) => (["/api/health", "/api/version"].includes(c.req.path) ? next() : requireAuth(c, next)));
+  app.use("/api/*", async (c, next) => (["/api/health", "/api/version", "/api/openapi.json"].includes(c.req.path) ? next() : requireAuth(c, next)));
+  app.get("/api/openapi.json", (c) => c.json(openApiDocument(hubVersion() ?? UNKNOWN_VERSION)));
   app.use(`${GIT_PATH}/*`, requireAuth);
   app.use(WS_PATH, requireAuth);
 
@@ -418,12 +430,18 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     nodeAction(c, (id) => registry.requestRestart(id), (n) => `${n.nodeId} restart ${n.restart === "sent" ? "sent" : "requested once its current job is done"}`),
   );
 
+  /** A request body as the API describes it (`@aso/shared` api.ts), or why it isn't. `optional`: it may be left out. */
+  const parsed = async <T>(c: Context, schema: z.ZodType<T>, opts: { optional?: boolean } = {}) => {
+    const data: unknown = await c.req.json().catch(() => undefined);
+    return parseBody(schema, data === undefined && opts.optional ? {} : data);
+  };
+
   // One-time console sign-in links (the console redeems them for a session; both need the token).
   const signInCodes = new SignInCodes();
   app.post("/api/sign-in-codes", (c) => c.json(signInCodes.create(), 201));
   app.post("/api/sign-in-codes/redeem", async (c) => {
-    const data = (await c.req.json().catch(() => null)) as { code?: unknown } | null;
-    return signInCodes.redeem(data?.code) ? c.json({ ok: true }) : c.json({ error: "this sign-in link is used up or expired" }, 410);
+    const req = await parsed(c, RedeemSignInCodeBodySchema);
+    return req.ok && signInCodes.redeem(req.data.code) ? c.json({ ok: true }) : c.json({ error: "this sign-in link is used up or expired" }, 410);
   });
 
   app.get("/api/llm", (c) => c.json(conversations.status()));
@@ -439,14 +457,8 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     }
     throw err;
   };
-  const body = async (c: Context): Promise<Record<string, unknown> | undefined> => {
-    const data = (await c.req.json().catch(() => undefined)) as unknown;
-    return data && typeof data === "object" && !Array.isArray(data) ? (data as Record<string, unknown>) : undefined;
-  };
-
   // Push notifications: devices subscribe from the console; the Hub notifies them of plans to
   // approve, failed tasks and finished plans.
-  const parsed = async <T>(c: Context, schema: Parameters<typeof parseBody<T>>[0]) => parseBody(schema, await c.req.json().catch(() => undefined));
   app.get("/api/push", (c) => c.json({ publicKey: notifier!.publicKey, devices: notifier!.subscriptionCount }));
   app.post("/api/push/subscriptions", async (c) => {
     const req = await parsed(c, PushSubscriptionSchema);
@@ -500,8 +512,10 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     return p ? c.json(projectView(p)) : c.json({ error: "not found" }, 404);
   });
   app.post("/api/projects", async (c) => {
+    const req = await parsed(c, CreateProjectBodySchema);
+    if (!req.ok) return c.json({ error: req.error }, 400);
     try {
-      return c.json(projectView(await projects.create((await body(c))?.name)), 201);
+      return c.json(projectView(await projects.create(req.data.name)), 201);
     } catch (err) {
       return fail(c, err);
     }
@@ -522,7 +536,9 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   });
   app.post("/api/sync", async (c) => {
     try {
-      const p = projects.resolve(c.req.query("project") ?? (await body(c))?.project);
+      const req = await parsed(c, SyncBodySchema, { optional: true });
+      if (!req.ok) return c.json({ error: req.error }, 400);
+      const p = projects.resolve(c.req.query("project") ?? req.data.project);
       await p.sync.requestPush();
       await projects.checkReviews(p.id);
       return c.json(p.sync.status());
@@ -539,9 +555,10 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   });
 
   app.post("/api/plans", async (c) => {
+    const req = await parsed(c, CreatePlanBodySchema);
+    if (!req.ok) return c.json({ error: req.error }, 400);
     try {
-      const data = await body(c);
-      return c.json(projects.resolve(data?.project).plans.create(data?.requirement), 201);
+      return c.json(projects.resolve(req.data.project).plans.create(req.data.requirement), 201);
     } catch (err) {
       return fail(c, err);
     }
@@ -560,8 +577,9 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   app.post("/api/plans/:id/approve", (c) => planAction(c, (p, id) => p.plans.approve(id)));
   app.post("/api/plans/:id/reject", (c) => planAction(c, (p, id) => p.plans.reject(id)));
   app.post("/api/plans/:id/reply", async (c) => {
-    const message = (await body(c))?.message;
-    return planAction(c, (p, id) => p.plans.reply(id, message));
+    // The plan's own checks come first (a plan that takes no reply is a 409 whatever the body).
+    const req = await parsed(c, PlanReplyBodySchema);
+    return planAction(c, (p, id) => p.plans.reply(id, req.ok ? req.data.message : undefined));
   });
 
   app.get("/api/tasks", (c) => c.json(inProject(c, tasks.list())));
@@ -594,10 +612,10 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   });
 
   app.post("/api/tasks", async (c) => {
-    const data = await body(c);
-    if (!data) return c.json({ error: "body must be a JSON object" }, 400);
+    const req = await parsed(c, CreateTaskBodySchema);
+    if (!req.ok) return c.json({ error: req.error }, 400);
     try {
-      const { project, ...spec } = data;
+      const { project, ...spec } = req.data;
       return c.json(projects.resolve(project).tasks.submit(spec), 201);
     } catch (err) {
       return fail(c, err);
@@ -666,6 +684,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     get sync() {
       return projects.resolve(undefined).sync;
     },
+    routes: () => app.routes.filter((r) => r.method === "GET" || r.method === "POST").map((r) => ({ method: r.method, path: r.path })),
     close: async () => {
       clearInterval(sweep);
       // Save before the nodes are disconnected: those disconnects are the Hub's doing, and
