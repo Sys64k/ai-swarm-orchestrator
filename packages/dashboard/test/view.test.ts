@@ -20,6 +20,7 @@ import {
   workerViews,
   buildOf,
   mergeNote,
+  crewLine,
   linkParts,
   reviewLink,
   reviewView,
@@ -103,6 +104,34 @@ describe("pull request reviews", () => {
     assert.equal(mergeNote({ pullRequests: { enabled: true, repo: "me/shop" } }), "QA-approved work becomes a pull request on me/shop for you to merge.");
     assert.equal(mergeNote({ pullRequests: { enabled: false, reason: "no GitHub token (ASO_GIT_TOKEN) for opening pull requests" } }), "QA-approved work is merged here: no GitHub token (ASO_GIT_TOKEN) for opening pull requests.");
     assert.equal(mergeNote({}), undefined, "a Hub from before pull requests");
+  });
+});
+
+describe("agents", () => {
+  const member = (job: "implement" | "test", host: string, slot: number) => ({ job, host, slot, nodeId: `${host}-x`, at: "" });
+
+  it("says which agents built and tested a task, and who is on it now", () => {
+    assert.equal(crewLine(task("t", "pending")), undefined);
+    assert.equal(crewLine(task("t", "in_progress", { crew: [member("implement", "avalon", 2)] })), "Building: avalon #2");
+    const done = [member("implement", "avalon", 2), member("test", "canfod", 1)];
+    assert.equal(crewLine(task("t", "testing", { crew: done })), "Built by avalon #2 · testing: canfod #1");
+    assert.equal(crewLine(task("t", "merged", { crew: done })), "Built by avalon #2 · tested by canfod #1");
+    const reworked = [...done, member("implement", "canfod", 2), member("test", "avalon", 1), member("test", "avalon", 1)];
+    assert.equal(crewLine(task("t", "awaiting_review", { crew: reworked })), "Built by avalon #2, then canfod #2 · tested by canfod #1, then avalon #1");
+  });
+
+  it("labels a worker's jobs with the desk running each", () => {
+    const node: HubNode = {
+      nodeId: "w",
+      nodeKind: "worker",
+      heartbeat: null,
+      currentTaskId: "a",
+      currentTaskIds: ["a", "b", "c"],
+      lastSeenAt: "",
+      jobs: [{ taskId: "a", job: "implement", slot: 2 }, { taskId: "b", job: "test", slot: 1 }, { taskId: "c", job: "implement" }],
+    };
+    assert.deepEqual(workerView(node).jobLabels.map((j) => j.label), ["#2 on a", "#1 testing b", "on c"]);
+    assert.deepEqual(workerView({ ...node, jobs: undefined }).jobLabels.map((j) => j.label), ["on a", "on b", "on c"], "an older Hub");
   });
 });
 

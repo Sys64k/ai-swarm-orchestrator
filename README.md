@@ -400,6 +400,15 @@ notified.
 - **Keys and subscriptions** are kept in `<projects root>/.aso/push.json` (owner-only
   permissions). Deleting it signs every device out of notifications.
 
+## Agents
+
+An **agent** is one job slot of a worker machine, named after both: `avalon #2` is desk 2 on
+avalon. Unlike a worker's node id, which changes each time it restarts, the name stays. Each
+task keeps its `crew`: the agents that implemented and tested it, including those after a
+rework. The console's task page says "Built by avalon #2 · tested by canfod #1", and a
+worker's page shows which desk is on which task. `/api/nodes` lists each worker's `jobs` with
+their desk.
+
 ## How a task flows
 
 1. **Route.** The Hub picks the best idle worker for the task's role and hardware needs.
@@ -725,7 +734,7 @@ Answers can gain fields over time: clients should ignore fields they don't know.
 | `GET` / `POST` | `/api/sync` | Push status / retry the push of `main` to `origin` |
 | `GET` | `/api/llm` | LLM status: model, queue, calls and estimated spend since start |
 | `GET` | `/api/nodes` | Registered nodes with hardware, latest heartbeat, current task, the aso build each runs (`version`), `outdated` (a different build than the Hub serves), `supervisor`, `updates` (`package`: it can update itself), `draining`, `restart`, `updateTo` (the build a pending or running update installs), `updateError` (why the Hub stopped updating that machine) and `actions` (what the console may do now, with `why` for a refusal) |
-| `GET` | `/api/tasks` | All tasks with state, nodes, commits, rework round and history |
+| `GET` | `/api/tasks` | All tasks with state, nodes, commits, rework round, `crew` (the agents that built and tested it) and history |
 | `GET` | `/api/tasks/:id` | A single task (history, agent turn log, LLM cost, files touched) |
 | `GET` | `/api/tasks/:id/transcript`, `/api/plans/:id/transcript` | What the agent said and did: text, tool calls, command output, events, QA verdicts. `?after=<seq>` returns only newer entries |
 | `POST` | `/api/tasks/:id/cancel` | Stop a task that isn't finished; a worker still on it is cut off at its next model turn |

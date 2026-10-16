@@ -168,6 +168,25 @@ export function linkParts(text: string): Array<{ text: string; url?: string }> {
   return parts;
 }
 
+/**
+ * Who worked on a task, by agent name (machine and desk): "Built by avalon #2 · tested by
+ * canfod #1", or "Building: avalon #3" while it is under way. Earlier agents (before a rework)
+ * come first: "Built by avalon #2, then canfod #1".
+ */
+export function crewLine(task: Pick<Task, "state" | "crew">): string | undefined {
+  const crew = task.crew ?? [];
+  if (!crew.length) return undefined;
+  const names = (job: "implement" | "test") => [...new Set(crew.filter((m) => m.job === job).map((m) => `${m.host} #${m.slot}`))];
+  const builders = names("implement");
+  const testers = names("test");
+  const building = task.state === "assigned" || task.state === "in_progress";
+  const parts = [
+    builders.length ? `${building ? "Building:" : "Built by"} ${building ? builders.at(-1) : builders.join(", then ")}` : undefined,
+    testers.length ? `${task.state === "testing" ? "testing:" : "tested by"} ${task.state === "testing" ? testers.at(-1) : testers.join(", then ")}` : undefined,
+  ].filter(Boolean);
+  return parts.join(" · ");
+}
+
 /** Where a project's QA-approved work goes, for its page. */
 export function mergeNote(project: Pick<Project, "pullRequests">): string | undefined {
   const pr = project.pullRequests;
@@ -201,6 +220,8 @@ export interface WorkerView {
   name: string;
   /** Tasks it is working on now (one per busy slot). */
   taskIds: string[];
+  /** The same, labelled with the agent (desk) on each when known: "#2 on api-1", "#1 testing ui-3". */
+  jobLabels: Array<{ taskId: string; label: string }>;
   detail: string;
   outdated: boolean;
   /** About its aso build, when it is not the Hub's: an update under way, or what to do. */
@@ -236,6 +257,11 @@ export function workerView(n: HubNode): WorkerView {
     nodeId: n.nodeId,
     name,
     taskIds,
+    jobLabels: taskIds.map((taskId) => {
+      const job = n.jobs?.find((j) => j.taskId === taskId);
+      const desk = job?.slot ? `#${job.slot} ` : "";
+      return { taskId, label: `${desk}${job?.job === "test" ? "testing" : "on"} ${taskId}` };
+    }),
     detail: [size, slots > 1 ? `${slots} job slots` : undefined, cpu, build].filter(Boolean).join(" · "),
     outdated: n.outdated === true,
     updateNote: updateNote(n, taskIds.length),

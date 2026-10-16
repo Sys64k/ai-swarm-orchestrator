@@ -34,6 +34,7 @@ describe("a job in a project with a lockfile", () => {
           await postTask(ctx.port, { taskId: "greet", role: "backend", title: "Greet", description: "Say hello" });
           const task = await waitFor(() => ctx.hub.tasks.get("greet")?.state === "merged" && ctx.hub.tasks.get("greet"), 10_000, "merged");
           assert.deepEqual(order, ["npm ci --no-audit --no-fund", "agent"], "installed before the agent started");
+          assert.deepEqual(task.crew?.map((m) => [m.job, m.host, m.slot]), [["implement", "test", 1]], "a real worker reports its desk");
           const files = git(ctx.repoDir, "ls-tree", "-r", "--name-only", task.commit!).split("\n");
           assert.ok(files.includes("hello.txt"));
           assert.ok(!files.some((f) => f.startsWith("node_modules")), "node_modules stays out of the commit, with no .gitignore");

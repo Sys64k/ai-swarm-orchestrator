@@ -42,9 +42,9 @@ export function WorkerPage({ id }: { id: string }) {
           <Badge {...w.status} />
           <div className="chips">
             <span className="chip">{w.nodeId}</span>
-            {w.taskIds.map((taskId) => (
+            {w.jobLabels.map(({ taskId, label }) => (
               <Link key={taskId} href={`/tasks/${taskId}`} className="chip chip-link">
-                on {taskId}
+                {label}
               </Link>
             ))}
           </div>

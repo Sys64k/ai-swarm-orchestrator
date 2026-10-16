@@ -276,6 +276,36 @@
               "type": "string"
             }
           },
+          "jobs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "taskId": {
+                  "type": "string"
+                },
+                "job": {
+                  "type": "string",
+                  "enum": [
+                    "implement",
+                    "test"
+                  ]
+                },
+                "slot": {
+                  "description": "Its desk, once the worker reported it",
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "taskId",
+                "job"
+              ],
+              "additionalProperties": false
+            },
+            "description": "What it runs, and at which desk (the agent named `<host> #<slot>`)"
+          },
           "slots": {
             "type": "integer",
             "minimum": -9007199254740991,
@@ -543,6 +573,7 @@
           "lastSeenAt",
           "currentTaskId",
           "currentTaskIds",
+          "jobs",
           "slots",
           "heartbeat",
           "draining",
@@ -949,6 +980,49 @@
           },
           "qaSummary": {
             "type": "string"
+          },
+          "crew": {
+            "description": "The agents that implemented and tested it, oldest first",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "job": {
+                  "type": "string",
+                  "enum": [
+                    "implement",
+                    "test"
+                  ]
+                },
+                "host": {
+                  "type": "string",
+                  "description": "The worker machine's hostname"
+                },
+                "slot": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "The job slot (desk) on it, from 1"
+                },
+                "nodeId": {
+                  "type": "string",
+                  "description": "The worker's node id at the time (changes when it restarts)"
+                },
+                "at": {
+                  "type": "string",
+                  "description": "When this agent started on it"
+                }
+              },
+              "required": [
+                "job",
+                "host",
+                "slot",
+                "nodeId",
+                "at"
+              ],
+              "additionalProperties": false,
+              "description": "An agent that worked on a task: one per implementation round or QA run on a new desk"
+            }
           },
           "review": {
             "type": "object",
