@@ -168,6 +168,51 @@ export function linkParts(text: string): Array<{ text: string; url?: string }> {
   return parts;
 }
 
+export interface AgentRow {
+  /** `<host> #<desk>`, the agent's name everywhere (console, aso-ui, task crews). */
+  name: string;
+  slot: number;
+  /** What the desk is doing now; absent when idle. */
+  now?: { taskId: string; job: "implement" | "test"; title: string };
+  /** The last task this agent worked on, other than the current one. */
+  last?: { taskId: string; title: string; job: "implement" | "test"; badge: { label: string; tone: Tone } };
+}
+
+/**
+ * One row per desk of a worker machine, named `<host> #<desk>`. A running job sits at the desk
+ * the worker reported; jobs without one (older workers) fill the free desks in order. The last
+ * work comes from the tasks' crews, so it survives the worker's restarts.
+ */
+export function agentRows(node: HubNode, tasks: readonly Task[]): AgentRow[] {
+  const host = node.hardware?.hostname;
+  if (!host || node.nodeKind !== "worker") return [];
+  const slots = node.slots ?? 1;
+  const title = (taskId: string) => tasks.find((t) => t.spec.taskId === taskId)?.spec.title ?? taskId;
+  const seated = new Map<number, { taskId: string; job: "implement" | "test" }>();
+  const unseated: Array<{ taskId: string; job: "implement" | "test" }> = [];
+  for (const taskId of runningTasks(node)) {
+    const job = node.jobs?.find((j) => j.taskId === taskId);
+    const entry = { taskId, job: job?.job ?? ("implement" as const) };
+    if (job?.slot && job.slot <= slots && !seated.has(job.slot)) seated.set(job.slot, entry);
+    else unseated.push(entry);
+  }
+  for (let slot = 1; slot <= slots && unseated.length; slot++) if (!seated.has(slot)) seated.set(slot, unseated.shift()!);
+
+  return Array.from({ length: slots }, (_, i) => {
+    const slot = i + 1;
+    const current = seated.get(slot);
+    const worked = tasks
+      .flatMap((t) => (t.crew ?? []).filter((m) => m.host === host && m.slot === slot && t.spec.taskId !== current?.taskId).map((m) => ({ t, m })))
+      .sort((a, b) => b.m.at.localeCompare(a.m.at))[0];
+    return {
+      name: `${host} #${slot}`,
+      slot,
+      ...(current ? { now: { ...current, title: title(current.taskId) } } : {}),
+      ...(worked ? { last: { taskId: worked.t.spec.taskId, title: worked.t.spec.title, job: worked.m.job, badge: taskBadge(worked.t) } } : {}),
+    };
+  });
+}
+
 /**
  * Who worked on a task, by agent name (machine and desk): "Built by avalon #2 · tested by
  * canfod #1", or "Building: avalon #3" while it is under way. Earlier agents (before a rework)
@@ -220,8 +265,6 @@ export interface WorkerView {
   name: string;
   /** Tasks it is working on now (one per busy slot). */
   taskIds: string[];
-  /** The same, labelled with the agent (desk) on each when known: "#2 on api-1", "#1 testing ui-3". */
-  jobLabels: Array<{ taskId: string; label: string }>;
   detail: string;
   outdated: boolean;
   /** About its aso build, when it is not the Hub's: an update under way, or what to do. */
@@ -257,11 +300,6 @@ export function workerView(n: HubNode): WorkerView {
     nodeId: n.nodeId,
     name,
     taskIds,
-    jobLabels: taskIds.map((taskId) => {
-      const job = n.jobs?.find((j) => j.taskId === taskId);
-      const desk = job?.slot ? `#${job.slot} ` : "";
-      return { taskId, label: `${desk}${job?.job === "test" ? "testing" : "on"} ${taskId}` };
-    }),
     detail: [size, slots > 1 ? `${slots} job slots` : undefined, cpu, build].filter(Boolean).join(" · "),
     outdated: n.outdated === true,
     updateNote: updateNote(n, taskIds.length),

@@ -21,6 +21,7 @@ import {
   buildOf,
   mergeNote,
   crewLine,
+  agentRows,
   linkParts,
   reviewLink,
   reviewView,
@@ -120,18 +121,33 @@ describe("agents", () => {
     assert.equal(crewLine(task("t", "awaiting_review", { crew: reworked })), "Built by avalon #2, then canfod #2 · tested by canfod #1, then avalon #1");
   });
 
-  it("labels a worker's jobs with the desk running each", () => {
+  it("lists every desk of a machine as an agent, with its work now and last", () => {
     const node: HubNode = {
-      nodeId: "w",
+      nodeId: "avalon-1",
       nodeKind: "worker",
       heartbeat: null,
       currentTaskId: "a",
       currentTaskIds: ["a", "b", "c"],
       lastSeenAt: "",
-      jobs: [{ taskId: "a", job: "implement", slot: 2 }, { taskId: "b", job: "test", slot: 1 }, { taskId: "c", job: "implement" }],
+      slots: 4,
+      hardware: { hostname: "avalon", cpu: { logicalCores: 12 }, memory: { totalBytes: 1 } },
+      jobs: [{ taskId: "a", job: "implement", slot: 3 }, { taskId: "b", job: "test", slot: 1 }, { taskId: "c", job: "implement" }],
     };
-    assert.deepEqual(workerView(node).jobLabels.map((j) => j.label), ["#2 on a", "#1 testing b", "on c"]);
-    assert.deepEqual(workerView({ ...node, jobs: undefined }).jobLabels.map((j) => j.label), ["on a", "on b", "on c"], "an older Hub");
+    const tasks = [
+      task("a", "in_progress"),
+      task("b", "testing"),
+      task("c", "in_progress"),
+      task("old", "merged", { crew: [{ ...member("implement", "avalon", 4), at: "2026-10-16T10:00:00Z" }] }),
+      task("older", "merged", { crew: [{ ...member("implement", "avalon", 4), at: "2026-10-16T09:00:00Z" }] }),
+      task("elsewhere", "merged", { crew: [member("implement", "canfod", 4)] }),
+    ];
+    const rows = agentRows(node, tasks);
+    assert.deepEqual(rows.map((r) => r.name), ["avalon #1", "avalon #2", "avalon #3", "avalon #4"]);
+    assert.deepEqual(rows.map((r) => r.now?.taskId), ["b", "c", "a", undefined], "reported desks first; a job without one takes the first free desk");
+    assert.deepEqual([rows[0].now?.job, rows[0].now?.title], ["test", "Task b"]);
+    assert.deepEqual([rows[3].last?.taskId, rows[3].last?.badge.label], ["old", "Merged"], "the newest work of that desk on this machine");
+    assert.deepEqual(agentRows({ ...node, nodeKind: "architect" }, tasks), []);
+    assert.deepEqual(agentRows({ ...node, slots: undefined, currentTaskIds: [], jobs: [] }, []).map((r) => r.name), ["avalon #1"], "one desk on an older Hub");
   });
 });
 

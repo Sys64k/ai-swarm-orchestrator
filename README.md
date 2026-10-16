@@ -406,7 +406,8 @@ An **agent** is one job slot of a worker machine, named after both: `avalon #2` 
 avalon. Unlike a worker's node id, which changes each time it restarts, the name stays. Each
 task keeps its `crew`: the agents that implemented and tested it, including those after a
 rework. The console's task page says "Built by avalon #2 · tested by canfod #1", and a
-worker's page shows which desk is on which task. `/api/nodes` lists each worker's `jobs` with
+worker's page lists its agents, one per desk: what each is building or testing now, or what it
+worked on last. `/api/nodes` lists each worker's `jobs` with
 their desk.
 
 ## How a task flows
