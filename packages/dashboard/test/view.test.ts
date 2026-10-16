@@ -19,6 +19,8 @@ import {
   workerView,
   workerViews,
   buildOf,
+  mergeNote,
+  reviewView,
 } from "../lib/view.ts";
 import type { HubNode, Plan, PlannedTask, Project, Task, TranscriptEntry } from "../lib/types.ts";
 
@@ -45,6 +47,38 @@ const plan = (id: string, state: Plan["state"], extra: Partial<Plan> = {}): Plan
   updatedAt: "2026-10-14T10:00:00.000Z",
   history: [],
   ...extra,
+});
+
+describe("pull request reviews", () => {
+  const pr = { number: 7, url: "https://github.com/me/shop/pull/7" };
+
+  it("asks for a review under Needs you, with the pull request on the task page", () => {
+    const v = homeView([task("r", "awaiting_review", { review: { pr, rounds: 0 } }), task("w", "in_progress")], []);
+    assert.deepEqual(
+      v.attention.map((a) => [a.id, a.reason, a.badge.label, a.href]),
+      [["r", "Pull request #7 is ready for your review on GitHub", "Review?", "/tasks/r"]],
+    );
+    assert.deepEqual(v.running.map((t) => t.spec.taskId), ["w"], "not listed as running too");
+    assert.deepEqual(taskBadge(task("r", "awaiting_review")), { label: "Review", tone: "waiting" });
+    assert.deepEqual(taskActions(task("r", "awaiting_review")), { retry: false, cancel: true });
+  });
+
+  it("words each stage of the pull request", () => {
+    const view = (state: Task["state"], review?: Task["review"]) => reviewView(task("t", state, { review }));
+    assert.equal(view("in_progress"), undefined, "no pull requests on this Hub");
+    assert.deepEqual(view("awaiting_review", { rounds: 0, error: "HTTP 502" }), { text: "Opening a pull request on GitHub", error: "HTTP 502" });
+    assert.deepEqual(view("awaiting_review", { pr, rounds: 2 }), { text: "Pull request #7 is ready for your review on GitHub (after 2 rounds of changes)", url: pr.url, error: undefined });
+    assert.deepEqual(view("in_progress", { pr, rounds: 1 }), { text: "Changes requested on pull request #7; an agent is on it (after 1 round of changes)", url: pr.url });
+    assert.deepEqual(view("merged", { pr, rounds: 0 }), { text: "Merged on GitHub as pull request #7", url: pr.url });
+    assert.deepEqual(view("cancelled", { pr, rounds: 0 }), { text: "Pull request #7 was closed", url: pr.url });
+    assert.equal(view("in_progress", { rounds: 0 }), undefined, "no pull request yet, nothing to say");
+  });
+
+  it("says where a project's work goes", () => {
+    assert.equal(mergeNote({ pullRequests: { enabled: true, repo: "me/shop" } }), "QA-approved work becomes a pull request on me/shop for you to merge.");
+    assert.equal(mergeNote({ pullRequests: { enabled: false, reason: "no GitHub token (ASO_GIT_TOKEN) for opening pull requests" } }), "QA-approved work is merged here: no GitHub token (ASO_GIT_TOKEN) for opening pull requests.");
+    assert.equal(mergeNote({}), undefined, "a Hub from before pull requests");
+  });
 });
 
 describe("home view", () => {

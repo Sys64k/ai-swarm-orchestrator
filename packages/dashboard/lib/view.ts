@@ -11,6 +11,7 @@ const TASK_TONE: Record<TaskState, Tone> = {
   awaiting_qa: "waiting",
   testing: "active",
   merging: "active",
+  awaiting_review: "waiting",
   merged: "good",
   failed: "bad",
   cancelled: "muted",
@@ -24,6 +25,7 @@ const TASK_LABEL: Record<TaskState, string> = {
   awaiting_qa: "Waiting for QA",
   testing: "Testing",
   merging: "Merging",
+  awaiting_review: "Review",
   merged: "Merged",
   failed: "Failed",
   cancelled: "Cancelled",
@@ -106,6 +108,10 @@ export function homeView(tasks: readonly Task[], plans: readonly Plan[]): HomeVi
         const ask = PLAN_ASKS[p.state as keyof typeof PLAN_ASKS];
         return { kind: "plan" as const, id: p.planId, project: p.project, title: firstLine(p.requirement), reason: ask.reason, href: `/plans/${p.planId}`, badge: { label: ask.label, tone: "waiting" as Tone } };
       }),
+    ...tasks.flatMap((t) => {
+      const review = t.state === "awaiting_review" ? reviewView(t) : undefined;
+      return review ? [{ kind: "task" as const, id: t.spec.taskId, project: t.project, title: t.spec.title, reason: review.text, href: `/tasks/${t.spec.taskId}`, badge: { label: "Review?", tone: "waiting" as Tone } }] : [];
+    }),
     ...tasks
       .filter((t) => t.state === "failed")
       .map((t) => ({ kind: "task" as const, id: t.spec.taskId, project: t.project, title: t.spec.title, reason: t.detail ?? "Failed", href: `/tasks/${t.spec.taskId}`, badge: { label: "Failed", tone: "bad" as Tone } })),
@@ -122,6 +128,28 @@ export function homeView(tasks: readonly Task[], plans: readonly Plan[]): HomeVi
     // Failed tasks are listed under "Needs you" until someone retries them.
     done: tasks.filter((t) => t.state === "merged" || t.state === "cancelled").sort(byUpdate),
   };
+}
+
+/** A task's pull request as the console words it, while one is involved. */
+export function reviewView(task: Pick<Task, "state" | "review">): { text: string; url?: string; error?: string } | undefined {
+  const r = task.review;
+  if (!r) return undefined;
+  const rounds = r.rounds ? ` (after ${r.rounds} round${r.rounds === 1 ? "" : "s"} of changes)` : "";
+  if (task.state === "awaiting_review") {
+    if (!r.pr) return { text: "Opening a pull request on GitHub", error: r.error };
+    return { text: `Pull request #${r.pr.number} is ready for your review on GitHub${rounds}`, url: r.pr.url, error: r.error };
+  }
+  if (!r.pr) return undefined;
+  if (task.state === "merged") return { text: `Merged on GitHub as pull request #${r.pr.number}`, url: r.pr.url };
+  if (task.state === "cancelled") return { text: `Pull request #${r.pr.number} was closed`, url: r.pr.url };
+  return { text: `Changes requested on pull request #${r.pr.number}; an agent is on it${rounds}`, url: r.pr.url };
+}
+
+/** Where a project's QA-approved work goes, for its page. */
+export function mergeNote(project: Pick<Project, "pullRequests">): string | undefined {
+  const pr = project.pullRequests;
+  if (!pr) return undefined;
+  return pr.enabled ? `QA-approved work becomes a pull request on ${pr.repo} for you to merge.` : `QA-approved work is merged here: ${pr.reason}.`;
 }
 
 export interface PlanProgress {

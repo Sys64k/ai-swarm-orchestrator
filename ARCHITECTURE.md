@@ -318,6 +318,7 @@ to `state.json.unreadable-<time>`, never deleted, and the Hub starts empty.
 | `assigned`, or `testing` not started | Back to `pending` / `awaiting_qa`; not counted as a drop |
 | `verifying` | Verified again |
 | `merging` | Merged again; a commit already on `main` merges as "already up to date" |
+| `awaiting_review` | Unchanged; the next pull request check carries on (opens it if it never was) |
 | Plan `planning` | Back to `pending` for the next Architect |
 | Anything else | Unchanged |
 
@@ -429,7 +430,11 @@ stateDiagram-v2
   awaiting_qa --> testing: TEST_EXECUTION
   testing --> awaiting_qa: QA node could not run / lost
   testing --> merging: FEEDBACK_LOOP pass
+  testing --> awaiting_review: FEEDBACK_LOOP pass (pull requests on)
   testing --> pending: rework (FEEDBACK_LOOP fail)
+  awaiting_review --> merged: PR merged on GitHub, Hub main caught up
+  awaiting_review --> pending: changes requested (review round) / PR conflicts (rework)
+  awaiting_review --> cancelled: PR closed, or cancelled here (PR closed too)
   merging --> merged: merge commit on main
   merging --> pending: rework (merge conflict)
   merging --> failed: merge blocked (dirty Hub checkout)
@@ -1157,6 +1162,31 @@ checksum and installs the local file. First installs do the same by hand with `c
 
 The Docker image builds the package during `docker build`. The CLI passes the host's commit as
 `ASO_BUILD`, since the image has no `.git`, so a containerized Hub serves the package too.
+
+### Pull requests
+
+With a GitHub `origin` and a token (`ASO_GIT_TOKEN`), QA-approved work is not merged on the
+Hub: a person merges it on GitHub. `PullRequests` (`git/pull-requests.ts`) is the task
+manager's `ReviewGate`, over `GitHubApi` (`git/github.ts`, a few REST calls on `fetch`).
+
+- **Open.** After QA passes, the task goes to `awaiting_review`. The Hub force-pushes
+  `task/<id>` to GitHub (`GitSync.pushBranch`, with the same token header as main pushes) and
+  opens a PR, or updates the open one: new body and a "passed QA, ready again" comment. A
+  failure is kept in `task.review.error` and the next check tries again.
+- **Check.** Every 30 s (and on `POST /api/sync`), each `awaiting_review` task's PR is read:
+  - *merged:* `GitSync.catchUp` fast-forwards the Hub's `main` to GitHub's (or merges and
+    pushes when the Hub has commits of its own, such as a dependency change). Only then is the
+    task `merged`, so dependants branch from a `main` that has it.
+  - *closed:* the task is `cancelled`.
+  - *changes requested:* the newest approve-or-request-changes review on the PR's current head,
+    if it requests changes and wasn't handled yet (`changesRequested`). The review and its
+    code comments become the rework reason and output. Review rounds are counted separately
+    (`review.rounds`) and never fail the task; the agent sees one running round number.
+  - *conflicting* (`mergeable: false`): catch up `main`, then a normal, counted rework.
+- **Cancel** in the console closes the PR with a comment. A retry forgets the PR, so the next
+  pass opens a new one.
+- **Off** without a GitHub remote, without a token, with `--no-push`, or with
+  `ASO_PULL_REQUESTS=0`; `/api/projects` says which (`pullRequests.reason`).
 
 ### Workers as services
 

@@ -91,6 +91,11 @@ export interface HubOptions {
   dist?: { version: () => string | undefined; tarball: () => string | undefined };
   /** Push main to the target repo's remote after merges. Default: on when an `origin` remote exists. */
   sync?: { enabled?: boolean; remote?: string; token?: string; retryMs?: number };
+  /**
+   * QA-approved work as GitHub pull requests that a person merges, when the remote is on GitHub
+   * and `sync.token` is set. Default on; `enabled: false` merges on the Hub instead.
+   */
+  pullRequests?: { enabled?: boolean; apiUrl?: string; repo?: { owner: string; repo: string }; pollMs?: number };
   /** Push notifications. `send` replaces real delivery (tests); the contact defaults to ASO_PUSH_CONTACT. */
   push?: { send?: typeof sendPush; contact?: string };
   llm?: {
@@ -144,6 +149,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     tasks: { policies: opts.policies, reclaimGraceMs: opts.reclaimGraceMs, qa: opts.qa },
     deps: { installer: opts.dependencyInstaller, allow: opts.allowDependencies },
     sync: { enabled: opts.sync?.enabled, remote: opts.sync?.remote, token: opts.sync?.token, retryMs: opts.sync?.retryMs },
+    pullRequests: opts.pullRequests,
     onChange: (p) => notifier?.observe({ id: p.id, tasks: p.tasks.list(), plans: p.plans.list() }),
   });
   const tasks = projects.tasks;
@@ -475,9 +481,11 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       dir: shown(p.dir),
       mainBranch: p.repo.mainBranch,
       sync: p.sync.status(),
+      pullRequests: p.pullRequests,
       tasks: {
         total: list.length,
         running: count(["assigned", "in_progress", "verifying", "awaiting_qa", "testing", "merging"]),
+        reviewing: count(["awaiting_review"]),
         queued: count(["pending"]),
         failed: count(["failed"]),
         merged: count(["merged"]),
@@ -516,6 +524,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     try {
       const p = projects.resolve(c.req.query("project") ?? (await body(c))?.project);
       await p.sync.requestPush();
+      await projects.checkReviews(p.id);
       return c.json(p.sync.status());
     } catch (err) {
       return fail(c, err);

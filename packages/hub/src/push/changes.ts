@@ -30,7 +30,8 @@ export function notableChanges(seen: Map<string, string>, project: ProjectState)
   };
   return [
     ...project.plans.filter((p) => changed(`plan:${p.planId}`, p.state)).map((p) => planNotification(project.id, p)),
-    ...project.tasks.filter((t) => changed(`task:${t.spec.taskId}`, t.state)).map((t) => taskNotification(project, t)),
+    // A task waiting for review counts as changed once its pull request is open, not before.
+    ...project.tasks.filter((t) => changed(`task:${t.spec.taskId}`, taskStage(t))).map((t) => taskNotification(project, t)),
   ].filter((n): n is PushNotification => n !== undefined);
 }
 
@@ -42,8 +43,21 @@ function planNotification(project: string, plan: PlanRecord): PushNotification |
   return undefined;
 }
 
+/** The pull request a task waits on, once it is open (before that there is nothing to review). */
+function prToReview(task: TaskRecord) {
+  return task.state === "awaiting_review" ? task.review?.pr : undefined;
+}
+
+function taskStage(task: TaskRecord): string {
+  const pr = prToReview(task);
+  return pr ? `${task.state}:${pr.number}` : task.state;
+}
+
 function taskNotification(project: ProjectState, task: TaskRecord): PushNotification | undefined {
   const id = task.spec.taskId;
+  const pr = prToReview(task);
+  if (pr) return notification(project.id, "ready for your review", [task.spec.title, `Pull request #${pr.number} on GitHub`], "task", id);
+  if (task.state === "awaiting_review") return undefined;
   if (task.state === "failed") return notification(project.id, "task failed", [task.spec.title, task.detail], "task", id);
   if (task.state !== "merged") return undefined;
   const plan = planOf(project, id);

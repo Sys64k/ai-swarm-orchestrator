@@ -1,0 +1,194 @@
+import { createLogger, taskBranchName } from "@aso/shared";
+import type { ReviewGate, ReviewOutcome, TaskManager, TaskRecord } from "../tasks.js";
+import { GitHubApi, parseGitHubRemote, type PullRef, type PullState, type RepoSlug, type Review, type ReviewComment } from "./github.js";
+import type { GitSync } from "./sync.js";
+
+const log = createLogger("pull-requests");
+
+export interface PullRequestOptions {
+  /** Off: QA-approved work is merged on the Hub and main pushed, as without a GitHub token. Default on. */
+  enabled?: boolean;
+  /** GitHub token with Contents and Pull requests read/write on the repository. */
+  token?: string;
+  /** GitHub API base (tests point it at a fake). */
+  apiUrl?: string;
+  /** The repository, when the remote is not a github.com URL (tests). */
+  repo?: RepoSlug;
+  /** How often open pull requests are checked. */
+  pollMs?: number;
+}
+
+export interface PullRequestStatus {
+  enabled: boolean;
+  /** `owner/repo` on GitHub. */
+  repo?: string;
+  /** Why work is merged on the Hub instead. */
+  reason?: string;
+}
+
+const DEFAULT_POLL_MS = 30_000;
+/** Limits of a rework's reason and output in the protocol (TASK_ASSIGNMENT). */
+const REASON_MAX = 4000;
+const OUTPUT_MAX = 100_000;
+
+/**
+ * QA-approved work as GitHub pull requests that a person merges. The Hub pushes the task's
+ * branch, opens the PR, and checks it every `pollMs`: merged, closed, changes requested on the
+ * current commit, or conflicting with main. A merge brings the Hub's main up to GitHub's.
+ */
+export class PullRequests implements ReviewGate {
+  private timer?: NodeJS.Timeout;
+  private checking = false;
+
+  private constructor(
+    private readonly api: GitHubApi,
+    private readonly sync: GitSync,
+    private readonly mainBranch: string,
+    private readonly pollMs: number,
+  ) {}
+
+  /** Pull requests for this project (`gate`), or why work is merged on the Hub instead; `status` says which. */
+  static async create(sync: GitSync, mainBranch: string, opts: PullRequestOptions): Promise<{ gate?: PullRequests; status: PullRequestStatus }> {
+    const off = (reason: string) => ({ status: { enabled: false, reason } });
+    if (opts.enabled === false) return off("pull requests are off (ASO_PULL_REQUESTS=0)");
+    if (!sync.status().enabled) return off(sync.status().reason ?? "pushing is off");
+    const url = await sync.remoteUrl();
+    const slug = opts.repo ?? (url ? parseGitHubRemote(url) : undefined);
+    if (!slug) return off(`${sync.status().remote} is not a GitHub repository`);
+    if (!opts.token) return off("no GitHub token (ASO_GIT_TOKEN) for opening pull requests");
+    const gate = new PullRequests(new GitHubApi(slug, opts.token, opts.apiUrl), sync, mainBranch, opts.pollMs ?? DEFAULT_POLL_MS);
+    return { gate, status: { enabled: true, repo: `${slug.owner}/${slug.repo}` } };
+  }
+
+  /** Check `tasks`' pull requests every `pollMs` until `stopPolling`. */
+  startPolling(tasks: TaskManager): void {
+    this.timer = setInterval(() => void this.check(tasks), this.pollMs);
+    this.timer.unref();
+  }
+
+  stopPolling(): void {
+    clearInterval(this.timer);
+  }
+
+  async open(task: TaskRecord): Promise<PullRef> {
+    const branch = taskBranchName(task.spec.taskId);
+    await this.sync.pushBranch(branch);
+    const body = pullRequestBody(task);
+    const existing = task.review?.pr ?? (await this.api.findOpenPull(branch));
+    if (existing && (await this.api.getPull(existing.number)).state === "open") {
+      await this.api.updatePull(existing.number, { body });
+      await this.api.comment(existing.number, `New commit \`${task.commit?.slice(0, 8)}\` passed QA: ${task.qaSummary ?? "no summary"}. Ready for review again.`);
+      return existing;
+    }
+    const pr = await this.api.createPull({ title: task.spec.title, head: branch, base: this.mainBranch, body });
+    log.info(`opened pull request #${pr.number} for ${task.spec.taskId}: ${pr.url}`);
+    return pr;
+  }
+
+  async close(task: TaskRecord, comment: string): Promise<void> {
+    const pr = task.review?.pr;
+    if (!pr) return;
+    await this.api.comment(pr.number, comment);
+    await this.api.updatePull(pr.number, { state: "closed" });
+  }
+
+  /**
+   * One pass over the tasks waiting for review: open the pull requests that failed to open,
+   * and act on what happened to the others. Overlapping passes are skipped.
+   */
+  async check(tasks: TaskManager): Promise<void> {
+    if (this.checking) return;
+    this.checking = true;
+    try {
+      for (const task of tasks.list()) {
+        if (task.state !== "awaiting_review") continue;
+        if (!task.review?.pr) {
+          await tasks.openReview(task);
+          continue;
+        }
+        try {
+          const outcome = await this.outcome(task, task.review.pr);
+          if (outcome) tasks.applyReview(task.spec.taskId, outcome);
+        } catch (err) {
+          tasks.reviewCheckFailed(task.spec.taskId, (err as Error).message);
+        }
+      }
+    } finally {
+      this.checking = false;
+    }
+  }
+
+  /** What happened to the pull request since the last check, if anything to act on. */
+  private async outcome(task: TaskRecord, pr: PullRef): Promise<ReviewOutcome | undefined> {
+    const pull = await this.api.getPull(pr.number);
+    if (pull.merged) {
+      // Dependants branch from the Hub's main: it must have the merge before they start.
+      await this.catchUp("merged on GitHub");
+      return { kind: "merged", mainCommit: pull.mergeCommit ?? pull.headSha };
+    }
+    if (pull.state === "closed") return { kind: "closed" };
+
+    const review = changesRequested(await this.api.reviews(pr.number), pull, task.review?.handled ?? []);
+    if (review) {
+      const comments = await this.api.reviewComments(pr.number, review.id);
+      return { kind: "changes_requested", reviewId: review.id, author: review.author, ...reviewFeedback(review, comments) };
+    }
+    if (pull.mergeable === false) {
+      // The agent rebases onto the Hub's main, so it needs what GitHub's main gained since.
+      await this.catchUp("the pull request conflicts with main");
+      return { kind: "conflict" };
+    }
+    return undefined;
+  }
+
+  /** Bring the Hub's main up to GitHub's, or throw saying what it was for. */
+  private async catchUp(why: string): Promise<void> {
+    const result = await this.sync.catchUp();
+    if (!result.ok) throw new Error(`${why}, but the Hub's main could not catch up: ${result.reason}`);
+  }
+}
+
+/**
+ * The review to act on: the newest decisive one (approve or request changes) on the pull
+ * request's current commit, if it requests changes and was not handled yet. A review of an
+ * older commit was answered by the commits since.
+ */
+export function changesRequested(reviews: readonly Review[], pull: Pick<PullState, "headSha">, handled: readonly number[]): Review | undefined {
+  const decisive = reviews.filter((r) => r.commit === pull.headSha && (r.state === "CHANGES_REQUESTED" || r.state === "APPROVED"));
+  const latest = decisive.reduce<Review | undefined>((a, r) => (!a || r.id > a.id ? r : a), undefined);
+  return latest?.state === "CHANGES_REQUESTED" && !handled.includes(latest.id) ? latest : undefined;
+}
+
+/** A review as rework for the agent: a short reason, and everything the reviewer wrote. */
+export function reviewFeedback(review: Review, comments: readonly ReviewComment[]): { summary: string; details: string } {
+  const body = review.body.trim();
+  const lines = comments.map((c) => `- ${c.path}${c.line ? `:${c.line}` : ""}: ${c.body.trim()}`);
+  const summary = `${review.author} requested changes on GitHub: ${body || "see the comments on the code"}`;
+  const details = [`Review by ${review.author}:`, body || "(no summary)", ...(lines.length ? ["", "Comments on the code:", ...lines] : [])].join("\n");
+  return { summary: summary.length > REASON_MAX ? `${summary.slice(0, REASON_MAX - 1)}…` : summary, details: details.slice(0, OUTPUT_MAX) };
+}
+
+/** What the pull request says about the task: what was asked, what QA found, what it cost. */
+export function pullRequestBody(task: TaskRecord): string {
+  const s = task.spec;
+  const criteria = s.acceptanceCriteria.length ? ["", "**Acceptance criteria**", ...s.acceptanceCriteria.map((c) => `- ${c}`)] : [];
+  const files = task.filesTouched.length ? ["", `**Files** (${task.filesTouched.length})`, ...task.filesTouched.slice(-30).map((f) => `- \`${f}\``)] : [];
+  const rounds = roundsNote(task);
+  return [
+    s.description.trim(),
+    ...criteria,
+    ...files,
+    "",
+    `**QA:** ${task.qaSummary ?? "not run"}`,
+    `**Task:** \`${s.taskId}\` (${s.role}, ${s.kind})${rounds ? `, after ${rounds}` : ""}; model cost about $${task.llm.costUsd.toFixed(2)}`,
+    "",
+    "---",
+    "Opened by the ASO Hub. **Merge** to accept it. **Request changes** to send it back to an agent with your review. **Close** to cancel the task.",
+  ].join("\n");
+}
+
+/** "2 rework rounds and 1 review round", or empty when the work never came back. */
+function roundsNote(task: Pick<TaskRecord, "reworkRound" | "review">): string {
+  const count = (n: number, what: string) => (n ? `${n} ${what} round${n === 1 ? "" : "s"}` : "");
+  return [count(task.reworkRound, "rework"), count(task.review?.rounds ?? 0, "review")].filter(Boolean).join(" and ");
+}
