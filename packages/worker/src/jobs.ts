@@ -70,7 +70,12 @@ export const unconfiguredExecutor: TaskExecutor = {
   },
 };
 
-export type Send = <T extends AgentMessageType>(type: T, payload: PayloadInput<T>) => void;
+/**
+ * Send a message to the Hub. `final` marks a job's result (its last message): until the Hub has
+ * it, a worker that reconnects still claims the job, so a result held back by a Hub restart is
+ * delivered instead of the job being run again.
+ */
+export type Send = <T extends AgentMessageType>(type: T, payload: PayloadInput<T>, final?: RunningJob) => void;
 
 export interface JobRunnerOptions {
   workDir: string;
@@ -236,8 +241,9 @@ export class JobRunner {
   private async implement(task: TaskAssignment, slot: number): Promise<void> {
     const { send } = this.opts;
     const repoDir = this.repoDir(task.project, slot);
+    const job: RunningJob = { taskId: task.taskId, job: "implement" };
     const status = (state: "in_progress" | "failed", detail?: string) =>
-      send("STATUS_UPDATE", { state, taskId: task.taskId, detail: detail?.slice(0, 2000) });
+      send("STATUS_UPDATE", { state, taskId: task.taskId, detail: detail?.slice(0, 2000) }, state === "failed" ? job : undefined);
     try {
       const git = await this.openRepo(repoDir, task.project, task.role);
       const { resumed } = await git.startTask(task.taskId);
@@ -257,12 +263,11 @@ export class JobRunner {
         commands: this.commands,
       });
       const done = await git.completeTask(result?.commitMessage ?? `${task.taskId}: ${task.title}`);
-      send("STATUS_UPDATE", {
-        state: "completed",
-        taskId: task.taskId,
-        commit: done.commit,
-        detail: result?.summary?.slice(0, 2000),
-      });
+      send(
+        "STATUS_UPDATE",
+        { state: "completed", taskId: task.taskId, commit: done.commit, detail: result?.summary?.slice(0, 2000) },
+        job,
+      );
     } catch (err) {
       log.warn(`task ${task.taskId} failed: ${(err as Error).message}`);
       status("failed", (err as Error).message);
@@ -317,7 +322,10 @@ export class JobRunner {
 
 
   private async test(job: TestExecution, slot: number): Promise<void> {
-    const { send } = this.opts;
+    const opts = this.opts;
+    // Every message but "in_progress" is this job's result.
+    const final: RunningJob = { taskId: job.taskId, job: "test" };
+    const send: Send = (type, payload) => opts.send(type, payload, type === "STATUS_UPDATE" && (payload as { state: string }).state === "in_progress" ? undefined : final);
     const repoDir = this.repoDir(job.project, slot);
     try {
       const git = await this.openRepo(repoDir, job.project, "qa");

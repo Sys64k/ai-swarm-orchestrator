@@ -287,6 +287,12 @@ flowchart TD
 Holding a started job is cheap. LLM access is centralized, so a disconnected worker can't make
 progress anyway; it is effectively paused. A short network blip therefore costs nothing.
 
+**A resume claim covers finished jobs too.** A job can end while the node is cut off: tests
+finish, or an agent's commit is pushed just before a Hub restart. Its result then waits in the
+worker's outbox, marked as the job's final message (`Send`'s `final`). On re-registration
+the worker claims those jobs as well as running ones, so the Hub reattaches the job and the
+held result is accepted, instead of requeuing the job and rejecting the result.
+
 ### When the Hub restarts
 
 Tasks, plans and agent conversations are saved to disk, so a Hub restart looks to the swarm
