@@ -1113,3 +1113,21 @@ checksum and installs the local file. First installs do the same by hand with `c
 
 The Docker image builds the package during `docker build`. The CLI passes the host's commit as
 `ASO_BUILD`, since the image has no `.git`, so a containerized Hub serves the package too.
+
+### Workers as services
+
+`aso service install` turns `start-worker` into a systemd **user** service
+(`~/.config/systemd/user/aso-worker.service`), so no root is needed. Lingering is enabled
+where the system allows it, so the service still starts at boot without a login.
+
+- **The unit is generated** by pure functions in `cli/src/service.ts`: `workerArgs`,
+  `workerUnit`, `systemdQuote`.
+- **ExecStart runs the same `aso`** (Node binary plus script) the install ran from, with
+  `Restart=always`. A global `npm install` replaces the files in place, so after `aso update`
+  only a restart is needed, and `aso update` does it when the service is active.
+- **The token never goes into the unit.** The worker already finds a token in the token file
+  or `~/.config/aso/.env`. Any other token goes to `~/.config/aso/worker.env` (0600) through
+  `EnvironmentFile=`.
+- **Each start registers a new node id** (the worker's id has a random suffix). A crash in the
+  middle of a job is therefore handled like any disconnect: the job is held for the
+  reconnect grace period, then reassigned.

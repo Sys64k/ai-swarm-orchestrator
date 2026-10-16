@@ -160,6 +160,30 @@ image, which is about 2 GB: Node plus the libraries headless Chromium needs. See
 [Security notes](#security-notes). Without Docker, `--sandbox none` runs those commands
 directly on the machine instead.
 
+#### Keep a worker running (systemd)
+
+On Linux, install the worker as a systemd user service instead of starting it by hand. It
+starts at boot, restarts if it crashes, and `aso update` restarts it on the new version:
+
+```bash
+aso service install --hub 192.168.1.10 --roles backend,qa   # same options as start-worker
+aso service status
+aso service logs -f
+aso service uninstall
+```
+
+- **Where it lives.** `aso service install` writes `~/.config/systemd/user/aso-worker.service`.
+  The unit runs the `aso` you ran it with, using your current `PATH` (so it finds Docker and
+  git like your shell does), and restarts 10 s after any exit.
+- **The token stays out of the unit file.** If the token comes from `~/.config/aso/.env` or
+  the token file, the worker reads it there as usual. One passed with `--token` or only set in
+  your shell is written to `~/.config/aso/worker.env` (mode 0600), which only the service
+  reads.
+- **Running without a login.** It enables lingering (`loginctl enable-linger`), so the worker
+  runs at boot without you logging in and keeps running after you log out. If your system
+  needs root for that, it prints the `sudo` command to run once.
+- **To change options,** run `aso service install` again with the new ones.
+
 ### Updating
 
 Run `aso update` on any machine:
@@ -169,7 +193,8 @@ Run `aso update` on any machine:
 - **Source checkouts:** `git pull`, `npm ci` and a rebuild.
 
 To roll out a new version, update the Hub machine, run `npm run package` there, then run
-`aso update --hub <hub-ip>` on each worker.
+`aso update --hub <hub-ip>` on each worker. A worker installed with `aso service install` is
+restarted on the new version automatically; restart others yourself.
 
 Workers and the Architect report the build they run (`0.1.0+<commit>`; a source checkout
 reports its commit, with `-dirty` for uncommitted changes). When it differs from the package
@@ -496,6 +521,13 @@ outgoing messages and sends them once it has registered again.
 | `--sandbox <mode>` | `docker` | `docker`: each job command runs in a throwaway container that sees only the checkout. `none`: directly on this machine as this user. The worker refuses to start if `docker` is chosen but Docker isn't usable |
 | `--sandbox-image <image>` | built on first start | Image for job commands. The default is `node:<worker's Node major>-bookworm` plus Playwright's Chromium libraries |
 | `--sandbox-network <name>` | `bridge` | Docker network for job commands. `none` blocks all network access, but then `npm ci` and browser downloads fail |
+
+### `aso service`
+
+`aso service install [start-worker options]` installs and starts this machine's worker as a
+systemd user service (see [Keep a worker running](#keep-a-worker-running-systemd)). The
+other subcommands are `status`, `logs [-f] [-n <lines>]` and `uninstall`. Linux with systemd
+only.
 
 ### `aso plan`
 

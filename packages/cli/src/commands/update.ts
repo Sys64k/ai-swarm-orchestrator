@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { createLogger, resolveHubUrl } from "@aso/shared";
 import { layout } from "../layout.js";
+import { restartWorkerService, workerServiceActive } from "../systemd.js";
 
 const log = createLogger("cli");
 
@@ -25,6 +26,7 @@ export async function updateCommand(opts: { hub: string; spec?: string }): Promi
   const current = layout.version();
   if (opts.spec) {
     run("npm", ["install", "--global", opts.spec]);
+    afterUpdate();
     return;
   }
   if (layout.mode === "source") {
@@ -33,7 +35,7 @@ export async function updateCommand(opts: { hub: string; spec?: string }): Promi
     run("git", ["pull", "--ff-only"], root);
     run("npm", ["ci"], root);
     run("npm", ["run", "build"], root);
-    log.info("updated; restart running aso processes to use the new version");
+    afterUpdate();
     return;
   }
 
@@ -65,5 +67,11 @@ export async function updateCommand(opts: { hub: string; spec?: string }): Promi
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
-  log.info("updated; restart running aso processes to use the new version");
+  afterUpdate();
+}
+
+/** The worker service runs the new version only after a restart; do it rather than tell people to. */
+function afterUpdate(): void {
+  if (workerServiceActive()) restartWorkerService();
+  else log.info("updated; restart running aso processes to use the new version");
 }
