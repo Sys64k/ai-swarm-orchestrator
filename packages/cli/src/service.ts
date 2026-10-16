@@ -63,6 +63,15 @@ WantedBy=default.target
 `;
 }
 
+/**
+ * Whether systemd runs this process as a service's main process (it then starts it again after
+ * it exits, so a restart from the console is safe). A shell inside a desktop's systemd unit
+ * inherits SYSTEMD_EXEC_PID too, but with another pid, so a hand-started worker never matches.
+ */
+export function runsAsSystemdService(env: NodeJS.ProcessEnv, pid: number): boolean {
+  return env.SYSTEMD_EXEC_PID === String(pid);
+}
+
 /** Whether a `.env` file the CLI loads on start already sets this token (then the service finds it too). */
 export function envFilesSetToken(contents: readonly string[], token: string): boolean {
   return contents.some((text) =>

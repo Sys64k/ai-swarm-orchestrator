@@ -31,7 +31,7 @@ import { type DependencyInstaller } from "./git/hub-repo.js";
 import type { GitSync } from "./git/sync.js";
 import { PlanError, type PlanRecord } from "./plans.js";
 import { ProjectError, ProjectSet, type Project } from "./projects.js";
-import { isOutdated, NodeRegistry, type NodeTransport } from "./registry.js";
+import { isOutdated, NodeError, NodeRegistry, type NodeEntry, type NodeTransport } from "./registry.js";
 import type { RoutingPolicies } from "./routing.js";
 import { Notifier, TEST_NOTIFICATION } from "./push/notifier.js";
 import type { sendPush } from "./push/web-push.js";
@@ -357,10 +357,35 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     });
   });
 
-  app.get("/api/nodes", (c) => {
-    const current = hubVersion();
-    return c.json(registry.list().map((n) => ({ ...n, outdated: isOutdated(n.version, current) })));
-  });
+  const withOutdated = (n: ReturnType<NodeRegistry["view"]>) => ({ ...n, outdated: isOutdated(n.version, hubVersion()) });
+  app.get("/api/nodes", (c) => c.json(registry.list().map(withOutdated)));
+
+  // A person drains a worker (no new jobs; the current one finishes), resumes it, or restarts it once idle.
+  const nodeAction = (c: Context, action: (id: string) => NodeEntry, done: (entry: NodeEntry) => string) => {
+    try {
+      const entry = action(c.req.param("id")!);
+      log.info(done(entry));
+      return c.json(withOutdated(registry.view(entry)));
+    } catch (err) {
+      if (!(err instanceof NodeError)) throw err;
+      return c.json({ error: err.message }, err.code === "not_found" ? 404 : 409);
+    }
+  };
+  app.post("/api/nodes/:id/drain", (c) => nodeAction(c, (id) => registry.drain(id), (n) => `${n.nodeId} draining: no new jobs`));
+  app.post("/api/nodes/:id/resume", (c) =>
+    nodeAction(
+      c,
+      (id) => {
+        const entry = registry.resume(id);
+        projects.dispatchAll(); // waiting tasks may go to it now
+        return entry;
+      },
+      (n) => `${n.nodeId} takes jobs again`,
+    ),
+  );
+  app.post("/api/nodes/:id/restart", (c) =>
+    nodeAction(c, (id) => registry.requestRestart(id), (n) => `${n.nodeId} restart ${n.restart === "sent" ? "sent" : "requested once its current job is done"}`),
+  );
 
   // One-time console sign-in links (the console redeems them for a session; both need the token).
   const signInCodes = new SignInCodes();

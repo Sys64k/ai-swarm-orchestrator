@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { envFilesSetToken, needsTokenEnvFile, systemdQuote, userUnitDir, workerArgs, workerUnit } from "../dist/service.js";
+import { envFilesSetToken, needsTokenEnvFile, runsAsSystemdService, systemdQuote, userUnitDir, workerArgs, workerUnit } from "../dist/service.js";
 
 describe("worker service unit", () => {
   it("passes on only the options that differ from start-worker's defaults", () => {
@@ -57,5 +57,13 @@ describe("worker service unit", () => {
 
   it("lives in the user's systemd directory", () => {
     assert.equal(userUnitDir({ XDG_CONFIG_HOME: "/x/cfg" }), "/x/cfg/systemd/user");
+  });
+});
+
+describe("runsAsSystemdService", () => {
+  it("is true only for the unit's own main process", () => {
+    assert.equal(runsAsSystemdService({ SYSTEMD_EXEC_PID: "4242" }, 4242), true);
+    assert.equal(runsAsSystemdService({ SYSTEMD_EXEC_PID: "100" }, 4242), false, "a shell in a desktop's unit inherits another pid");
+    assert.equal(runsAsSystemdService({}, 4242), false);
   });
 });

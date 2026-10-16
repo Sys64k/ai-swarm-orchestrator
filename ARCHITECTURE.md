@@ -197,6 +197,7 @@ keys are rejected.
 | `PROMPT_RESULT` | hub → node | 5 | The model's visible text and tool calls for that turn, plus usage/cost; or an error marked retryable or not |
 | `PLAN_REQUEST` | hub → architect | 6 | Plan this requirement (`planId`, `requirement`); carries the `project` |
 | `PLAN_RESULT` | architect → hub | 6 | `proposed` (summary + planned tasks with plan-local keys and `dependsOn`) or `failed` |
+| `NODE_CONTROL` | hub → worker | 1 | `restart`: exit so systemd starts the worker again. Sent only to workers that registered with `supervisor: "systemd"` (their pid is the unit's `SYSTEMD_EXEC_PID`), and only once idle |
 | `PROTOCOL_ERROR` | hub → node | 1 | Why a message was rejected, with the offending message id |
 
 ### Validation pipeline (Hub)
@@ -369,8 +370,8 @@ waits for independence.
 flowchart TD
   T["Task: role + kind"] --> P["Look up policy for kind"]
   P --> L["For each connected worker"]
-  L --> R2{"idle?"}
-  R2 -- no --> X2["rejected: busy"]
+  L --> R2{"idle and not draining?"}
+  R2 -- no --> X2["rejected: busy or draining"]
   R2 -- yes --> R3{"policy needs Docker<br/>and daemon down?"}
   R3 -- yes --> X3["rejected: no Docker daemon"]
   R3 -- no --> R4{"total RAM ≥<br/>policy minimum?"}
@@ -460,6 +461,15 @@ stateDiagram-v2
   fenced like a node that lost its job: its status updates, model calls and QA verdicts are
   refused, so the agent stops at its next model turn. Dependants are `blocked`, as for a
   failure.
+- **Drain and restart.** `POST /api/nodes/:id/drain` sets `draining` on the registry entry;
+  the router skips draining nodes, and the current job carries on. `/resume` clears it.
+  `/restart` drains the worker and sets `restart: "pending"`; when the registry releases the
+  worker's job (or at once if it is idle) it sends `NODE_CONTROL restart` and marks it
+  `"sent"`. The worker waits for its job runner to empty, stops, and exits 0; the unit's
+  `Restart=always` starts it again on the installed build, as a new node. State lives on the
+  connection, so a worker that reconnects comes back undrained. `nodeActions` in
+  `registry.ts` is the one place these rules live: the API refuses what it disallows (409 with
+  its `why`), and `/api/nodes` sends it as `actions`, which the console turns into buttons.
 - **Retry.** `POST /api/tasks/:id/retry` requeues a `failed` or `cancelled` task with fresh
   limits: rework rounds, node drops, QA attempts and budget. The budget counts from the retry
   (`budgetBaseUsd`), while `llm.costUsd` keeps the total. The branch keeps the previous
@@ -499,7 +509,7 @@ flowchart LR
   connection per phone through the proxy; polling was enough for v1.
 - **The token stays on the server.** Pages call `/api/hub/...`. The route handler checks the
   path against `lib/hub-routes.ts` (task/plan reads and transcripts, cancel/retry,
-  create/approve/reject plans; no raw task submission, sync or node endpoints) and adds the
+  create/approve/reject plans, drain/resume/restart a worker; no raw task submission or sync) and adds the
   Bearer token. A cross-site `Origin` on a POST is refused, since browsers re-send Basic-auth
   credentials across sites.
 - **Redirects use the browser's address.** Next.js builds `request.url` from the address it

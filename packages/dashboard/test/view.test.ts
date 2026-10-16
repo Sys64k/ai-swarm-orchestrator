@@ -16,6 +16,7 @@ import {
   taskBadge,
   terminalLines,
   timeAgo,
+  workerView,
   workerViews,
   buildOf,
 } from "../lib/view.ts";
@@ -192,18 +193,50 @@ describe("formatting", () => {
         heartbeat: { memoryAvailableBytes: 1, cpuLoadPercent: 37.4 },
         currentTaskId: "api",
         lastSeenAt: "",
+        supervisor: "systemd",
       },
     ];
-    assert.deepEqual(workerViews(nodes), [{ nodeId: "avalon-1", name: "avalon", busy: true, taskId: "api", detail: "12 cores, 32 GiB · CPU 37%", outdated: false }]);
+    const [w, ...rest] = workerViews(nodes);
+    assert.equal(rest.length, 0);
+    assert.deepEqual(
+      { nodeId: w.nodeId, name: w.name, taskId: w.taskId, detail: w.detail, status: w.status },
+      { nodeId: "avalon-1", name: "avalon", taskId: "api", detail: "12 cores, 32 GiB · CPU 37%", status: { label: "Busy", tone: "active" } },
+    );
   });
 
   it("shows each worker's build and whether it needs updating", () => {
     const node = (version: string | undefined, outdated?: boolean): HubNode => ({ nodeId: "w", nodeKind: "worker", heartbeat: null, currentTaskId: null, lastSeenAt: "", version, outdated });
     assert.deepEqual(
-      workerViews([node("0.1.0+e422cd7", false), node("0.1.0", true), node(undefined)]).map((w) => [w.detail, w.outdated]),
-      [["build e422cd7", false], ["build 0.1.0", true], ["", false]],
+      workerViews([node("0.1.0+e422cd7", false), node("0.1.0", true), node(undefined)]).map((w) => [w.detail, w.status.label]),
+      [["build e422cd7", "Idle"], ["build 0.1.0", "Update"], ["", "Idle"]],
     );
     assert.equal(buildOf("0.1.0+abc-dirty"), "abc-dirty");
+  });
+
+  it("shows the worker buttons the Hub allows, with labels for the current state", () => {
+    const allow = (drain: boolean, resume: boolean, restart: boolean, why: Record<string, string> = {}) => ({ drain, resume, restart, why });
+    const base: HubNode = { nodeId: "w", nodeKind: "worker", heartbeat: null, currentTaskId: null, lastSeenAt: "", hardware: { hostname: "avalon", cpu: { logicalCores: 1 }, memory: { totalBytes: 1 } } };
+    const view = (n: Partial<HubNode>) => workerView({ ...base, ...n });
+
+    const idle = view({ actions: allow(true, false, true), outdated: true });
+    assert.deepEqual([idle.status.label, idle.actions.drain, idle.actions.resume, idle.actions.restart], ["Update", true, false, true]);
+    assert.equal(idle.actions.restartConfirm, "Restart avalon? It restarts now.");
+
+    const busy = view({ currentTaskId: "t", actions: allow(true, false, true) });
+    assert.match(busy.actions.restartConfirm, /finishes its current job first/);
+
+    assert.deepEqual([view({ draining: true }).status.label, view({ draining: true, currentTaskId: "t" }).status.label], ["Drained", "Busy, draining"]);
+    const pending = view({ draining: true, restart: "pending", currentTaskId: "t", actions: allow(false, true, false) });
+    assert.deepEqual([pending.status.label, pending.actions.resumeLabel], ["Restart after job", "Cancel restart"]);
+    assert.equal(view({ draining: true, actions: allow(false, true, true) }).actions.resumeLabel, "Resume");
+    assert.equal(view({ draining: true, restart: "sent" }).status.label, "Restarting");
+
+    const manual = view({ actions: allow(true, false, false, { restart: "started by hand: run aso service install" }) });
+    assert.equal(manual.actions.restart, false);
+    assert.match(manual.actions.restartNote!, /aso service install/);
+
+    const oldHub = view({}).actions;
+    assert.deepEqual([oldHub.drain, oldHub.resume, oldHub.restart, oldHub.restartNote], [false, false, false, undefined], "a Hub without actions gets no buttons");
   });
 });
 

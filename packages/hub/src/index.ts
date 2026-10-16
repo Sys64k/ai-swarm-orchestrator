@@ -1,5 +1,5 @@
 export { startHub, type HubOptions, type HubHandle } from "./server.js";
-export { isOutdated, NodeRegistry, type NodeEntry, type Registration, type Heartbeat } from "./registry.js";
+export { isOutdated, nodeActions, NodeError, NodeRegistry, type NodeAction, type NodeActions, type NodeEntry, type Registration, type Heartbeat } from "./registry.js";
 export { TaskManager, TaskError, DEFAULT_QA, type QaOptions, type TaskRecord, type TaskState } from "./tasks.js";
 export {
   HubRepository,

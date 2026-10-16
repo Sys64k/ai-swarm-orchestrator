@@ -3,6 +3,12 @@
  * Git, package downloads) stays out of reach of the browser.
  */
 const ID = "[A-Za-z0-9_-]{1,128}";
+
+/** What the console can ask of a worker (`POST nodes/<id>/<action>`). */
+export const WORKER_ACTIONS = ["drain", "resume", "restart"] as const;
+export type WorkerAction = (typeof WORKER_ACTIONS)[number];
+/** Node ids carry the hostname, so dots and colons too; never a `.` or `..` segment. */
+const NODE_ID = "(?!\\.\\.?/)[A-Za-z0-9._:-]{1,128}";
 const RULES: ReadonlyArray<{ method: "GET" | "POST"; pattern: RegExp }> = [
   { method: "GET", pattern: /^health$/ },
   // Signed-in devices may create sign-in links for other devices; redeeming is server-side only.
@@ -15,6 +21,7 @@ const RULES: ReadonlyArray<{ method: "GET" | "POST"; pattern: RegExp }> = [
   { method: "GET", pattern: new RegExp(`^projects/${ID}$`) },
   { method: "GET", pattern: /^llm$/ },
   { method: "GET", pattern: /^nodes$/ },
+  { method: "POST", pattern: new RegExp(`^nodes/${NODE_ID}/(${WORKER_ACTIONS.join("|")})$`) },
   { method: "GET", pattern: /^tasks$/ },
   { method: "GET", pattern: new RegExp(`^tasks/${ID}$`) },
   { method: "GET", pattern: new RegExp(`^tasks/${ID}/transcript$`) },
