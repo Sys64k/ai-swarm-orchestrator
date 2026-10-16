@@ -142,6 +142,31 @@ You get:
 - **Container ownership:** in Docker the container runs as your user ID, so files the Hub
   writes into your project keep your ownership.
 
+#### Keep the Hub running (systemd)
+
+`aso start-hub` runs only as long as its terminal. On Linux, install it as a systemd user
+service instead, with the same options:
+
+```bash
+aso hub-service install --docker   # same options as start-hub
+aso hub-service status
+aso hub-service logs -f            # the Hub's, the console's and the Architect's output
+aso hub-service restart            # after rebuilding or updating aso
+aso hub-service uninstall
+```
+
+- **Starts at boot, restarts on failure.** `~/.config/systemd/user/aso-hub.service` runs the
+  `aso` you installed it with, using your current `PATH`, and restarts 10 s after any exit.
+  Lingering is turned on as for the worker service, so it runs without a login.
+- **Options:** the unit keeps the options you typed, plus the projects folder as an absolute
+  path. Everything else is read again at each start: the token file, `ANTHROPIC_API_KEY` and
+  `ASO_*` settings from `~/.config/aso/.env` (or the checkout's `.env`). A key that is only
+  exported in your shell does not reach the service; the install warns about that.
+- **The Architect runs as a child process** of the service instead of in tmux, so its output
+  is in `aso hub-service logs`. It is started again 10 s after it exits.
+- **One Hub per port.** The install refuses while another Hub answers on the port: stop that
+  one first.
+
 ### Worker machines
 
 Workers install the package the Hub serves. No clone, build or npm registry access is needed:
@@ -197,7 +222,8 @@ Run `aso update` on any machine:
 - **Source checkouts:** `git pull`, `npm ci` and a rebuild.
 
 To roll out a new version, update the Hub machine, run `npm run package` there, and restart
-the Hub. Workers then update themselves (below); run `aso update --hub <hub-ip>` on the
+the Hub (`aso hub-service restart` for the service; `aso update` on a Hub installed from the
+package restarts the service itself). Workers then update themselves (below); run `aso update --hub <hub-ip>` on the
 others. A worker installed with `aso service install` is restarted on the new version
 automatically; restart others yourself.
 
@@ -538,7 +564,7 @@ failure), and so do the dashboard and `aso sync`.
 | `--task-budget <usd>` | `5` | Estimated LLM spend cap per task |
 | `--llm-concurrency <n>` | `4` | Concurrent model requests across all workers and the Architect; jobs beyond it wait their turn |
 | `--no-dashboard` | | Skip the dashboard (not supported with `--docker`) |
-| `--no-architect` | | Skip the Architect tmux session |
+| `--no-architect` | | Do not start the Architect |
 
 ### `aso start-worker`
 
@@ -566,6 +592,12 @@ systemd user service (see [Keep a worker running](#keep-a-worker-running-systemd
 other subcommands are `status`, `logs [-f] [-n <lines>]` and `uninstall`. Linux with systemd
 only.
 
+### `aso hub-service`
+
+`aso hub-service install [start-hub options]` installs and starts the Hub as a systemd user
+service (see [Keep the Hub running](#keep-the-hub-running-systemd)). The other subcommands
+are `status`, `restart`, `logs [-f] [-n <lines>]` and `uninstall`. Linux with systemd only.
+
 ### `aso plan`
 
 `aso plan [requirement...]` asks the Architect to plan a requirement. It streams the
@@ -587,7 +619,8 @@ prints them and reads your answers (an empty answer rejects the plan).
 
 Without a terminal (scripts), `aso plan` prints these commands and exits.
 
-The Architect runs in the `aso-architect` tmux session that `start-hub` starts. Plans wait
+The Architect runs in the `aso-architect` tmux session that `start-hub` starts (under
+`aso hub-service`, as a child process whose output is in `aso hub-service logs`). Plans wait
 while no Architect is connected.
 
 ### `aso llm-check`

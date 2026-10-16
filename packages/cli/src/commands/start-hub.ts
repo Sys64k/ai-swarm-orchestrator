@@ -4,6 +4,7 @@ import path from "node:path";
 import { ARCHITECT_TMUX_SESSION, createLogger, resolveToken } from "@aso/shared";
 import { startHub, type Effort } from "@aso/hub";
 import { gitBuildId, layout } from "../layout.js";
+import { runsAsSystemdService } from "../service.js";
 
 const log = createLogger("cli");
 
@@ -57,11 +58,11 @@ export async function startHubCommand(opts: StartHubOptions): Promise<void> {
     },
   });
   const dashboard = opts.dashboard ? launchDashboard(opts.dashboardPort, hub.port) : undefined;
-  const architectStarted = opts.architect ? launchArchitect(hub.port) : false;
+  const architect = opts.architect ? launchArchitect(hub.port) : undefined;
 
   onShutdown(async () => {
     dashboard?.kill("SIGTERM");
-    if (architectStarted) tmux(["kill-session", "-t", ARCHITECT_TMUX_SESSION]);
+    architect?.stop();
     await hub.close();
     process.exit(0);
   });
@@ -110,21 +111,21 @@ async function startHubInDocker(root: string, opts: StartHubOptions, token: stri
   const exited = new Promise<number>((resolve) => compose.on("exit", (code) => resolve(code ?? 1)));
   log.info(`starting Hub container (first run builds the image; this can take a few minutes)`);
 
-  let architectStarted = false;
+  let architect: Architect | undefined;
   if (opts.architect) {
     const healthy = await waitForHealth(`http://127.0.0.1:${opts.port}/api/health`, exited);
-    if (healthy) architectStarted = launchArchitect(opts.port);
+    if (healthy) architect = launchArchitect(opts.port);
   }
 
   onShutdown(async (signal) => {
-    if (architectStarted) tmux(["kill-session", "-t", ARCHITECT_TMUX_SESSION]);
+    architect?.stop();
     // Ctrl+C already reached compose via the terminal's process group; a second SIGINT would
     // make compose force-kill the container. Only forward signals that came from elsewhere.
     if (signal !== "SIGINT") compose.kill(signal);
     process.exit(await exited);
   });
   const code = await exited;
-  if (architectStarted) tmux(["kill-session", "-t", ARCHITECT_TMUX_SESSION]);
+  architect?.stop();
   process.exit(code);
 }
 
@@ -188,24 +189,66 @@ function tmux(args: string[]): boolean {
   }
 }
 
-/** Starts the Architect in a detached tmux session. Returns true if this process created it. */
-function launchArchitect(hubPort: number): boolean {
+/** An Architect this process started, stopped with the Hub. */
+interface Architect {
+  stop(): void;
+}
+
+/** How long a crashed Architect waits before it is started again (service mode). */
+const ARCHITECT_RESTART_MS = 10_000;
+
+/** The same `aso` script runs the Architect via its hidden `architect` command. */
+const architectArgv = (hubPort: number) => [process.argv[1], "architect", "--hub", `127.0.0.1:${hubPort}`];
+
+/**
+ * Start the Architect: in a detached tmux session to attach to, or, under the Hub service, as a
+ * child process whose output goes to the journal. A service-owned tmux server would take in
+ * every tmux session started later and die with the service on a restart. Undefined when tmux
+ * is missing or the session already exists (a child process always starts).
+ */
+function launchArchitect(hubPort: number): Architect | undefined {
+  return runsAsSystemdService(process.env, process.pid) ? architectChild(hubPort) : architectTmux(hubPort);
+}
+
+function architectTmux(hubPort: number): Architect | undefined {
   if (!tmux(["-V"])) {
     log.warn("tmux not found; skipping Architect session (install tmux or use --no-architect)");
-    return false;
+    return undefined;
   }
   if (tmux(["has-session", "-t", ARCHITECT_TMUX_SESSION])) {
     log.warn(`tmux session "${ARCHITECT_TMUX_SESSION}" already exists; leaving it running`);
-    return false;
+    return undefined;
   }
-  // The same `aso` script runs the Architect via its hidden `architect` command.
-  const ok = tmux([
-    "new-session", "-d", "-s", ARCHITECT_TMUX_SESSION, "--",
-    process.execPath, process.argv[1], "architect", "--hub", `127.0.0.1:${hubPort}`,
-  ]);
-  if (ok) log.info(`Architect started (tmux attach -t ${ARCHITECT_TMUX_SESSION})`);
-  else log.error("failed to start Architect tmux session");
-  return ok;
+  if (!tmux(["new-session", "-d", "-s", ARCHITECT_TMUX_SESSION, "--", process.execPath, ...architectArgv(hubPort)])) {
+    log.error("failed to start Architect tmux session");
+    return undefined;
+  }
+  log.info(`Architect started (tmux attach -t ${ARCHITECT_TMUX_SESSION})`);
+  return { stop: () => void tmux(["kill-session", "-t", ARCHITECT_TMUX_SESSION]) };
+}
+
+/** The Architect as a child process, started again if it exits on its own. */
+function architectChild(hubPort: number): Architect {
+  let child: ChildProcess | undefined;
+  let stopped = false;
+  let retry: NodeJS.Timeout | undefined;
+  const start = () => {
+    child = spawn(process.execPath, architectArgv(hubPort), { stdio: "inherit" });
+    child.on("exit", (code, signal) => {
+      if (stopped) return;
+      log.warn(`Architect exited (${signal ?? `code ${code}`}); starting it again in ${ARCHITECT_RESTART_MS / 1000} s`);
+      retry = setTimeout(start, ARCHITECT_RESTART_MS);
+    });
+  };
+  start();
+  log.info("Architect started as a child process (its log is the Hub service's)");
+  return {
+    stop() {
+      stopped = true;
+      clearTimeout(retry);
+      child?.kill("SIGTERM");
+    },
+  };
 }
 
 function launchDashboard(port: number, hubPort: number): ChildProcess | undefined {

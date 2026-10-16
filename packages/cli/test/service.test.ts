@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { envFilesSetToken, needsTokenEnvFile, runsAsSystemdService, systemdQuote, userUnitDir, workerArgs, workerUnit } from "../dist/service.js";
+import { Command } from "commander";
+import { envFilesSetToken, explicitArgs, needsTokenEnvFile, runsAsSystemdService, serviceUnit, systemdQuote, userUnitDir, workerArgs } from "../dist/service.js";
 
 describe("worker service unit", () => {
   it("passes on only the options that differ from start-worker's defaults", () => {
@@ -22,21 +23,24 @@ describe("worker service unit", () => {
   });
 
   it("runs the installed aso with restarts, the install-time PATH and the token file", () => {
-    const unit = workerUnit({
+    const unit = serviceUnit({
+      description: "ASO worker (Hub 192.168.1.10)",
+      installedBy: "aso service",
       node: "/usr/bin/node",
       script: "/usr/lib/node_modules/@aso/cli/dist/aso.mjs",
       args: ["start-worker", "--hub", "192.168.1.10"],
       path: "/home/me/.nvm/bin:/usr/bin",
       envFile: "/home/me/.config/aso/worker.env",
-      hub: "192.168.1.10",
     });
+    assert.match(unit, /^# Installed by `aso service install`; remove with `aso service uninstall`\.$/m);
+    assert.match(unit, /^Description=ASO worker \(Hub 192\.168\.1\.10\)$/m);
     assert.match(unit, /^ExecStart=\/usr\/bin\/node \/usr\/lib\/node_modules\/@aso\/cli\/dist\/aso\.mjs start-worker --hub 192\.168\.1\.10$/m);
     assert.match(unit, /^Restart=always$/m);
     assert.match(unit, /^Environment="PATH=\/home\/me\/\.nvm\/bin:\/usr\/bin"$/m);
     assert.match(unit, /^EnvironmentFile=\/home\/me\/\.config\/aso\/worker\.env$/m);
     assert.match(unit, /^WantedBy=default\.target$/m);
     assert.doesNotMatch(unit, /aso_/, "the token never goes into the unit file");
-    assert.doesNotMatch(workerUnit({ node: "n", script: "s", args: [], path: "/bin", hub: "h" }), /EnvironmentFile/);
+    assert.doesNotMatch(serviceUnit({ description: "d", installedBy: "aso hub-service", node: "n", script: "s", args: [], path: "/bin" }), /EnvironmentFile/);
   });
 
   it("knows when a .env file already provides the token", () => {
@@ -57,6 +61,40 @@ describe("worker service unit", () => {
 
   it("lives in the user's systemd directory", () => {
     assert.equal(userUnitDir({ XDG_CONFIG_HOME: "/x/cfg" }), "/x/cfg/systemd/user");
+  });
+});
+
+describe("Hub service arguments", () => {
+  /** A command shaped like start-hub's options, parsed from `argv`. */
+  const parsed = (argv: string[], env: { ASO_MODEL?: string } = {}) => {
+    const cmd = new Command()
+      .exitOverride()
+      .option("-r, --root <dir>", "projects", "/home/me/aso-projects")
+      .option("-p, --port <port>", "port", Number, 7420)
+      .option("--no-push", "keep merges local")
+      .option("--docker", "docker", false)
+      .option("--model <id>", "model", env.ASO_MODEL || "claude-opus-5-5")
+      .option("--allow-deps <list>", "deps");
+    cmd.parse(argv, { from: "user" });
+    return cmd;
+  };
+
+  it("keeps only the options given on the command line, so defaults and .env values stay live", () => {
+    assert.deepEqual(explicitArgs(parsed([])), []);
+    assert.deepEqual(explicitArgs(parsed(["--docker", "--no-push", "-p", "7500", "--allow-deps", "zod,@types/*"])), [
+      "--port", "7500", "--no-push", "--docker", "--allow-deps", "zod,@types/*",
+    ]);
+    assert.deepEqual(explicitArgs(parsed([], { ASO_MODEL: "claude-sonnet-5-5" })), [], "an env default is read again at start");
+  });
+
+  it("always passes the options it is told to, even from a default", () => {
+    assert.deepEqual(explicitArgs(parsed([]), { always: ["root"] }), ["--root", "/home/me/aso-projects"]);
+    assert.deepEqual(explicitArgs(parsed(["--root", "/srv/p", "--docker"]), { always: ["root"] }), ["--root", "/srv/p", "--docker"]);
+  });
+
+  it("rewrites a value by option name, whatever the values around it", () => {
+    const upper = { map: { root: (v: string) => v.toUpperCase() } };
+    assert.deepEqual(explicitArgs(parsed(["--model", "--root", "--root", "/srv/p"]), upper), ["--root", "/SRV/P", "--model", "--root"]);
   });
 });
 

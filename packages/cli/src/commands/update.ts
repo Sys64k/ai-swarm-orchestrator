@@ -5,7 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import { createLogger, hubHttpBase } from "@aso/shared";
 import { layout } from "../layout.js";
-import { restartWorkerService, workerServiceActive } from "../systemd.js";
+import { HUB_SERVICE, WORKER_SERVICE } from "../service.js";
+import { restartAfterUpdate, serviceActive } from "../systemd.js";
 
 const log = createLogger("cli");
 
@@ -97,8 +98,18 @@ export async function installHubPackage(base: string, current = layout.version()
   return true;
 }
 
-/** The worker service runs the new version only after a restart; do it rather than tell people to. */
+/**
+ * Services run the new version only after a restart; do it rather than tell people to. A Hub
+ * from a source checkout also serves the package and console it was built with, which
+ * `aso update` does not rebuild, so it is left for after those.
+ */
 function afterUpdate(): void {
-  if (workerServiceActive()) restartWorkerService();
-  else log.info("updated; restart running aso processes to use the new version");
+  const active = [WORKER_SERVICE, HUB_SERVICE].filter(serviceActive);
+  for (const unit of active) {
+    if (unit === HUB_SERVICE && layout.mode === "source") log.info(SOURCE_HUB_NEXT_STEPS);
+    else restartAfterUpdate(unit);
+  }
+  if (active.length === 0) log.info("updated; restart running aso processes to use the new version");
 }
+
+const SOURCE_HUB_NEXT_STEPS = "to serve the new build: npm run build:dashboard && npm run package && aso hub-service restart";

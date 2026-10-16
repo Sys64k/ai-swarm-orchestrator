@@ -1165,7 +1165,7 @@ The Docker image builds the package during `docker build`. The CLI passes the ho
 where the system allows it, so the service still starts at boot without a login.
 
 - **The unit is generated** by pure functions in `cli/src/service.ts`: `workerArgs`,
-  `workerUnit`, `systemdQuote`.
+  `serviceUnit`, `systemdQuote`.
 - **ExecStart runs the same `aso`** (Node binary plus script) the install ran from, with
   `Restart=always`. A global `npm install` replaces the files in place, so after `aso update`
   only a restart is needed, and `aso update` does it when the service is active.
@@ -1175,3 +1175,25 @@ where the system allows it, so the service still starts at boot without a login.
 - **Each start registers a new node id** (the worker's id has a random suffix). A crash in the
   middle of a job is therefore handled like any disconnect: the job is held for the
   reconnect grace period, then reassigned.
+
+### The Hub as a service
+
+`aso hub-service install` does the same for `start-hub`
+(`~/.config/systemd/user/aso-hub.service`), sharing the install, linger, status and logs code
+in `cli/src/commands/service.ts`.
+
+- **Arguments:** `explicitArgs` keeps the options whose Commander value source is `cli`,
+  plus `--root` made absolute. Defaults and `ASO_*` values from `.env` are read again at each
+  start, so editing `.env` and restarting is enough.
+- **The Architect** is a child process of `start-hub` when it runs as the unit's main process
+  (`runsAsSystemdService`), not a tmux session. A tmux server started from the service would
+  live in its cgroup, take in tmux sessions started later, and be killed with them on a
+  restart. The child is started again `ARCHITECT_RESTART_MS` (10 s) after it exits. On a
+  crash of the main process, systemd stops the rest of the cgroup before restarting.
+- **With `--docker`,** the unit runs `docker compose up --build` attached, as `start-hub
+  --docker` does in a terminal. SIGTERM reaches compose, which stops the container.
+- **The install refuses** while a Hub answers `/api/health` on the port, unless that Hub is
+  the service itself.
+- **`aso update`** restarts an active Hub service when it installed a package. A source
+  checkout also serves the console and package it was built with, so it says to run
+  `build:dashboard`, `package` and `aso hub-service restart` instead.
