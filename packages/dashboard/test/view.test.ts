@@ -265,7 +265,7 @@ describe("formatting", () => {
 
     const failed = view({ updates: "package", updateError: { version: "0.1.0+f262197", reason: "npm install exited with code 1" } });
     assert.deepEqual([failed.status.label, failed.updateNote], ["Update", "The automatic update to build f262197 failed: npm install exited with code 1. Run aso update on it."]);
-    assert.match(view({}).updateNote!, /cannot update itself \(a source checkout/);
+    assert.match(view({}).updateNote!, /cannot update itself: it runs from a source checkout.*predates automatic updates\. Run aso update on it\.$/);
     assert.equal(view({ updates: "package" }).updateNote, "This worker runs another aso build than the Hub: run aso update on it.");
     assert.equal(view({ outdated: false, updateError: { version: "x", reason: "y" } }).updateNote, undefined, "current: nothing to say");
   });

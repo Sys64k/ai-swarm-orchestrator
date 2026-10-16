@@ -179,7 +179,7 @@ export class NodeRegistry {
     const reg = entry?.registration;
     if (!entry || reg?.nodeKind !== "worker") return "it is not a connected worker";
     if (reg.updates !== "package" || reg.supervisor === undefined) {
-      return "it cannot update itself (it runs from a source checkout, or was not started by aso service install)";
+      return "it cannot update itself: it runs from a source checkout, was not started by aso service install, or its build predates automatic updates";
     }
     if (entry.restart !== undefined) return "it is already restarting";
     const host = reg.hardware.hostname;

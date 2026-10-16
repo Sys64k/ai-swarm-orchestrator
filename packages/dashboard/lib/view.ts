@@ -215,7 +215,7 @@ function workerStatus(n: HubNode, running: number, slots: number): { label: stri
 }
 
 const CANNOT_UPDATE =
-  "This worker runs another aso build than the Hub and cannot update itself (a source checkout, or not run by aso service install): run aso update on it.";
+  "This worker runs another aso build than the Hub and cannot update itself: it runs from a source checkout, was not started by aso service install, or its build predates automatic updates. Run aso update on it.";
 
 function updateNote(n: HubNode, running: number): string | undefined {
   if (n.updateTo && n.restart === "sent") return `Installing build ${buildOf(n.updateTo)} from the Hub, then restarting.`;
