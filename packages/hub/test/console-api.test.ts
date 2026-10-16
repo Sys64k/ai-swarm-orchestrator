@@ -35,7 +35,7 @@ function result(m: AgentMessage) {
 
 /** A worker that took `taskId` and reported it started. */
 async function implementing(ctx: HubContext, nodeId: string, taskId: string): Promise<TestClient> {
-  const w = await worker(ctx.port, nodeId, { roles: ["backend"] });
+  const w = await worker(ctx.port, nodeId);
   await postTask(ctx.port, { taskId, role: "backend", title: "Greet", description: "Say hello" });
   const assignment = await w.next();
   assert.ok(assignment.type === "TASK_ASSIGNMENT" && assignment.payload.taskId === taskId);
@@ -71,7 +71,7 @@ describe("cancel and retry", () => {
       assert.equal((await call(ctx.port, "/api/tasks/nope/retry", "POST")).status, 404);
       assert.equal((await call(ctx.port, "/api/tasks/nope/cancel", "POST")).status, 404);
 
-      const w = await worker(ctx.port, "dev", { roles: ["backend"] });
+      const w = await worker(ctx.port, "dev");
       const assignment = await w.next();
       assert.ok(assignment.type === "TASK_ASSIGNMENT" && assignment.payload.taskId === "api");
       assert.equal(assignment.payload.rework?.round, 1, "the agent hears why it is running again");
@@ -169,7 +169,7 @@ describe("transcripts", () => {
         // QA verdicts land in the transcript with the runner's output.
         const commit = await pushTaskBranch(ctx.gitUrl, "greet", { "greeting.txt": "hello\n" });
         w.send(createMessage("STATUS_UPDATE", "dev", { state: "completed", taskId: "greet", commit }));
-        const qa = await worker(ctx.port, "qa", { roles: ["qa"] });
+        const qa = await worker(ctx.port, "qa");
         const run = await qa.next();
         assert.equal(run.type, "TEST_EXECUTION");
         qa.send(createMessage("FEEDBACK_LOOP", "qa", {

@@ -150,7 +150,7 @@ Workers install the package the Hub serves. No clone, build or npm registry acce
 curl -fo /tmp/aso.tgz http://192.168.1.10:7420/dist/aso.tgz && npm install -g /tmp/aso.tgz
 mkdir -p ~/.config/aso && echo "ASO_TOKEN=<output of aso token on the Hub>" >> ~/.config/aso/.env
 chmod 600 ~/.config/aso/.env
-aso start-worker --hub 192.168.1.10 --roles backend,qa
+aso start-worker --hub 192.168.1.10
 ```
 
 Workers need **Docker**, usable by the worker's user (in the `docker` group). Every command a
@@ -166,7 +166,7 @@ On Linux, install the worker as a systemd user service instead of starting it by
 starts at boot, restarts if it crashes, and `aso update` restarts it on the new version:
 
 ```bash
-aso service install --hub 192.168.1.10 --roles backend,qa   # same options as start-worker
+aso service install --hub 192.168.1.10   # same options as start-worker
 aso service status
 aso service logs -f
 aso service uninstall
@@ -507,7 +507,9 @@ failure), and so do the dashboard and `aso sync`.
 
 ### `aso start-worker`
 
-Profiles the machine (CPU, RAM, Docker, disk write speed) and connects to the Hub. If the
+Profiles the machine (CPU, RAM, Docker, disk write speed) and connects to the Hub. A worker
+doesn't choose what it works on: the Architect gives each task a role, and the Hub sends it to
+the best free machine. If the
 connection drops, the worker reconnects with exponential backoff. While offline it queues
 outgoing messages and sends them once it has registered again.
 
@@ -515,7 +517,6 @@ outgoing messages and sends them once it has registered again.
 |---|---|---|
 | `--hub <address>` | *required* | `192.168.1.10`, `hub.lan:7420`, or `ws://…` |
 | `-p, --port <port>` | `7420` | Hub port, if `--hub` doesn't include one |
-| `-r, --roles <list>` | all | Comma-separated: `backend,frontend,qa,devops` |
 | `-w, --work-dir <path>` | `~/.aso/work` | Where the project checkout lives; the I/O benchmark runs here |
 | `--token <token>` | `ASO_TOKEN` / token file | The Hub's ASO token |
 | `--sandbox <mode>` | `docker` | `docker`: each job command runs in a throwaway container that sees only the checkout. `none`: directly on this machine as this user. The worker refuses to start if `docker` is chosen but Docker isn't usable |
@@ -649,8 +650,9 @@ layouts vary too much for a fixed rule. Each role has its own system prompt; see
 
 ## Task kinds and routing
 
-The task's **role** decides *who* can take it, from the roles a worker accepts. The task's
-**kind** decides *where* it runs best:
+The Architect gives each task a **role**, which decides *what* the agent may do (tools, prompt,
+writable files). Workers don't pick roles: every worker runs whatever role it is sent. The
+task's **kind** decides *where* it runs best:
 
 | Kind | Hard requirement | Preference |
 |---|---|---|
@@ -659,6 +661,10 @@ The task's **role** decides *who* can take it, from the roles a worker accepts. 
 | `e2e_test` | ≥ 4 GiB total RAM | most free RAM (70%) |
 | `db_migration` | — | fastest disk writes (80%) |
 | `container_build` | running Docker daemon | balanced |
+
+**QA runs on another machine** than the one that wrote the code, if another worker is free, so
+the tests start from a fresh checkout and setup. With a single worker, or when every other
+worker is busy, the writer runs QA itself rather than waiting.
 
 For the scoring formula, see [ARCHITECTURE.md](ARCHITECTURE.md#6-hardware-aware-routing).
 

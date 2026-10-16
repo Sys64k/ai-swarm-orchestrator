@@ -158,7 +158,7 @@ export function workerViews(nodes: readonly HubNode[]): WorkerView[] {
   return nodes
     .filter((n) => n.nodeKind === "worker")
     .map((n) => {
-      const roles = n.roles?.join(", ");
+      const size = n.hardware ? `${n.hardware.cpu.logicalCores} cores, ${Math.round(n.hardware.memory.totalBytes / 1024 ** 3)} GiB` : undefined;
       const cpu = n.heartbeat ? `CPU ${Math.round(n.heartbeat.cpuLoadPercent)}%` : undefined;
       const build = n.version ? `build ${buildOf(n.version)}` : undefined;
       return {
@@ -166,7 +166,7 @@ export function workerViews(nodes: readonly HubNode[]): WorkerView[] {
         name: n.hardware?.hostname ?? n.nodeId,
         busy: n.currentTaskId !== null,
         taskId: n.currentTaskId,
-        detail: [roles, cpu, build].filter(Boolean).join(" · "),
+        detail: [size, cpu, build].filter(Boolean).join(" · "),
         outdated: n.outdated === true,
       };
     });

@@ -129,7 +129,7 @@ describe("Hub restart", () => {
         if (r.status === 409) throw new Error("duplicate");
       }), /duplicate/, "restored ids stay taken");
 
-      const w = await worker(hub.port, "dev", { roles: ["backend"] });
+      const w = await worker(hub.port, "dev");
       const assignment = await w.next();
       assert.ok(assignment.type === "TASK_ASSIGNMENT" && assignment.payload.taskId === "api");
       w.ws.close();
@@ -142,7 +142,7 @@ describe("Hub restart", () => {
     const env = await restartable();
     try {
       let hub = await env.start();
-      const w = await worker(hub.port, "dev", { roles: ["backend"] });
+      const w = await worker(hub.port, "dev");
       await postTask(hub.port, { taskId: "api", role: "backend", title: "API", description: "Build it" });
       assert.equal((await w.next()).type, "TASK_ASSIGNMENT");
       await waitFor(() => hub.tasks.get("api")?.state === "assigned");
@@ -165,7 +165,7 @@ describe("Hub restart", () => {
     const env = await restartable({ llm: { adapter: model } });
     try {
       let hub = await env.start();
-      let w = await worker(hub.port, "dev", { roles: ["backend"] });
+      let w = await worker(hub.port, "dev");
       await postTask(hub.port, { taskId: "greet", role: "backend", title: "Greet", description: "Say hello" });
       assert.equal((await w.next()).type, "TASK_ASSIGNMENT");
       w.send(createMessage("STATUS_UPDATE", "dev", { state: "in_progress", taskId: "greet" }));
@@ -184,7 +184,7 @@ describe("Hub restart", () => {
       assert.ok(held.detachedAt !== undefined, "held for the worker to reconnect");
       assert.equal(held.llm.calls, 1, "cost so far survives");
 
-      w = await worker(hub.port, "dev", { roles: ["backend"], resume: { taskId: "greet", job: "implement" } });
+      w = await worker(hub.port, "dev", { resume: { taskId: "greet", job: "implement" } });
       await waitFor(() => hub.tasks.get("greet")?.detachedAt === undefined, 2000, "resume");
 
       // A turn whose answer was lost in the restart is answered again without a new model call.

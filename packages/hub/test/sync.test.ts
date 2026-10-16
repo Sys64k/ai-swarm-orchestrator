@@ -7,7 +7,7 @@ import { git, postTask, pushTaskBranch, tempDir, waitFor, withHub, worker, write
 
 /** Fake implementer: push files to task/<id> and report completion (QA is off in these tests). */
 async function deliver(ctx: HubContext, taskId: string, files: Record<string, string>) {
-  const w = await worker(ctx.port, `dev-${taskId}`, { roles: ["backend"] });
+  const w = await worker(ctx.port, `dev-${taskId}`);
   await postTask(ctx.port, { taskId, role: "backend", title: `Task ${taskId}`, description: "d" });
   await w.next();
   w.send(createMessage("STATUS_UPDATE", `dev-${taskId}`, { state: "in_progress", taskId }));

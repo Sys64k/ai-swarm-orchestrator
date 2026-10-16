@@ -9,9 +9,6 @@ import {
   DEFAULT_DASHBOARD_PORT,
   DEFAULT_HUB_PORT,
   DEFAULT_PROJECTS_DIR,
-  WORKER_ROLES,
-  WorkerRoleSchema,
-  type WorkerRole,
 } from "@aso/shared";
 import type { Effort } from "@aso/hub";
 import { startArchitect } from "@aso/architect";
@@ -36,15 +33,6 @@ function parsePort(value: string): number {
     throw new InvalidArgumentError("must be an integer between 1 and 65535");
   }
   return n;
-}
-
-function parseRoles(value: string): WorkerRole[] {
-  const roles = value.split(",").map((r) => r.trim()).filter(Boolean);
-  const invalid = roles.filter((r) => !WorkerRoleSchema.safeParse(r).success);
-  if (!roles.length || invalid.length) {
-    throw new InvalidArgumentError(`expected a comma-separated list of: ${WORKER_ROLES.join(", ")}`);
-  }
-  return [...new Set(roles)] as WorkerRole[];
 }
 
 function parseUsd(value: string): number {
@@ -110,7 +98,6 @@ function workerOptions(cmd: Command): Command {
   return cmd
     .requiredOption("--hub <ip_address>", "Hub address (IP, host:port, or ws:// URL)")
     .option("-p, --port <port>", "Hub port if not given in --hub", parsePort, DEFAULT_HUB_PORT)
-    .option("-r, --roles <roles>", `roles to accept (default: ${WORKER_ROLES.join(",")})`, parseRoles)
     .option("-w, --work-dir <path>", "directory for task checkouts (default: ~/.aso/work)")
     .option("--token <token>", "ASO token from the Hub (default: ASO_TOKEN or the local token file)")
     .option(

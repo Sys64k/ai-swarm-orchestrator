@@ -10,7 +10,6 @@ import {
   parseAgentMessage,
   type AgentMessage,
   type HardwareProfile,
-  type WorkerRole,
 } from "@aso/shared";
 
 process.env.ASO_LOG_LEVEL ??= "error";
@@ -153,7 +152,6 @@ export async function worker(
   port: number,
   nodeId: string,
   opts: {
-    roles?: WorkerRole[];
     ramGiB?: number;
     docker?: boolean;
     mbps?: number;
@@ -165,7 +163,6 @@ export async function worker(
     createMessage("NODE_REGISTRATION", nodeId, {
       nodeKind: "worker",
       version: "test",
-      roles: opts.roles ?? ["backend", "frontend", "qa", "devops"],
       hardware: hardware(opts),
       resume: opts.resume,
     }),

@@ -52,7 +52,7 @@ describe("task dependencies", () => {
   it("starts a task only after its dependencies are merged", () =>
     withHub(
       async (ctx) => {
-        const w = await worker(ctx.port, "dev", { roles: ["backend"] });
+        const w = await worker(ctx.port, "dev");
         await postTask(ctx.port, { taskId: "api", role: "backend", title: "API", description: "d" });
         const page = await postTask(ctx.port, { taskId: "page", role: "backend", title: "Page", description: "d", dependsOn: ["api"] });
         assert.equal(page.status, 201);
@@ -73,7 +73,7 @@ describe("task dependencies", () => {
 
   it("blocks dependants of a failed task and rejects unknown dependencies", () =>
     withHub(async (ctx) => {
-      const w = await worker(ctx.port, "dev", { roles: ["backend"] });
+      const w = await worker(ctx.port, "dev");
       await postTask(ctx.port, { taskId: "base", role: "backend", title: "Base", description: "d" });
       await postTask(ctx.port, { taskId: "child", role: "backend", title: "Child", description: "d", dependsOn: ["base"] });
       await w.next();
@@ -90,7 +90,7 @@ describe("task dependencies", () => {
 describe("role scope on the Hub", () => {
   it("sends a QA task back when its branch changes feature code", () =>
     withHub(async (ctx) => {
-      const w = await worker(ctx.port, "qa1", { roles: ["qa"] });
+      const w = await worker(ctx.port, "qa1");
       await postTask(ctx.port, { taskId: "tests", role: "qa", title: "Tests", description: "d" });
       await w.next();
       w.send(createMessage("STATUS_UPDATE", "qa1", { state: "in_progress", taskId: "tests" }));
@@ -146,7 +146,7 @@ describe("plans (fake Architect)", () => {
       const p1 = (await api(ctx, "/api/plans", { method: "POST", body: JSON.stringify({ requirement: "one" }) })).body.planId;
       planRequest(await a.next());
 
-      const stranger = await worker(ctx.port, "w", { roles: ["backend"] });
+      const stranger = await worker(ctx.port, "w");
       stranger.send(createMessage("PLAN_RESULT", "w", { planId: p1, outcome: "failed", error: "x" }));
       const rejected = await stranger.next();
       assert.ok(rejected.type === "PROTOCOL_ERROR" && /not being planned by w/.test(rejected.payload.reason));
@@ -322,8 +322,8 @@ describe("Architect → plan → workers (real nodes, scripted model)", () => {
       async (ctx) => {
         const dirs = [tempDir("aso-arch-"), tempDir("aso-dev-"), tempDir("aso-qa-")];
         const architect = startArchitect({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "arch", workDir: dirs[0] });
-        const dev = await startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "dev", roles: ["backend"], workDir: dirs[1], hardware: hardware(), executor });
-        const qa = await startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "qa", roles: ["qa"], workDir: dirs[2], hardware: hardware(), executor });
+        const dev = await startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "dev", workDir: dirs[1], hardware: hardware(), executor });
+        const qa = await startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "qa", workDir: dirs[2], hardware: hardware(), executor });
         try {
           const planId = (await api(ctx, "/api/plans", { method: "POST", body: JSON.stringify({ requirement: "Add the answer" }) })).body.planId;
           const plan = await waitFor(() => ["proposed", "failed"].includes(ctx.hub.plans.get(planId)!.state) && ctx.hub.plans.get(planId)!, 15_000);

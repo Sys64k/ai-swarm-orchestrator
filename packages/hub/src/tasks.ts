@@ -361,7 +361,8 @@ export class TaskManager {
   }
 
   private dispatchQa(task: TaskRecord): void {
-    const decision = selectNode({ role: "qa", kind: this.qa.kind }, this.registry.workerSnapshots(), this.policies);
+    // QA on another machine than the implementer when one is free, so the tests run on a fresh checkout and setup.
+    const decision = selectNode({ role: "qa", kind: this.qa.kind, avoid: task.nodeId }, this.registry.workerSnapshots(), this.policies);
     if (!decision.ok) return this.wait(task, decision);
 
     this.registry.assign(decision.nodeId, task.spec.taskId);

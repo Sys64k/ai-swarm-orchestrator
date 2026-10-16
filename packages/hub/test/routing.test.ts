@@ -1,10 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { selectNode, type NodeSnapshot, type RoutingDecision } from "@aso/hub";
-import type { HardwareProfile, WorkerRole } from "@aso/shared";
+import type { HardwareProfile } from "@aso/shared";
 
 const GiB = 1024 ** 3;
-const ALL: WorkerRole[] = ["backend", "frontend", "qa", "devops"];
 
 function node(
   nodeId: string,
@@ -14,7 +13,6 @@ function node(
     cores?: number;
     mbps?: number;
     docker?: boolean;
-    roles?: WorkerRole[];
     busy?: boolean;
     load?: number;
     lastAssignedAt?: number;
@@ -33,7 +31,6 @@ function node(
   };
   return {
     nodeId,
-    roles: opts.roles ?? ALL,
     hardware,
     busy: opts.busy ?? false,
     lastAssignedAt: opts.lastAssignedAt,
@@ -80,17 +77,33 @@ describe("selectNode", () => {
     assert.ok(!d.ok && d.rejected[0].reason === "no Docker daemon");
   });
 
-  it("filters by role and busy state, explaining every rejection", () => {
-    const nodes = [node("fe", { roles: ["frontend"] }), node("busy", { busy: true }), node("ok")];
-    const d = selectNode({ role: "backend", kind: "feature" }, nodes);
-    assert.equal(chosen(d), "ok");
+  it("skips busy nodes and gives any free node any role, explaining every rejection", () => {
+    const nodes = [node("busy", { busy: true }), node("ok")];
+    for (const role of ["backend", "frontend", "qa", "devops"] as const) {
+      assert.equal(chosen(selectNode({ role, kind: "feature" }, nodes)), "ok", role);
+    }
 
-    const none = selectNode({ role: "backend", kind: "feature" }, nodes.slice(0, 2));
+    const none = selectNode({ role: "backend", kind: "feature" }, nodes.slice(0, 1));
     assert.ok(!none.ok);
-    assert.deepEqual(none.rejected, [
-      { nodeId: "fe", reason: "does not accept role backend" },
-      { nodeId: "busy", reason: "busy" },
-    ]);
+    assert.deepEqual(none.rejected, [{ nodeId: "busy", reason: "busy" }]);
+  });
+
+  it("keeps a job off the avoided node while another node is free", () => {
+    const nodes = [node("writer", { cores: 32 }), node("other", { cores: 4 })];
+    const d = selectNode({ role: "qa", kind: "unit_test", avoid: "writer" }, nodes);
+    assert.equal(chosen(d), "other", "even though the writer scores higher");
+    assert.ok(d.ok && d.reasons.includes("not writer, which wrote the code"));
+    assert.ok(d.ok && d.ranking.every((r) => r.nodeId !== "writer"));
+  });
+
+  it("falls back to the avoided node when no other node can take the job", () => {
+    for (const nodes of [[node("writer")], [node("writer"), node("busy", { busy: true })]]) {
+      const d = selectNode({ role: "qa", kind: "unit_test", avoid: "writer" }, nodes);
+      assert.equal(chosen(d), "writer");
+      assert.ok(d.ok && d.reasons.includes("no other node free, so the node that wrote the code"));
+    }
+    const none = selectNode({ role: "qa", kind: "unit_test", avoid: "writer" }, [node("writer", { busy: true })]);
+    assert.ok(!none.ok);
   });
 
   it("discounts CPU cores by current load", () => {

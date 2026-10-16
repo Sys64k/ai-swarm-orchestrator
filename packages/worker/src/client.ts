@@ -5,7 +5,6 @@ import WebSocket from "ws";
 import {
   HEARTBEAT_INTERVAL_MS,
   HUB_TO_NODE_TYPES,
-  WORKER_ROLES,
   authorizationHeader,
   createLogger,
   createMessage,
@@ -15,7 +14,6 @@ import {
   type AgentMessageType,
   type HardwareProfile,
   type PayloadInput,
-  type WorkerRole,
   UNKNOWN_VERSION,
 } from "@aso/shared";
 import { profileHardware, sampleLoad } from "./hardware.js";
@@ -29,8 +27,6 @@ export interface WorkerOptions {
   /** Hub address: IP, host:port, or ws:// URL. */
   hub: string;
   port?: number;
-  /** Agent roles this node accepts tasks for. Defaults to all worker roles. */
-  roles?: WorkerRole[];
   /** Directory for task checkouts; also where the I/O benchmark runs. Default ~/.aso/work. */
   workDir?: string;
   /** Does the implementation work. Defaults to the LLM agent (model calls go through the Hub). */
@@ -66,7 +62,6 @@ export interface WorkerHandle {
 
 export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
   const url = resolveHubUrl(opts.hub, opts.port);
-  const roles = opts.roles?.length ? opts.roles : [...WORKER_ROLES];
   const workDir = path.resolve(opts.workDir ?? DEFAULT_WORK_DIR);
 
   let profile = opts.hardware;
@@ -121,7 +116,6 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
           createMessage("NODE_REGISTRATION", nodeId, {
             nodeKind: "worker",
             version: opts.version ?? UNKNOWN_VERSION,
-            roles,
             hardware: profile,
             resume: runner.current,
           }),
@@ -136,7 +130,7 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
       switch (msg.type) {
         case "REGISTRATION_ACK":
           registered = true;
-          log.info(`registered as ${msg.payload.nodeId} (roles: ${roles.join(", ")})`);
+          log.info(`registered as ${msg.payload.nodeId}`);
           for (const raw of outbox.splice(0)) socket.send(raw);
           runner.resendPending();
           clearInterval(heartbeatTimer);

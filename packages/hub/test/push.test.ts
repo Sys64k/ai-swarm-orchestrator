@@ -288,7 +288,7 @@ describe("push notifications from the Hub", () => {
       arch.ws.close();
 
       // A task fails on a worker.
-      const w = await worker(hub.port, "dev", { roles: ["backend"] });
+      const w = await worker(hub.port, "dev");
       await call(hub.port, "/api/tasks", { taskId: "api", project: "shop", role: "backend", title: "API", description: "x" });
       assert.equal((await w.next()).type, "TASK_ASSIGNMENT");
       w.send(createMessage("STATUS_UPDATE", "dev", { state: "failed", taskId: "api", detail: "npm test failed" }));

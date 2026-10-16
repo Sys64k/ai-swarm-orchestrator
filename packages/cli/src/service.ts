@@ -8,7 +8,6 @@ export const WORKER_SERVICE = "aso-worker.service";
 export interface WorkerServiceOptions {
   hub: string;
   port?: number;
-  roles?: readonly string[];
   workDir?: string;
   sandbox?: "docker" | "none";
   sandboxImage?: string;
@@ -19,7 +18,6 @@ export interface WorkerServiceOptions {
 export function workerArgs(o: WorkerServiceOptions, defaultPort: number): string[] {
   const args = ["start-worker", "--hub", o.hub];
   if (o.port !== undefined && o.port !== defaultPort) args.push("--port", String(o.port));
-  if (o.roles?.length) args.push("--roles", o.roles.join(","));
   if (o.workDir) args.push("--work-dir", path.resolve(o.workDir));
   if (o.sandbox && o.sandbox !== "docker") args.push("--sandbox", o.sandbox);
   if (o.sandboxImage) args.push("--sandbox-image", o.sandboxImage);

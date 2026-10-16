@@ -1,4 +1,4 @@
-import { createLogger, resolveToken, type WorkerRole } from "@aso/shared";
+import { createLogger, resolveToken } from "@aso/shared";
 import { startWorker } from "@aso/worker";
 import { layout } from "../layout.js";
 
@@ -7,7 +7,6 @@ const log = createLogger("cli");
 export async function startWorkerCommand(opts: {
   hub: string;
   port: number;
-  roles?: WorkerRole[];
   workDir?: string;
   token?: string;
   sandbox: "docker" | "none";

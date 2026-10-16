@@ -127,7 +127,7 @@ describe("node loss", () => {
       await postTask(port, task("survivor"));
       await a.next();
       a.send(createMessage("STATUS_UPDATE", "a", { state: "accepted", taskId: "survivor" }));
-      const b = await worker(port, "b", { roles: ["backend"] });
+      const b = await worker(port, "b");
       a.ws.close();
 
       assert.equal(assignment(await b.next()).taskId, "survivor");
