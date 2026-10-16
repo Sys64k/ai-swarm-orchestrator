@@ -39,6 +39,8 @@ export interface PullState {
   /** The commit the merge put on the base branch (merged PRs). */
   mergeCommit?: string;
   headSha: string;
+  /** Who opened it: the token's owner. */
+  author: string;
   /** False when the PR conflicts with its base; null while GitHub is still computing it. */
   mergeable: boolean | null;
 }
@@ -67,6 +69,7 @@ interface PullJson {
   merge_commit_sha?: string | null;
   mergeable?: boolean | null;
   head: { sha: string };
+  user?: { login: string } | null;
 }
 
 export class GitHubApi {
@@ -103,6 +106,7 @@ export class GitHubApi {
       merged,
       mergeCommit: merged ? (p.merge_commit_sha ?? undefined) : undefined,
       headSha: p.head.sha,
+      author: p.user?.login ?? "",
       mergeable: p.mergeable ?? null,
     };
   }
@@ -115,12 +119,17 @@ export class GitHubApi {
     return list.map((r) => ({ id: r.id, state: r.state, body: r.body ?? "", author: r.user?.login ?? "someone", commit: r.commit_id }));
   }
 
+  /**
+   * A review's comments on the code. Read from the pull request's comment list: the per-review
+   * endpoint leaves out line numbers.
+   */
   async reviewComments(number: number, reviewId: number): Promise<ReviewComment[]> {
-    const list = await this.call<Array<{ path: string; line?: number | null; original_line?: number | null; body: string }>>(
-      "GET",
-      `/pulls/${number}/reviews/${reviewId}/comments?per_page=100`,
-    );
-    return list.map((c) => ({ path: c.path, line: c.line ?? c.original_line ?? undefined, body: c.body }));
+    const list = await this.call<
+      Array<{ pull_request_review_id: number | null; path: string; line?: number | null; original_line?: number | null; body: string }>
+    >("GET", `/pulls/${number}/comments?per_page=100`);
+    return list
+      .filter((c) => c.pull_request_review_id === reviewId)
+      .map((c) => ({ path: c.path, line: c.line ?? c.original_line ?? undefined, body: c.body }));
   }
 
   async comment(number: number, body: string): Promise<void> {

@@ -1179,7 +1179,10 @@ manager's `ReviewGate`, over `GitHubApi` (`git/github.ts`, a few REST calls on `
     task `merged`, so dependants branch from a `main` that has it.
   - *closed:* the task is `cancelled`.
   - *changes requested:* the newest approve-or-request-changes review on the PR's current head,
-    if it requests changes and wasn't handled yet (`changesRequested`). The review and its
+    if it asks for changes and wasn't handled yet (`changesRequested`). GitHub forbids
+    requesting changes on your own PR, and the Hub's PRs are its token owner's, so a
+    `COMMENTED` review by the PR's author counts as asking for changes. Line comments are read
+    from the PR's comment list (`original_line`); the per-review endpoint has no line numbers. The review and its
     code comments become the rework reason and output. Review rounds are counted separately
     (`review.rounds`) and never fail the task; the agent sees one running round number.
   - *conflicting* (`mergeable: false`): catch up `main`, then a normal, counted rework.

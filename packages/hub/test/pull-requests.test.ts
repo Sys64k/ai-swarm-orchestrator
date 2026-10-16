@@ -80,6 +80,7 @@ class FakeGitHub {
       merge_commit_sha: pull.mergeCommit ?? null,
       mergeable: pull.mergeable,
       head: { sha: pull.merged ? (pull.mergeCommit ?? "") : this.headSha(pull.head) },
+      user: { login: "hub-token-owner" },
     };
   }
 
@@ -137,16 +138,24 @@ class FakeGitHub {
       return [200, this.json(pull)];
     }
     if (rest === "/reviews" && req.method === "GET") return [200, pull.reviews];
-    const rc = /^\/reviews\/(\d+)\/comments$/.exec(rest);
-    if (rc && req.method === "GET") return [200, pull.reviewComments.get(Number(rc[1])) ?? []];
+    if (rest === "/comments" && req.method === "GET") {
+      // Like GitHub: \`line\` is often null; \`original_line\` has it.
+      return [200, [...pull.reviewComments].flatMap(([id, list]) => list.map((c) => ({ pull_request_review_id: id, path: c.path, line: null, original_line: c.line, body: c.body })))];
+    }
     return [404, { message: "Not Found" }];
   }
 
   /** A person reviews the PR's current commit. */
-  review(number: number, state: "CHANGES_REQUESTED" | "APPROVED" | "COMMENTED", text: string, comments: Array<{ path: string; line: number; body: string }> = []): number {
+  review(
+    number: number,
+    state: "CHANGES_REQUESTED" | "APPROVED" | "COMMENTED",
+    text: string,
+    comments: Array<{ path: string; line: number; body: string }> = [],
+    login = "reviewer",
+  ): number {
     const pull = this.pulls.get(number)!;
     const id = 100 + pull.reviews.length + number * 1000;
-    pull.reviews.push({ id, state, body: text, user: { login: "reviewer" }, commit_id: this.headSha(pull.head) });
+    pull.reviews.push({ id, state, body: text, user: { login }, commit_id: this.headSha(pull.head) });
     pull.reviewComments.set(id, comments);
     return id;
   }
@@ -241,7 +250,7 @@ describe("pull requests on GitHub", () => {
       assert.match(pull.body, /Build greet\./);
       assert.match(pull.body, /- says hello/);
       assert.match(pull.body, /\*\*QA:\*\* 12 tests passed/);
-      assert.match(pull.body, /\*\*Request changes\*\* to send it back/);
+      assert.match(pull.body, /requests changes\*\* \(on a pull request you opened yourself, GitHub only offers \*\*Comment\*\*/);
       assert.equal(t.review!.pr!.url, `https://github.com/me/shop/pull/${pull.number}`);
       assert.match(ctx.hub.tasks.get("follow")!.waitingReason ?? "", /waiting for greet to be merged/);
 
@@ -280,7 +289,7 @@ describe("pull requests on GitHub", () => {
       const back = await dev.next();
       assert.ok(back.type === "TASK_ASSIGNMENT" && back.payload.rework);
       assert.equal(back.payload.rework.round, 1);
-      assert.match(back.payload.rework.reason, /^Review round 1: reviewer requested changes on GitHub: Say hello politely\.$/);
+      assert.match(back.payload.rework.reason, /^Review round 1: reviewer asked for changes on GitHub: Say hello politely\.$/);
       assert.match(back.payload.rework.output ?? "", /- greeting\.txt:1: Use 'Hello there'/);
       const t = ctx.hub.tasks.get("greet")!;
       assert.deepEqual([t.reworkRound, t.review!.rounds], [0, 1], "review rounds do not count towards the rework limit");
@@ -300,6 +309,13 @@ describe("pull requests on GitHub", () => {
 
       await ctx.hub.projects.checkReviews("project");
       assert.equal(ctx.hub.tasks.get("greet")!.state, "awaiting_review", "the old review was about the old commit");
+
+      // The token's owner reviews their own pull request: GitHub only lets them Comment.
+      github.review(number, "COMMENTED", "Add a full stop.", [], "hub-token-owner");
+      await ctx.hub.projects.checkReviews("project");
+      const own = await dev.next();
+      assert.ok(own.type === "TASK_ASSIGNMENT" && own.payload.rework);
+      assert.match(own.payload.rework.reason, /^Review round 2: hub-token-owner asked for changes on GitHub: Add a full stop\.$/);
       dev.ws.close();
       qa.ws.close();
     }));
@@ -457,19 +473,22 @@ describe("pull request helpers", () => {
   });
 
   it("acts on the newest decision about the current commit, once", () => {
-    const r = (id: number, state: string, commit = "head") => ({ id, state, body: "", author: "a", commit });
-    const pull = { headSha: "head" };
+    const r = (id: number, state: string, commit = "head", author = "a") => ({ id, state, body: "", author, commit });
+    const pull = { headSha: "head", author: "me" };
     assert.equal(changesRequested([r(1, "CHANGES_REQUESTED")], pull, [])?.id, 1);
     assert.equal(changesRequested([r(1, "CHANGES_REQUESTED")], pull, [1]), undefined, "handled");
     assert.equal(changesRequested([r(1, "CHANGES_REQUESTED", "old")], pull, []), undefined, "about an older commit");
     assert.equal(changesRequested([r(1, "CHANGES_REQUESTED"), r(2, "APPROVED")], pull, []), undefined, "approved since");
     assert.equal(changesRequested([r(1, "APPROVED"), r(2, "COMMENTED"), r(3, "CHANGES_REQUESTED")], pull, [])?.id, 3);
+    assert.equal(changesRequested([r(1, "COMMENTED", "head", "me")], pull, [])?.id, 1, "on your own PR, a Comment review is the way to ask");
+    assert.equal(changesRequested([r(1, "COMMENTED", "head", "someone")], pull, []), undefined, "someone else's comment is not a decision");
+    assert.equal(changesRequested([r(1, "COMMENTED", "head", "me"), r(2, "APPROVED", "head", "boss")], pull, []), undefined, "approved since");
   });
 
   it("turns a review into the agent's reason and details", () => {
     const review = { id: 1, state: "CHANGES_REQUESTED", body: "", author: "ana", commit: "h" };
     const f = reviewFeedback(review, [{ path: "a.ts", line: 3, body: " no " }, { path: "b.ts", body: "rename" }]);
-    assert.equal(f.summary, "ana requested changes on GitHub: see the comments on the code");
+    assert.equal(f.summary, "ana asked for changes on GitHub: see the comments on the code");
     assert.equal(f.details, "Review by ana:\n(no summary)\n\nComments on the code:\n- a.ts:3: no\n- b.ts: rename");
     assert.ok(reviewFeedback({ ...review, body: "x".repeat(10_000) }, []).summary.length <= 4000);
   });
