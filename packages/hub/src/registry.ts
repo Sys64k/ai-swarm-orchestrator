@@ -81,9 +81,19 @@ export class NodeRegistry {
     if (entry) entry.lastSeenAt = now;
   }
 
-  setHeartbeat(nodeId: string, heartbeat: Heartbeat): void {
+  /**
+   * Record a worker's heartbeat. Returns whether Docker is now available when that changed:
+   * the registered hardware profile follows the heartbeats, so a check that failed once at
+   * startup (or Docker stopping later) is not kept on record.
+   */
+  setHeartbeat(nodeId: string, heartbeat: Heartbeat): boolean | undefined {
     const entry = this.nodes.get(nodeId);
-    if (entry) entry.heartbeat = heartbeat;
+    if (!entry) return undefined;
+    entry.heartbeat = heartbeat;
+    const reg = entry.registration;
+    if (reg.nodeKind !== "worker" || reg.hardware.docker.available === heartbeat.dockerAvailable) return undefined;
+    reg.hardware.docker = { available: heartbeat.dockerAvailable };
+    return heartbeat.dockerAvailable;
   }
 
   /** Give a node a task (workers) or a plan (Architect); it is busy once all its slots are taken. */

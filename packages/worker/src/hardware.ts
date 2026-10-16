@@ -5,12 +5,13 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import si from "systeminformation";
-import { MAX_WORKER_SLOTS, type HardwareProfile } from "@aso/shared";
+import { MAX_WORKER_SLOTS, createLogger, type HardwareProfile } from "@aso/shared";
 
 const BENCH_BYTES = 64 * 1024 * 1024;
 const BENCH_CHUNK = 4 * 1024 * 1024;
 
 const exec = promisify(execFile);
+const log = createLogger("worker");
 const GiB = 1024 ** 3;
 /** What one job needs: an agent's npm installs and builds, or a headless browser for e2e tests. */
 const THREADS_PER_SLOT = 2;
@@ -44,9 +45,10 @@ export async function profileHardware(workDir: string): Promise<HardwareProfile>
     si.mem(),
     si.osInfo(),
     si.diskLayout().catch(() => []),
-    dockerServerVersion(),
+    probeDocker(),
     measureWriteMBps(workDir),
   ]);
+  if ("error" in docker) log.warn(`Docker is not available: ${docker.error}`);
 
   return {
     hostname: os.hostname(),
@@ -55,7 +57,7 @@ export async function profileHardware(workDir: string): Promise<HardwareProfile>
     cpu: { brand: cpu.brand, physicalCores: cpu.physicalCores, logicalCores: cpu.cores },
     memory: { totalBytes: mem.total, availableBytes: mem.available },
     disks: disks.map((d) => ({ name: d.name, type: d.type, sizeBytes: d.size })),
-    docker: docker ? { available: true, version: docker } : { available: false },
+    docker: "version" in docker ? { available: true, version: docker.version } : { available: false },
     storage: { workDir, writeMBps },
   };
 }
@@ -66,12 +68,16 @@ export interface LoadMetrics {
   dockerAvailable: boolean;
 }
 
-export async function sampleLoad(): Promise<LoadMetrics> {
-  const [mem, load, docker] = await Promise.all([si.mem(), si.currentLoad(), dockerServerVersion()]);
+/** A heartbeat's metrics, and why Docker did not answer (kept on the worker, for its log). */
+export async function sampleLoad(): Promise<{ load: LoadMetrics; dockerError?: string }> {
+  const [mem, load, docker] = await Promise.all([si.mem(), si.currentLoad(), probeDocker()]);
   return {
-    memoryAvailableBytes: mem.available,
-    cpuLoadPercent: Math.min(100, Math.max(0, Math.round(load.currentLoad * 10) / 10)),
-    dockerAvailable: docker !== undefined,
+    load: {
+      memoryAvailableBytes: mem.available,
+      cpuLoadPercent: Math.min(100, Math.max(0, Math.round(load.currentLoad * 10) / 10)),
+      dockerAvailable: "version" in docker,
+    },
+    dockerError: "error" in docker ? docker.error : undefined,
   };
 }
 
@@ -82,12 +88,33 @@ export async function sampleLoad(): Promise<LoadMetrics> {
  * /var/run/docker.sock, the only socket systeminformation checks.
  */
 export async function dockerServerVersion(docker = "docker"): Promise<string | undefined> {
+  const probe = await probeDocker(docker);
+  return "version" in probe ? probe.version : undefined;
+}
+
+export type DockerProbe = { version: string } | { error: string };
+
+const DOCKER_TIMEOUT_MS = 10_000;
+
+/** Like `dockerServerVersion`, but says why Docker did not answer, so the worker can log it. */
+export async function probeDocker(docker = "docker"): Promise<DockerProbe> {
   try {
-    const { stdout } = await exec(docker, ["version", "--format", "{{.Server.Version}}"], { timeout: 10_000 });
-    return stdout.trim() || undefined;
-  } catch {
-    return undefined;
+    const { stdout } = await exec(docker, ["version", "--format", "{{.Server.Version}}"], { timeout: DOCKER_TIMEOUT_MS });
+    const version = stdout.trim();
+    return version ? { version } : { error: "`docker version` printed no server version" };
+  } catch (err) {
+    return { error: dockerFailure(err as ExecError) };
   }
+}
+
+type ExecError = NodeJS.ErrnoException & { killed?: boolean; signal?: string | null; stderr?: string };
+
+/** One line on why `docker version` failed: the CLI is missing, it hung, or the daemon's own message. */
+export function dockerFailure(err: ExecError): string {
+  if (err.code === "ENOENT") return "the docker CLI is not on PATH";
+  if (err.killed && err.signal === "SIGTERM") return `\`docker version\` did not answer within ${DOCKER_TIMEOUT_MS / 1000} s`;
+  const stderr = err.stderr?.trim().split("\n").find((line) => line.trim()) ?? "";
+  return stderr || err.message.split("\n")[0];
 }
 
 /**
