@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { appendFile, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { simpleGit, type SimpleGit } from "simple-git";
 import {
@@ -99,6 +100,7 @@ export class AgentGitClient {
       const current = (await git.remote(["get-url", remote]).catch(() => ""))?.toString().trim();
       if (current !== remoteUrl) await git.remote(["set-url", remote, remoteUrl]);
     }
+    await excludeLocally(dir, LOCAL_EXCLUDES);
     return new AgentGitClient(dir, opts);
   }
 
@@ -271,4 +273,20 @@ export class AgentGitClient {
   private async head(): Promise<string> {
     return (await this.git.revparse(["HEAD"])).trim();
   }
+}
+
+/**
+ * What the worker puts in a checkout that must never be committed, whatever the project's
+ * .gitignore says (a new project may have none): `git add -A` commits everything else.
+ */
+export const LOCAL_EXCLUDES = ["node_modules/"];
+
+/** Add patterns to the checkout's own .git/info/exclude (never committed), once. */
+export async function excludeLocally(repoDir: string, patterns: readonly string[]): Promise<void> {
+  const file = path.join(repoDir, ".git", "info", "exclude");
+  const lines = new Set((await readFile(file, "utf8").catch(() => "")).split("\n").map((l) => l.trim()));
+  const missing = patterns.filter((p) => !lines.has(p));
+  if (!missing.length) return;
+  await mkdir(path.dirname(file), { recursive: true });
+  await appendFile(file, `${lines.size > 1 ? "\n" : ""}# added by the ASO worker\n${missing.join("\n")}\n`);
 }

@@ -404,7 +404,10 @@ notified.
 
 1. **Route.** The Hub picks the best idle worker for the task's role and hardware needs.
 2. **Implement.** The worker checks out `task/<id>` from the Hub. It starts from `main`, or
-   continues an existing branch when reworking. The agent works through tools the worker
+   continues an existing branch when reworking. If the project has a `package-lock.json`, the
+   worker runs `npm ci` first (when `node_modules` doesn't match it already), since agents may
+   not install packages. `node_modules` is never committed, even without a `.gitignore`. The
+   agent works through tools the worker
    executes locally until it calls `finish`, and the worker commits and pushes the branch back
    to the Hub. If the agent stops without calling `finish`, it is reminded once. If it stops
    again, the task fails with the agent's explanation, and nothing is pushed or sent to QA.

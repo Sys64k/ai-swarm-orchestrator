@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync, existsSync
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { AgentGitClient, AgentGitError, ProtectedFileError, RebaseConflictError } from "@aso/worker";
+import { AgentGitClient, AgentGitError, excludeLocally, ProtectedFileError, RebaseConflictError } from "@aso/worker";
 
 process.env.ASO_LOG_LEVEL ??= "warn";
 
@@ -59,6 +59,23 @@ beforeEach(async () => {
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 describe("AgentGitClient", () => {
+  it("never commits node_modules, even in a project without a .gitignore", async () => {
+    await client.startTask("feat-1");
+    write(client.repoDir, "node_modules/left-pad/index.js", "module.exports = 1;\n");
+    write(client.repoDir, "src/a.ts", "export const a = 1;\n");
+    const done = await client.completeTask("feat: add a");
+    assert.deepEqual(done.files, ["src/a.ts"]);
+    assert.equal(git(origin, "ls-tree", "-r", "--name-only", "task/feat-1").includes("node_modules"), false);
+    assert.ok(existsSync(path.join(client.repoDir, "node_modules/left-pad/index.js")), "kept for the next job");
+
+    // Opening the checkout again adds nothing twice.
+    await AgentGitClient.cloneOrOpen(client.repoDir, origin);
+    await excludeLocally(client.repoDir, ["node_modules/"]);
+    const exclude = readFileSync(path.join(client.repoDir, ".git", "info", "exclude"), "utf8");
+    assert.equal(exclude.split("\n").filter((l) => l === "node_modules/").length, 1);
+  });
+
+
   it("startTask branches task/<id> from origin/main", async () => {
     const { branch, base } = await client.startTask("feat-1");
     assert.equal(branch, "task/feat-1");

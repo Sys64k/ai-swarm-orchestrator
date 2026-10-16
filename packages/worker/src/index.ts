@@ -3,6 +3,8 @@ export { defaultSlots, distroName, dockerFailure, osReleaseName, dockerServerVer
 export {
   AgentGitClient,
   AgentGitError,
+  excludeLocally,
+  LOCAL_EXCLUDES,
   ProtectedFileError,
   RebaseConflictError,
   type AgentGitClientOptions,
