@@ -101,6 +101,8 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
   let retryTimer: NodeJS.Timeout | undefined;
   let restartTimer: NodeJS.Timeout | undefined;
   let heartbeatTimer: NodeJS.Timeout | undefined;
+  /** Last Docker state logged, so a heartbeat logs only a change. */
+  let dockerAvailable = profile.docker.available;
   const outbox: string[] = [];
 
   const transmit = (raw: string) => {
@@ -156,7 +158,14 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
           clearInterval(heartbeatTimer);
           heartbeatTimer = setInterval(() => {
             sampleLoad()
-              .then((load) => send("NODE_HEARTBEAT", load))
+              .then(({ load, dockerError }) => {
+                if (load.dockerAvailable !== dockerAvailable) {
+                  if (dockerError) log.warn(`Docker is not available: ${dockerError}`);
+                  else log.info("Docker is available now");
+                  dockerAvailable = load.dockerAvailable;
+                }
+                send("NODE_HEARTBEAT", load);
+              })
               .catch((err: Error) => log.warn(`heartbeat failed: ${err.message}`));
           }, HEARTBEAT_INTERVAL_MS);
           break;

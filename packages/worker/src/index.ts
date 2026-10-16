@@ -1,5 +1,5 @@
 export { DEFAULT_WORK_DIR, startWorker, type WorkerOptions, type WorkerHandle } from "./client.js";
-export { defaultSlots, dockerServerVersion, resolveSlots, profileHardware, sampleLoad, type LoadMetrics } from "./hardware.js";
+export { defaultSlots, dockerFailure, dockerServerVersion, probeDocker, resolveSlots, profileHardware, sampleLoad, type DockerProbe, type LoadMetrics } from "./hardware.js";
 export {
   AgentGitClient,
   AgentGitError,

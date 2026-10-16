@@ -233,9 +233,11 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     registry.touch(conn.nodeId);
 
     switch (msg.type) {
-      case "NODE_HEARTBEAT":
-        registry.setHeartbeat(conn.nodeId, msg.payload);
+      case "NODE_HEARTBEAT": {
+        const docker = registry.setHeartbeat(conn.nodeId, msg.payload);
+        if (docker !== undefined) log.info(`${conn.nodeId}: Docker ${docker ? "now available" : "no longer available"}`);
         return;
+      }
       case "STATUS_UPDATE": {
         const { taskId } = msg.payload;
         if (taskId === undefined) return; // idle keepalive
