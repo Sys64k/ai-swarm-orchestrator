@@ -20,6 +20,7 @@ import { profileHardware, sampleLoad } from "./hardware.js";
 import { LlmTaskExecutor } from "./agent/executor.js";
 import { JobRunner, type TaskExecutor } from "./jobs.js";
 import { DockerSandbox, hostRunner, type CommandRunner, type DockerSandboxOptions } from "./sandbox.js";
+import { lockWorkDir } from "./work-dir-lock.js";
 
 const log = createLogger("worker");
 
@@ -63,13 +64,20 @@ export interface WorkerHandle {
 export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
   const url = resolveHubUrl(opts.hub, opts.port);
   const workDir = path.resolve(opts.workDir ?? DEFAULT_WORK_DIR);
+  const lock = lockWorkDir(workDir);
 
   let profile = opts.hardware;
-  if (!profile) {
-    log.info("scanning hardware...");
-    profile = await profileHardware(workDir);
+  let commands: CommandRunner;
+  try {
+    if (!profile) {
+      log.info("scanning hardware...");
+      profile = await profileHardware(workDir);
+    }
+    commands = await createCommandRunner(opts.sandbox ?? "docker", workDir, opts.sandboxOptions);
+  } catch (err) {
+    lock.release();
+    throw err;
   }
-  const commands = await createCommandRunner(opts.sandbox ?? "docker", workDir, opts.sandboxOptions);
   const nodeId = opts.nodeId ?? `${profile.hostname}-${randomUUID().slice(0, 8)}`;
   log.info(
     `${profile.hostname}: ${profile.cpu.logicalCores} threads, ` +
@@ -193,6 +201,7 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
       clearTimeout(retryTimer);
       clearInterval(heartbeatTimer);
       ws?.close(1000, "worker stopping");
+      lock.release();
     },
   };
 }

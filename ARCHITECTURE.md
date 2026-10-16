@@ -245,7 +245,7 @@ sequenceDiagram
   participant H as Hub
   participant T as TaskManager
 
-  Note over W: aso start-worker<br/>profile CPU, RAM, Docker,<br/>benchmark disk in work dir
+  Note over W: aso start-worker<br/>lock work dir, profile CPU, RAM,<br/>Docker, benchmark disk in work dir
   W->>H: WebSocket connect /ws
   W->>H: NODE_REGISTRATION {hardware, resume?}
   H->>H: validate, check id unique
@@ -344,6 +344,13 @@ keeps itself alive by sending `STATUS_UPDATE {state: "idle"}` every 15 s.
 | Logical cores, total RAM, disks, OS | `systeminformation` at boot | Registration |
 | Disk write MB/s | 64 MiB sequential write + `fsync` in the worker's work dir | Registration |
 | Free RAM, CPU load %, Docker daemon reachable | `systeminformation` | Every heartbeat (15 s) |
+
+Before anything else the worker takes `<workDir>/worker.lock` (`lockWorkDir` in
+`packages/worker/src/work-dir-lock.ts`): its pid, boot id and a token, created with `O_EXCL`.
+Two workers sharing a directory would overwrite each other's checkouts, so a second one exits
+with an error while the holder's pid is alive in the same boot. A lock whose process is gone,
+from another boot, or unreadable is taken over; release on stop or process exit removes it only
+if its token is still ours.
 
 The disk benchmark runs in the **work directory**, not `/tmp`. On CachyOS and similar
 distributions `/tmp` is tmpfs and would report RAM speed.

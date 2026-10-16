@@ -20,6 +20,7 @@ export {
   type TaskExecutor,
   type TestExecution,
 } from "./jobs.js";
+export { holdsLock, lockWorkDir, WORK_DIR_LOCK, WorkDirLockedError, type LockEnv, type WorkDirLock } from "./work-dir-lock.js";
 export { runCommand, type CommandResult } from "./run-command.js";
 export {
   DockerSandbox,
