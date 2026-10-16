@@ -208,6 +208,22 @@ export class HubRepository {
     return { ok: true };
   }
 
+  /**
+   * Move main forward to `ref` (caller holds the main lock). `diverged` when main has commits
+   * `ref` lacks, so only a merge can join them.
+   */
+  async fastForward(ref: string): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const notReady = await this.checkoutProblem();
+    if (notReady) return { ok: false, reason: notReady };
+    if (!(await this.isAncestor(this.mainBranch, ref))) {
+      // Nothing to do when main already contains ref; otherwise only a merge joins them.
+      return (await this.isAncestor(ref, this.mainBranch)) ? { ok: true } : { ok: false, reason: "diverged" };
+    }
+    await this.git.raw(["merge", "--ff-only", ref]);
+    log.info(`${this.mainBranch} fast-forwarded to ${ref} @ ${(await this.mainHead()).slice(0, 8)}`);
+    return { ok: true };
+  }
+
   /** Minimal manifest for a project that has none yet (e.g. a brand-new empty repository). */
   private async createManifest(): Promise<void> {
     const name =
@@ -265,6 +281,14 @@ export class HubRepository {
     const run = this.mainLock.then(fn, fn);
     this.mainLock = run.catch(() => undefined);
     return run;
+  }
+
+  /** Whether commit `a` is in the history of `b`. */
+  private isAncestor(a: string, b: string): Promise<boolean> {
+    return this.git.raw(["merge-base", "--is-ancestor", a, b]).then(
+      () => true,
+      () => false,
+    );
   }
 
   /** `rev-parse --verify` that tolerates simple-git not rejecting on silent non-zero exits. */

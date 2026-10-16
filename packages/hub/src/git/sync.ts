@@ -92,6 +92,42 @@ export class GitSync {
     clearTimeout(this.retryTimer);
   }
 
+  /** The remote's URL (with any credentials), or undefined when it has none. */
+  async remoteUrl(): Promise<string | undefined> {
+    return (await simpleGit(this.repo.dir).raw(["remote", "get-url", this.remote]).catch(() => "")).trim() || undefined;
+  }
+
+  /** Push a branch to the remote as it is on the Hub (forced: the Hub's copy is the task's truth). */
+  async pushBranch(branch: string): Promise<void> {
+    const git = await this.client();
+    await git.raw(["push", "--force", this.remote, `refs/heads/${branch}:refs/heads/${branch}`]).catch((err: Error) => {
+      throw new Error(`push of ${branch} to ${this.remote} failed: ${firstLine(err.message)}`);
+    });
+  }
+
+  /**
+   * Bring the Hub's main up to the remote's, after a pull request was merged there: a fast
+   * forward, or a merge when the Hub has commits of its own (then pushed).
+   */
+  async catchUp(): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const git = await this.client();
+    const main = this.repo.mainBranch;
+    const result = await this.repo.withMainLock(async () => {
+      try {
+        await git.fetch(this.remote, main);
+      } catch (err) {
+        return { error: `fetch from ${this.remote} failed: ${firstLine((err as Error).message)}` };
+      }
+      const forwarded = await this.repo.fastForward(`${this.remote}/${main}`);
+      if (forwarded.ok) return {};
+      if (forwarded.reason !== "diverged") return { error: forwarded.reason };
+      const merged = await this.repo.mergeRemoteMain(this.remote, git);
+      return merged.ok ? { push: true } : { error: merged.reason };
+    });
+    if (result.push) void this.requestPush();
+    return result.error ? { ok: false, reason: result.error } : { ok: true };
+  }
+
   private async pushLoop(): Promise<void> {
     do {
       this.again = false;

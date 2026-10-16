@@ -5,6 +5,7 @@ import { usePoll } from "./use-poll.ts";
 import { Banner, LoadingPage, TopBar } from "./ui.tsx";
 import { NeedsYou, WorkLists } from "./work-lists.tsx";
 import type { Plan, Project, Task } from "../lib/types.ts";
+import { mergeNote } from "../lib/view.ts";
 
 /** One project: what needs you there, its plans, running, queued and finished work. */
 export function ProjectPage({ id }: { id: string }) {
@@ -15,12 +16,14 @@ export function ProjectPage({ id }: { id: string }) {
   if (!project.data) return <LoadingPage title={id} back="/" error={project.error} />;
   const ready = tasks.data && plans.data;
   const empty = ready && tasks.data!.length === 0 && plans.data!.length === 0;
+  const note = mergeNote(project.data);
 
   return (
     <>
       <TopBar title={id} back="/" />
       <main className="page">
         <p className="muted small mono path">{project.data.dir}</p>
+        {note && <p className="muted small">{note}</p>}
         {(tasks.error ?? plans.error) && <Banner tone="bad">{tasks.error ?? plans.error}</Banner>}
         {empty && <p className="muted">Nothing here yet. Start with a plan: describe what you want built.</p>}
         {ready && (

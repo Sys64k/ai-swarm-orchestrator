@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { createLogger, ProjectIdSchema, type LlmUsage } from "@aso/shared";
 import { DependencyManager, type DependencyManagerOptions } from "./dependencies.js";
 import { HubRepository } from "./git/hub-repo.js";
+import { PullRequests, type PullRequestOptions, type PullRequestStatus } from "./git/pull-requests.js";
 import { GitSync } from "./git/sync.js";
 import { PlanManager, type PlanRecord } from "./plans.js";
 import type { NodeRegistry } from "./registry.js";
@@ -25,6 +26,8 @@ export interface Project {
   plans: PlanManager;
   deps: DependencyManager;
   sync: GitSync;
+  /** Whether QA-approved work goes to GitHub pull requests, and if not, why. */
+  pullRequests: PullRequestStatus;
   transcripts: Transcripts;
   store?: StateStore;
 }
@@ -49,6 +52,8 @@ export interface ProjectSetOptions {
   tasks: Pick<TaskManagerOptions, "policies" | "reclaimGraceMs" | "qa">;
   deps: Pick<DependencyManagerOptions, "installer" | "allow">;
   sync: { enabled?: boolean; remote?: string; token?: string; retryMs?: number };
+  /** GitHub pull requests for QA-approved work (the token defaults to `sync.token`). */
+  pullRequests?: Omit<PullRequestOptions, "token"> & { token?: string };
   /** Called after any task or plan of a project changed (notifications). */
   onChange?: (project: Project) => void;
 }
@@ -59,6 +64,7 @@ export interface ProjectSetOptions {
  */
 export class ProjectSet {
   private readonly projects = new Map<string, Project>();
+  private readonly reviewers = new Map<string, PullRequests>();
   /** Rotates which project dispatches first, so one busy project can't starve the others. */
   private dispatchOffset = 0;
 
@@ -184,10 +190,17 @@ export class ProjectSet {
     read: (subject: TranscriptSubject, after?: number) => this.ownerOf(subject)?.transcripts.read(subject, after) ?? { entries: [], last: -1 },
   };
 
+  /** Check a project's open pull requests now instead of at the next poll. */
+  async checkReviews(projectId: string): Promise<void> {
+    const project = this.projects.get(projectId);
+    if (project) await this.reviewers.get(projectId)?.check(project.tasks);
+  }
+
   /** Write pending state and transcripts; later changes stay in memory (the Hub is stopping). */
   async close(): Promise<void> {
     for (const p of this.list()) {
       p.sync.stop();
+      this.reviewers.get(p.id)?.stopPolling();
       await p.store?.close();
       await p.transcripts.close();
     }
@@ -203,8 +216,10 @@ export class ProjectSet {
     const saved = await store?.load<TaskRecord, PlanRecord>();
     const transcripts = new Transcripts(store ? path.join(store.dir, "transcripts") : undefined);
     const sync = await GitSync.create(repo, { ...this.opts.sync, enabled: this.opts.sync.enabled ?? true });
+    const { gate, status: pullRequests } = await PullRequests.create(sync, repo.mainBranch, { token: this.opts.sync.token, ...this.opts.pullRequests });
+    log.info(`project ${id}: ${gate ? `QA-approved work goes to pull requests on ${pullRequests.repo}` : `merged on the Hub (${pullRequests.reason})`}`);
     // Filled in below; the managers' callbacks only run after construction.
-    const project = { id, dir, repo, sync, transcripts, store } as Project;
+    const project = { id, dir, repo, sync, pullRequests, transcripts, store } as Project;
     /** The managers report changes while they are still being constructed; listeners wait for both. */
     const ready = () => project.tasks !== undefined && project.plans !== undefined;
     const persist = () => {
@@ -224,6 +239,7 @@ export class ProjectSet {
         unpushed.add(task.spec.taskId);
         void sync.requestPush();
       },
+      reviewGate: gate,
       onChange: persist,
       onTranscript: (taskId, entry) => transcripts.append({ kind: "task", id: taskId }, entry),
     });
@@ -245,6 +261,10 @@ export class ProjectSet {
     if (saved) {
       project.tasks.restore(saved.tasks);
       project.plans.restore(saved.plans);
+    }
+    if (gate) {
+      this.reviewers.set(id, gate);
+      gate.startPolling(project.tasks);
     }
     log.info(`project ${id}: ${dir}${store ? ` (state in ${store.dir})` : ""}`);
     return project;

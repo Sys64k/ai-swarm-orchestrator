@@ -1,6 +1,6 @@
 export { startHub, type HubOptions, type HubHandle } from "./server.js";
 export { isOutdated, nodeActions, NodeError, NodeRegistry, type NodeAction, type NodeActions, type NodeEntry, type Registration, type Heartbeat } from "./registry.js";
-export { TaskManager, TaskError, DEFAULT_QA, type QaOptions, type TaskRecord, type TaskState } from "./tasks.js";
+export { TaskManager, TaskError, DEFAULT_QA, type QaOptions, type ReviewGate, type ReviewInfo, type ReviewOutcome, type TaskRecord, type TaskState } from "./tasks.js";
 export {
   HubRepository,
   HubRepoError,
@@ -26,6 +26,8 @@ export { priceUsage } from "./llm/pricing.js";
 export { architectSystemPrompt, planPrompt, systemPrompt, taskPrompt } from "./llm/prompts.js";
 export { PlanError, PlanManager, type PlanRecord, type PlanState } from "./plans.js";
 export { GitSync, sanitizeUrl, type SyncStatus } from "./git/sync.js";
+export { GitHubApi, GitHubError, parseGitHubRemote, type PullRef, type RepoSlug } from "./git/github.js";
+export { changesRequested, pullRequestBody, PullRequests, reviewFeedback, type PullRequestStatus } from "./git/pull-requests.js";
 export { StateStore, type Snapshot } from "./state-store.js";
 export { Transcripts, type TranscriptEntry, type TranscriptInput, type TranscriptSubject } from "./transcripts.js";
 export { SignInCodes, SIGN_IN_CODE_TTL_MS } from "./sign-in-codes.js";

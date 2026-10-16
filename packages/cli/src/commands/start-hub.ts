@@ -46,6 +46,7 @@ export async function startHubCommand(opts: StartHubOptions): Promise<void> {
     host: opts.host,
     token: auth.token,
     sync: { enabled: opts.push && process.env.ASO_PUSH !== "0", token: process.env.ASO_GIT_TOKEN || undefined },
+    pullRequests: { enabled: process.env.ASO_PULL_REQUESTS !== "0" },
     qa: { enabled: qaEnabled, command: testCommand },
     allowDependencies: parseList(opts.allowDeps),
     dist: { version: () => layout.distVersion(), tarball: () => layout.distTarball() },

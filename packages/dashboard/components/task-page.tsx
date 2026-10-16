@@ -6,7 +6,7 @@ import { hubAction, usePoll } from "./use-poll.ts";
 import { Terminal } from "./terminal.tsx";
 import { ActionButton, Badge, Banner, LoadingPage, Section, TopBar } from "./ui.tsx";
 import type { Task } from "../lib/types.ts";
-import { formatUsd, isLive, taskActions, taskBadge, timeAgo } from "../lib/view.ts";
+import { formatUsd, isLive, reviewView, taskActions, taskBadge, timeAgo } from "../lib/view.ts";
 
 export function TaskPage({ id }: { id: string }) {
   const { data: task, error, refresh } = usePoll<Task>(`tasks/${id}`);
@@ -68,6 +68,7 @@ export function TaskPage({ id }: { id: string }) {
 }
 
 function Details({ task }: { task: Task }) {
+  const review = reviewView(task);
   return (
     <>
       <Section title="Task">
@@ -91,6 +92,18 @@ function Details({ task }: { task: Task }) {
                 <Link href={`/tasks/${d}`}>{d}</Link>
               </span>
             ))}
+          </p>
+        )}
+        {review && (
+          <p className="small">
+            {review.url ? (
+              <a href={review.url} target="_blank" rel="noreferrer">
+                {review.text}
+              </a>
+            ) : (
+              review.text
+            )}
+            {review.error && <span className="muted"> · last try failed: {review.error}</span>}
           </p>
         )}
         {(task.mainCommit ?? task.commit) && (

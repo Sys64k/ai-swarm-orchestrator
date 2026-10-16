@@ -10,6 +10,7 @@ export type TaskState =
   | "awaiting_qa"
   | "testing"
   | "merging"
+  | "awaiting_review"
   | "merged"
   | "failed"
   | "cancelled";
@@ -50,6 +51,8 @@ export interface Task {
   filesTouched: string[];
   commit?: string;
   mainCommit?: string;
+  /** The task's pull request on GitHub (Hubs with pull requests on). */
+  review?: { pr?: { number: number; url: string }; error?: string; rounds: number };
   waitingReason?: string;
   detail?: string;
   createdAt: string;
@@ -119,7 +122,9 @@ export interface HubNode {
 export interface Project {
   id: string;
   dir: string;
-  tasks: { total: number; running: number; queued: number; failed: number; merged: number };
+  tasks: { total: number; running: number; queued: number; failed: number; merged: number; reviewing?: number };
+  /** Whether QA-approved work becomes a GitHub pull request (absent from Hubs before pull requests). */
+  pullRequests?: { enabled: boolean; repo?: string; reason?: string };
   plansAwaitingApproval: number;
   /** Plans whose Architect is waiting for answers (absent from Hubs before plan conversations). */
   plansWithQuestions?: number;

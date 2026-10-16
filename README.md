@@ -417,8 +417,9 @@ notified.
    touch `package.json` or lockfiles.
 4. **QA.** A QA worker checks out that exact commit, runs `npm ci` if the commit has a
    `package-lock.json`, then runs the test command (`npm test` by default).
-5. **Merge or rework.**
-   - **Pass:** the Hub merges the branch into `main` with a merge commit.
+5. **Merge, review or rework.**
+   - **Pass:** the Hub merges the branch into `main` with a merge commit. With
+     [pull requests](#pull-requests-you-merge) on, it opens a pull request for you instead.
    - **Failure or merge conflict:** the task goes back to an implementer with the failures and
      test output attached, up to 3 rework rounds.
 
@@ -521,6 +522,29 @@ Rules:
 
 ## Pushing to GitHub
 
+### Pull requests you merge
+
+When a project's `origin` is on GitHub and the Hub has a token (`ASO_GIT_TOKEN`, below), no
+task reaches `main` without you. After QA passes, the Hub pushes the task's branch and opens a
+pull request describing the task, its acceptance criteria, files, QA result and cost. Your
+phone gets a notification, and the task shows **Review** under *Needs you* in the console,
+linking to the pull request. Then, on GitHub:
+
+| You… | The task |
+|---|---|
+| **Merge** the pull request | is merged. The Hub's `main` catches up with GitHub's, and tasks that depend on it start |
+| Submit a review with **Request changes** | goes back to an agent with your review and its comments on the code. Its new commits go through QA and update the same pull request, which waits for you again. These rounds have no limit |
+| **Close** the pull request | is cancelled (and cancelling it in the console closes the pull request) |
+
+A pull request that conflicts with `main` goes back to an agent to rebase, like a merge
+conflict. The Hub checks pull requests every 30 seconds; `aso sync` checks now.
+
+The token needs **Pull requests: read and write** as well as *Contents: read and write*. Set
+`ASO_PULL_REQUESTS=0` to merge on the Hub instead. A project's page in the console says which
+of the two it does, and why.
+
+### Pushing main
+
 If the target repository has an `origin` remote, the Hub pushes `main` to it after every
 merge. A burst of merges becomes one push. Each merged task's history notes the push (or its
 failure), and so do the dashboard and `aso sync`.
@@ -541,8 +565,11 @@ failure), and so do the dashboard and `aso sync`.
   sent only to the remote's host, as a header, and never written to `.git/config`.
 - **Hub in Docker, SSH remote:** the container has no SSH keys. Use an HTTPS remote with a
   token, or run the Hub natively.
-- **Branch protection:** if GitHub's `main` requires pull requests, pushes are rejected and the
-  error shows in `aso sync`.
+- **Pull requests:** opening them always needs `ASO_GIT_TOKEN`, also for a native Hub, since
+  they go through GitHub's API. Add *Pull requests: read and write* to the token.
+- **Branch protection:** if GitHub's `main` requires pull requests, merging through pull
+  requests works, but the Hub's own pushes of `main` (after a dependency change) are rejected,
+  and the error shows in `aso sync`.
 
 ## CLI reference
 
@@ -758,6 +785,7 @@ For the scoring formula, see [ARCHITECTURE.md](ARCHITECTURE.md#6-hardware-aware-
 | `ASO_TEST_COMMAND` | `npm test` | Default for `--test-command` (also passed into the container) |
 | `ASO_QA` | `1` | `0` disables QA (same as `--no-qa`) |
 | `ASO_AUTO_UPDATE` | `1` | `0` stops the Hub from updating outdated workers itself |
+| `ASO_PULL_REQUESTS` | `1` | `0` merges QA-approved work on the Hub instead of opening GitHub pull requests |
 | `ASO_ALLOW_DEPS` | *(any)* | Default for `--allow-deps` (also passed into the container) |
 | `ANTHROPIC_API_KEY` | *(none)* | Hub only. Without it, agents fail tasks with "no LLM configured" |
 | *(file)* `.env` | — | Loaded on start: the shell's variables win, then `ASO_ENV_FILE`, then `~/.config/aso/.env`, then a source checkout's `.env`. See `.env.example` |
@@ -812,7 +840,7 @@ For the scoring formula, see [ARCHITECTURE.md](ARCHITECTURE.md#6-hardware-aware-
   anything. What contains a misbehaving agent is the sandbox. What protects `main` is the Hub
   (push policy, protected-file verification, QA).
 - **GitHub token.** `ASO_GIT_TOKEN` should be a fine-grained token limited to the one
-  repository. Remote URLs are shown with credentials stripped.
+  repository, with only *Contents* and *Pull requests* write access. Remote URLs are shown with credentials stripped.
 - **API key.** It lives only on the Hub. With `--docker` it is passed into the container
   through the environment, so anyone who can run `docker inspect` on the Hub machine can read
   it.

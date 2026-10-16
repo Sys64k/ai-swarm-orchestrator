@@ -9,6 +9,7 @@ import {
   type LlmUsage,
   type TaskSpec,
 } from "@aso/shared";
+import type { PullRef } from "./git/github.js";
 import type { HubRepository } from "./git/hub-repo.js";
 import type { NodeRegistry } from "./registry.js";
 import { DEFAULT_ROUTING_POLICIES, selectNode, type RoutingPolicies } from "./routing.js";
@@ -18,6 +19,9 @@ const log = createLogger("tasks");
 
 /**
  * pending → assigned → in_progress → verifying → awaiting_qa → testing → merging → merged
+ * With pull requests, QA-approved work goes to awaiting_review instead of merging, and a person
+ * merges it on GitHub (→ merged), requests changes (→ pending, a review round) or closes it
+ * (→ cancelled).
  * Verification, QA or merge problems send the task back to pending as a rework round.
  * A person can cancel any task that isn't finished, and retry a failed or cancelled one.
  */
@@ -29,6 +33,7 @@ export type TaskState =
   | "awaiting_qa"
   | "testing"
   | "merging"
+  | "awaiting_review"
   | "merged"
   | "failed"
   | "cancelled";
@@ -59,6 +64,10 @@ export interface TaskRecord {
   commit?: string;
   /** Merge commit on main. */
   mainCommit?: string;
+  /** What the last passing QA run reported (shown in the pull request). */
+  qaSummary?: string;
+  /** The pull request a person reviews, with pull requests on. */
+  review?: ReviewInfo;
   qaSetup?: string[][];
   /** Accumulated model usage for this task (estimated cost). */
   llm: { calls: number } & LlmUsage;
@@ -78,6 +87,32 @@ export interface TaskRecord {
   routing?: { nodeId: string; score: number; reasons: string[] };
   detail?: string;
   history: Array<{ at: string; event: string }>;
+}
+
+export interface ReviewInfo {
+  /** The task's pull request, once it is open. */
+  pr?: PullRef;
+  /** Why opening or checking it last failed; the next check tries again. */
+  error?: string;
+  /** Times a reviewer requested changes (not limited, unlike rework rounds). */
+  rounds: number;
+  /** Reviews already acted on. */
+  handled: number[];
+}
+
+/** What a person did with a task's pull request. */
+export type ReviewOutcome =
+  | { kind: "merged"; mainCommit: string }
+  | { kind: "closed" }
+  | { kind: "changes_requested"; reviewId: number; author: string; summary: string; details: string }
+  | { kind: "conflict" };
+
+/** Sends QA-approved work to a person for review (a GitHub pull request) instead of merging it. */
+export interface ReviewGate {
+  /** Push the task's branch and open its pull request, or update the open one. */
+  open(task: TaskRecord): Promise<PullRef>;
+  /** Close the task's pull request (the task was cancelled here). */
+  close(task: TaskRecord, comment: string): Promise<void>;
 }
 
 export interface AgentTurn {
@@ -132,6 +167,8 @@ export interface TaskManagerOptions {
   qa?: Partial<QaOptions>;
   /** Called after a task is merged into main (e.g. to push main to GitHub). */
   onMerged?: (task: TaskRecord) => void;
+  /** With a gate, QA-approved work waits for a person's review instead of being merged. */
+  reviewGate?: ReviewGate;
   /** Called whenever a task record changes (used to persist Hub state). */
   onChange?: () => void;
   /** Receives task events and QA verdicts for the task's transcript. */
@@ -151,6 +188,7 @@ export class TaskManager {
   private readonly reclaimGraceMs: number;
   readonly qa: QaOptions;
   private readonly onMerged?: (task: TaskRecord) => void;
+  private readonly reviewGate?: ReviewGate;
   private readonly onChange?: () => void;
   readonly project: string;
   private readonly onDispatchNeeded?: () => void;
@@ -169,6 +207,7 @@ export class TaskManager {
     this.reclaimGraceMs = opts.reclaimGraceMs ?? 5 * 60_000;
     this.qa = { ...DEFAULT_QA, ...opts.qa };
     this.onMerged = opts.onMerged;
+    this.reviewGate = opts.reviewGate;
     this.onChange = opts.onChange;
     this.onTranscript = opts.onTranscript;
     this.project = opts.project ?? "project";
@@ -192,6 +231,12 @@ export class TaskManager {
     }
     if (task.state === "merging") throw new TaskError(`task ${taskId} is being merged right now`, "conflict");
     for (const nodeId of [task.nodeId, task.qaNodeId]) if (nodeId) this.registry.release(nodeId, taskId);
+    if (task.state === "awaiting_review" && task.review?.pr && this.reviewGate) {
+      const pr = task.review.pr;
+      this.reviewGate.close(task, "The task was cancelled from the ASO console.").catch((err: Error) =>
+        log.warn(`could not close pull request #${pr.number} of ${taskId}: ${err.message}`),
+      );
+    }
     task.state = "cancelled";
     task.detachedAt = undefined;
     task.qaNodeId = undefined;
@@ -220,6 +265,7 @@ export class TaskManager {
     task.qaNodeId = undefined;
     task.commit = undefined;
     task.detail = undefined;
+    task.review = undefined; // a cancelled task's pull request was closed; the next one is new
     task.rework = { round: 1, reason: `Retried by a person; ${why}. Your branch may already contain that attempt.` };
     task.state = "pending";
     this.note(task, `retry ${task.retries} requested by a person`);
@@ -542,7 +588,8 @@ export class TaskManager {
     });
     if (feedback.outcome === "pass") {
       this.note(task, `QA passed on ${nodeId}: ${feedback.summary}`);
-      void this.merge(task);
+      task.qaSummary = feedback.summary;
+      this.approved(task);
     } else {
       this.note(task, `QA failed on ${nodeId}: ${feedback.summary}`);
       this.rework(task, `QA failed: ${feedback.summary}`, feedback.failures, feedback.output);
@@ -630,12 +677,85 @@ export class TaskManager {
 
     if (!this.qa.enabled) {
       this.note(task, "verified; QA disabled");
-      return void this.merge(task);
+      task.qaSummary = "QA is off on this Hub";
+      return this.approved(task);
     }
     task.qaSetup = this.qa.setup ?? ((await this.repo.fileExists(commit, "package-lock.json")) ? [["npm", "ci"]] : []);
     task.qaAttempts = 0;
     task.state = "awaiting_qa";
     this.note(task, "verified; awaiting QA");
+    this.kick();
+  }
+
+  /** QA-approved work: to a person's review when pull requests are on, else straight into main. */
+  private approved(task: TaskRecord): void {
+    if (!this.reviewGate) return void this.merge(task);
+    task.state = "awaiting_review";
+    task.review ??= { rounds: 0, handled: [] };
+    task.review.error = undefined; // a new commit: earlier failures are history
+    this.note(task, task.review.pr ? `updating pull request #${task.review.pr.number}` : "opening a pull request for review");
+    void this.openReview(task);
+  }
+
+  /**
+   * Push the branch and open or update the task's pull request. A failure is kept on the task
+   * and tried again by the next review check.
+   */
+  async openReview(task: TaskRecord): Promise<void> {
+    if (!this.reviewGate || task.state !== "awaiting_review" || !task.review) return;
+    const info = task.review;
+    try {
+      const pr = await this.reviewGate.open(task);
+      if (task.state !== "awaiting_review") return;
+      const opened = info.pr?.number !== pr.number;
+      info.pr = pr;
+      info.error = undefined;
+      this.note(task, opened ? `pull request #${pr.number} opened for review: ${pr.url}` : `pull request #${pr.number} updated with ${task.commit?.slice(0, 8)}`);
+    } catch (err) {
+      this.reviewProblem(task, `could not ${info.pr ? "update" : "open"} the pull request`, (err as Error).message);
+    }
+  }
+
+  /** Checking the task's pull request failed (GitHub unreachable...); the next check tries again. */
+  reviewCheckFailed(taskId: string, message: string): void {
+    const task = this.tasks.get(taskId);
+    if (task?.state === "awaiting_review") this.reviewProblem(task, `could not check pull request #${task.review?.pr?.number}`, message);
+  }
+
+  /** Keep a review step's failure on the task; noted once per distinct message. */
+  private reviewProblem(task: TaskRecord, what: string, message: string): void {
+    if (!task.review || task.review.error === message) return;
+    task.review.error = message;
+    this.note(task, `${what} (will retry): ${message}`);
+  }
+
+  /** Apply what a person did with the task's pull request (from the review check). */
+  applyReview(taskId: string, outcome: ReviewOutcome): void {
+    const task = this.tasks.get(taskId);
+    if (!task || task.state !== "awaiting_review" || !task.review?.pr) return;
+    const pr = task.review.pr;
+    task.review.error = undefined; // GitHub answered
+    switch (outcome.kind) {
+      case "merged":
+        task.state = "merged";
+        task.mainCommit = outcome.mainCommit;
+        this.note(task, `pull request #${pr.number} merged on GitHub @ ${outcome.mainCommit.slice(0, 8)}`);
+        this.onMerged?.(task);
+        break;
+      case "closed":
+        task.state = "cancelled";
+        this.note(task, `pull request #${pr.number} closed without merging; cancelled`);
+        break;
+      case "changes_requested":
+        task.review.handled.push(outcome.reviewId);
+        task.review.rounds++;
+        this.note(task, `${outcome.author} requested changes on pull request #${pr.number}`);
+        this.sendBack(task, { reason: `Review round ${task.review.rounds}: ${outcome.summary}`, failures: [], output: outcome.details }, "back to an agent");
+        break;
+      case "conflict":
+        this.rework(task, `pull request #${pr.number} conflicts with main; rebase onto main and resolve`);
+        break;
+    }
     this.kick();
   }
 
@@ -661,17 +781,24 @@ export class TaskManager {
     this.kick();
   }
 
+  /** A problem with the work (failed QA, bad push, conflict): back to an agent, up to the rework limit. */
   private rework(task: TaskRecord, reason: string, failures: Rework["failures"] = [], output?: string): void {
     if (task.reworkRound >= this.maxReworkRounds) {
       return this.fail(task, `${reason} (gave up after ${task.reworkRound} rework rounds)`);
     }
     task.reworkRound++;
-    task.rework = { round: task.reworkRound, reason, failures, output };
+    this.sendBack(task, { reason, failures, output }, `rework round ${task.reworkRound}`);
+  }
+
+  /** Queue the task for an agent again, with why. Review rounds come here directly: they have no limit. */
+  private sendBack(task: TaskRecord, rework: Omit<Rework, "round">, label: string): void {
+    // The agent sees one running count of every time its work came back.
+    task.rework = { round: task.reworkRound + (task.review?.rounds ?? 0), ...rework };
     task.state = "pending";
     task.nodeId = undefined;
     task.qaNodeId = undefined;
     task.commit = undefined;
-    this.note(task, `rework round ${task.reworkRound}: ${reason}`);
+    this.note(task, `${label}: ${rework.reason}`);
     this.kick();
   }
 

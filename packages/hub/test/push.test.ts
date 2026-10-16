@@ -153,6 +153,18 @@ describe("notableChanges", () => {
     ]);
   });
 
+  it("asks for a review once the pull request is open, and again after each review round", () => {
+    const seen = new Map([["task:t", "testing"]]);
+    const look = (state: TaskRecord["state"], pr?: number) =>
+      notableChanges(seen, { id: "shop", tasks: [task("t", state, pr ? { review: { pr: { number: pr, url: "u" }, rounds: 0, handled: [] } } : {})], plans: [] });
+    assert.deepEqual(look("awaiting_review"), [], "not before the pull request exists");
+    const ask = [{ title: "shop: ready for your review", body: "Title t\nPull request #7 on GitHub", url: "/tasks/t", tag: "task-t" }];
+    assert.deepEqual(look("awaiting_review", 7), ask);
+    assert.deepEqual(look("awaiting_review", 7), [], "once");
+    look("pending", 7);
+    assert.deepEqual(look("awaiting_review", 7), ask, "back after the requested changes");
+  });
+
   it("keeps notification text short", () => {
     const seen = new Map([["task:t", "in_progress"]]);
     const [n] = notableChanges(seen, { id: "shop", tasks: [task("t", "failed", { detail: "x".repeat(5000) })], plans: [] });
