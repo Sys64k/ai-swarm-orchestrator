@@ -26,6 +26,19 @@ export interface NodeEntry {
   heartbeat?: Heartbeat;
   currentTaskId?: string;
   lastAssignedAt?: number;
+  /** Takes no new jobs; set by a person from the console, or by a pending restart. */
+  draining?: boolean;
+  /** Restart once idle: "pending" until the restart is sent, then "sent" until the node disconnects. */
+  restart?: "pending" | "sent";
+}
+
+export class NodeError extends Error {
+  constructor(
+    message: string,
+    readonly code: "not_found" | "conflict",
+  ) {
+    super(message);
+  }
 }
 
 /** Live registry of connected nodes (workers and the Architect). */
@@ -77,7 +90,67 @@ export class NodeRegistry {
 
   release(nodeId: string, taskId: string): void {
     const entry = this.nodes.get(nodeId);
-    if (entry?.currentTaskId === taskId) entry.currentTaskId = undefined;
+    if (entry?.currentTaskId !== taskId) return;
+    entry.currentTaskId = undefined;
+    this.restartIfIdle(entry);
+  }
+
+  /*
+   * Draining and restarting a worker from the console:
+   *
+   *   idle/busy --drain--> draining --resume--> idle/busy
+   *   idle/busy/draining --restart--> restart "pending" (draining) --job released--> "sent"
+   *   restart "pending" --resume--> idle/busy   (cancels the restart)
+   *   restart "sent": the worker exits; its entry goes when it disconnects
+   *
+   * What a person may do in each state is `nodeActions`, which the console shows as buttons.
+   */
+
+  /** Give a worker no new jobs; its current job carries on. */
+  drain(nodeId: string): NodeEntry {
+    const entry = this.requireActionable(nodeId, "drain");
+    entry.draining = true;
+    return entry;
+  }
+
+  /** Give a drained worker jobs again. This also cancels a restart that is still waiting for a job. */
+  resume(nodeId: string): NodeEntry {
+    const entry = this.requireActionable(nodeId, "resume");
+    entry.draining = undefined;
+    entry.restart = undefined;
+    return entry;
+  }
+
+  /**
+   * Restart a worker once its current job is done: it takes no new jobs meanwhile, then gets
+   * NODE_CONTROL restart and exits for its service manager to start it again (on the build
+   * installed there, so this also finishes an `aso update`). It comes back as a new node.
+   */
+  requestRestart(nodeId: string): NodeEntry {
+    const entry = this.requireActionable(nodeId, "restart");
+    entry.draining = true;
+    entry.restart = "pending";
+    this.restartIfIdle(entry);
+    return entry;
+  }
+
+  /** Sends NODE_CONTROL to a worker with a pending restart once it has no job. Called on every release. */
+  private restartIfIdle(entry: NodeEntry): void {
+    if (entry.restart !== "pending" || entry.currentTaskId !== undefined) return;
+    try {
+      this.send(entry.nodeId, "NODE_CONTROL", { action: "restart" });
+      entry.restart = "sent";
+    } catch {
+      // The socket is closing; the node is about to drop, and its entry with it. Never let this break the release.
+    }
+  }
+
+  private requireActionable(nodeId: string, action: NodeAction): NodeEntry {
+    const entry = this.nodes.get(nodeId);
+    if (!entry || entry.registration.nodeKind !== "worker") throw new NodeError(`worker ${nodeId} is not connected`, "not_found");
+    const actions = nodeActions(entry);
+    if (!actions[action]) throw new NodeError(actions.why[action] ?? `cannot ${action} ${nodeId} now`, "conflict");
+    return entry;
   }
 
   /** Nodes whose last message is older than `timeoutMs`. */
@@ -99,22 +172,31 @@ export class NodeRegistry {
         hardware: n.registration.hardware,
         load: n.heartbeat,
         busy: n.currentTaskId !== undefined,
+        draining: n.draining === true,
         lastAssignedAt: n.lastAssignedAt,
       });
     }
     return out;
   }
 
-  /** JSON-safe view for the API / dashboard. */
+  /** JSON-safe view of every node for the API / dashboard. */
   list() {
-    return [...this.nodes.values()].map((n) => ({
+    return [...this.nodes.values()].map((n) => this.view(n));
+  }
+
+  /** JSON-safe view of one node. */
+  view(n: NodeEntry) {
+    return {
       nodeId: n.nodeId,
       connectedAt: new Date(n.connectedAt).toISOString(),
       lastSeenAt: new Date(n.lastSeenAt).toISOString(),
       currentTaskId: n.currentTaskId ?? null,
       heartbeat: n.heartbeat ?? null,
+      draining: n.draining === true,
+      restart: n.restart ?? null,
+      actions: nodeActions(n),
       ...n.registration,
-    }));
+    };
   }
 
   private require(nodeId: string): NodeEntry {
@@ -122,6 +204,29 @@ export class NodeRegistry {
     if (!entry) throw new Error(`unknown node ${nodeId}`);
     return entry;
   }
+}
+
+export type NodeAction = "drain" | "resume" | "restart";
+
+/** What a person may do with a node now; `why` explains a refusal that is not obvious from the state. */
+export type NodeActions = Record<NodeAction, boolean> & { why: Partial<Record<NodeAction, string>> };
+
+/** The single source of the drain/resume/restart rules: the API enforces them and the console shows them. */
+export function nodeActions(n: Pick<NodeEntry, "registration" | "draining" | "restart">): NodeActions {
+  if (n.registration.nodeKind !== "worker") return { drain: false, resume: false, restart: false, why: {} };
+  const restarting = n.restart !== undefined;
+  const service = n.registration.supervisor !== undefined;
+  return {
+    drain: !n.draining && !restarting,
+    resume: n.draining === true && n.restart !== "sent",
+    restart: service && !restarting,
+    why: {
+      ...(n.restart === "sent" ? { resume: "the worker is already restarting" } : {}),
+      ...(service
+        ? {}
+        : { restart: "this worker was started by hand, so nothing would start it again: on its machine, stop it and run aso service install (after aso update)" }),
+    },
+  };
 }
 
 /**

@@ -61,6 +61,9 @@ describe("Hub proxy allowlist", () => {
     assert.equal(hubPath("POST", ["plans"]), "/api/plans");
     assert.equal(hubPath("POST", ["plans", "plan-1", "approve"]), "/api/plans/plan-1/approve");
     assert.equal(hubPath("GET", ["nodes"]), "/api/nodes");
+    for (const action of ["drain", "resume", "restart"]) {
+      assert.equal(hubPath("POST", ["nodes", "avalon-a113298e", action]), `/api/nodes/avalon-a113298e/${action}`);
+    }
     assert.equal(hubPath("GET", ["projects"]), "/api/projects");
     assert.equal(hubPath("POST", ["sign-in-codes"]), "/api/sign-in-codes");
     assert.equal(hubPath("POST", ["projects"]), "/api/projects");
@@ -70,6 +73,11 @@ describe("Hub proxy allowlist", () => {
   it("refuses everything else", () => {
     assert.equal(hubPath("POST", ["tasks"]), undefined, "no raw task submission from the browser");
     assert.equal(hubPath("POST", ["projects", "shop"]), undefined);
+    assert.equal(hubPath("POST", ["nodes", "avalon-1", "kill"]), undefined);
+    assert.equal(hubPath("POST", ["nodes", "build.lan-1f2e", "drain"]), "/api/nodes/build.lan-1f2e/drain");
+    assert.equal(hubPath("POST", ["nodes", "..", "restart"]), undefined);
+    assert.equal(hubPath("POST", ["nodes", ".", "restart"]), undefined);
+    assert.equal(hubPath("GET", ["nodes", "avalon-1", "restart"]), undefined);
     assert.equal(hubPath("POST", ["sign-in-codes", "redeem"]), undefined, "only the console's server redeems codes");
     assert.equal(hubPath("GET", ["sign-in-codes"]), undefined);
     assert.equal(hubPath("GET", ["sync"]), undefined);

@@ -148,28 +148,64 @@ function planFinished(plan: Plan, tasks: readonly Task[]): boolean {
 export interface WorkerView {
   nodeId: string;
   name: string;
-  busy: boolean;
   taskId: string | null;
   detail: string;
   outdated: boolean;
+  status: { label: string; tone: Tone };
+  actions: WorkerActions;
+}
+
+/** The worker buttons to show; the Hub decides which actions are allowed. */
+export interface WorkerActions {
+  drain: boolean;
+  resume: boolean;
+  restart: boolean;
+  /** "Resume", or "Cancel restart" while a restart waits for the current job. */
+  resumeLabel: string;
+  restartConfirm: string;
+  /** Why Restart is not offered, when the reason is not obvious from the state. */
+  restartNote?: string;
 }
 
 export function workerViews(nodes: readonly HubNode[]): WorkerView[] {
-  return nodes
-    .filter((n) => n.nodeKind === "worker")
-    .map((n) => {
-      const size = n.hardware ? `${n.hardware.cpu.logicalCores} cores, ${Math.round(n.hardware.memory.totalBytes / 1024 ** 3)} GiB` : undefined;
-      const cpu = n.heartbeat ? `CPU ${Math.round(n.heartbeat.cpuLoadPercent)}%` : undefined;
-      const build = n.version ? `build ${buildOf(n.version)}` : undefined;
-      return {
-        nodeId: n.nodeId,
-        name: n.hardware?.hostname ?? n.nodeId,
-        busy: n.currentTaskId !== null,
-        taskId: n.currentTaskId,
-        detail: [size, cpu, build].filter(Boolean).join(" · "),
-        outdated: n.outdated === true,
-      };
-    });
+  return nodes.filter((n) => n.nodeKind === "worker").map(workerView);
+}
+
+export function workerView(n: HubNode): WorkerView {
+  const size = n.hardware ? `${n.hardware.cpu.logicalCores} cores, ${Math.round(n.hardware.memory.totalBytes / 1024 ** 3)} GiB` : undefined;
+  const cpu = n.heartbeat ? `CPU ${Math.round(n.heartbeat.cpuLoadPercent)}%` : undefined;
+  const build = n.version ? `build ${buildOf(n.version)}` : undefined;
+  const name = n.hardware?.hostname ?? n.nodeId;
+  return {
+    nodeId: n.nodeId,
+    name,
+    taskId: n.currentTaskId,
+    detail: [size, cpu, build].filter(Boolean).join(" · "),
+    outdated: n.outdated === true,
+    status: workerStatus(n),
+    actions: workerActions(n, name),
+  };
+}
+
+function workerStatus(n: HubNode): { label: string; tone: Tone } {
+  if (n.restart === "sent") return { label: "Restarting", tone: "active" };
+  if (n.restart === "pending") return { label: "Restart after job", tone: "waiting" };
+  if (n.currentTaskId !== null) return { label: n.draining ? "Busy, draining" : "Busy", tone: "active" };
+  if (n.draining) return { label: "Drained", tone: "waiting" };
+  if (n.outdated) return { label: "Update", tone: "waiting" };
+  return { label: "Idle", tone: "muted" };
+}
+
+function workerActions(n: HubNode, name: string): WorkerActions {
+  const allowed = n.actions;
+  return {
+    drain: allowed?.drain === true,
+    resume: allowed?.resume === true,
+    restart: allowed?.restart === true,
+    resumeLabel: n.restart === "pending" ? "Cancel restart" : "Resume",
+    restartConfirm: `Restart ${name}? ${n.currentTaskId !== null ? "It finishes its current job first and takes no new ones meanwhile." : "It restarts now."}`,
+    restartNote: allowed?.why.restart,
+  };
 }
 
 /** The build part of a version (`0.1.0+e422cd7` → `e422cd7`); older nodes report only `0.1.0`. */

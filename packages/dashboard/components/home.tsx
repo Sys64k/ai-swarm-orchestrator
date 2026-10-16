@@ -53,28 +53,14 @@ export function Home() {
           ) : (
             <div className="card-list">
               {workers.map((w) => (
-                <div key={w.nodeId} className="row row-static">
-                  <span className="row-main">
-                    <span className="row-title">{w.name}</span>
-                    <span className="row-sub">{w.detail}</span>
-                  </span>
-                  {w.busy ? (
-                    <Link href={`/tasks/${w.taskId}`}>
-                      <Badge label="Busy" tone="active" />
-                    </Link>
-                  ) : w.outdated ? (
-                    <Badge label="Update" tone="waiting" />
-                  ) : (
-                    <Badge label="Idle" tone="muted" />
-                  )}
-                </div>
+                <Row key={w.nodeId} href={`/workers/${w.nodeId}`} title={w.name} sub={w.detail} badge={<Badge {...w.status} />} />
               ))}
             </div>
           )}
           {workers.some((w) => w.outdated) && (
             <p className="muted small">
-              Workers marked Update run an older aso than the Hub. On each, run <code>aso update --hub &lt;hub address&gt;</code> and
-              restart its worker.
+              Workers marked Update run an older aso than the Hub. On each, run <code>aso update --hub &lt;hub address&gt;</code>; it
+              restarts a worker installed as a service.
             </p>
           )}
           {nodes.data && !architect && <p className="muted small">The Architect is not connected, so new plans will wait.</p>}

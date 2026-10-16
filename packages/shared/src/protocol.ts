@@ -122,12 +122,18 @@ export type HardwareProfile = z.infer<typeof HardwareProfileSchema>;
 // Payloads
 // ---------------------------------------------------------------------------
 
+/** Service managers that start a worker again after it exits (so the Hub may restart it). */
+export const SupervisorSchema = z.enum(["systemd"]);
+export type Supervisor = z.infer<typeof SupervisorSchema>;
+
 const NodeRegistrationPayload = z.discriminatedUnion("nodeKind", [
   z.strictObject({
     nodeKind: z.literal("worker"),
     version: z.string(),
     /** Sent by workers before roles became the Architect's call; ignored. */
     roles: z.array(WorkerRoleSchema).optional(),
+    /** Set when a service manager starts the worker again after it exits, so the Hub can restart it. */
+    supervisor: SupervisorSchema.optional(),
     hardware: HardwareProfileSchema,
     /** Job the worker is still running after a reconnect; lets the Hub hand it back. */
     resume: z
@@ -439,6 +445,11 @@ const PlanResultPayload = z.discriminatedUnion("outcome", [
   z.strictObject({ planId: PlanIdSchema, outcome: z.literal("failed"), error: z.string().min(1).max(5000) }),
 ]);
 
+/** The Hub asks a node to act on itself. `restart`: exit so its service manager starts it again (only sent while idle). */
+const NodeControlPayload = z.strictObject({
+  action: z.enum(["restart"]),
+});
+
 const ProtocolErrorPayload = z.strictObject({
   /** Envelope id of the offending message, when it could be read. */
   refId: z.string().optional(),
@@ -478,6 +489,7 @@ export const AgentMessageSchema = z.discriminatedUnion("type", [
   message("PROMPT_RESULT", PromptResultPayload),
   message("PLAN_REQUEST", PlanRequestPayload),
   message("PLAN_RESULT", PlanResultPayload),
+  message("NODE_CONTROL", NodeControlPayload),
   message("PROTOCOL_ERROR", ProtocolErrorPayload),
 ]);
 
@@ -510,6 +522,7 @@ export const HUB_TO_NODE_TYPES = new Set<AgentMessageType>([
   "DEPENDENCY_RESPONSE",
   "PROMPT_RESULT",
   "PLAN_REQUEST",
+  "NODE_CONTROL",
   "PROTOCOL_ERROR",
 ]);
 

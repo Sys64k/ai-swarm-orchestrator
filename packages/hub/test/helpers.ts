@@ -156,6 +156,7 @@ export async function worker(
     docker?: boolean;
     mbps?: number;
     resume?: { taskId: string; job: "implement" | "test" };
+    supervisor?: "systemd";
   } = {},
 ) {
   const c = await connect(port);
@@ -165,6 +166,7 @@ export async function worker(
       version: "test",
       hardware: hardware(opts),
       resume: opts.resume,
+      supervisor: opts.supervisor,
     }),
   );
   const ack = await c.next();

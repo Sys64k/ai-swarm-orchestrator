@@ -1,3 +1,5 @@
+import type { WorkerAction } from "./hub-routes.ts";
+
 /** The parts of the Hub's API responses the console uses. */
 
 export type TaskState =
@@ -90,6 +92,14 @@ export interface HubNode {
   heartbeat: { memoryAvailableBytes: number; cpuLoadPercent: number } | null;
   currentTaskId: string | null;
   lastSeenAt: string;
+  /** Takes no new jobs (set from the console). */
+  draining?: boolean;
+  /** A restart from the console: waiting for the current job, or sent and the worker is exiting. */
+  restart?: "pending" | "sent" | null;
+  /** Set when a service manager restarts the worker; only those can be restarted from here. */
+  supervisor?: "systemd";
+  /** What a person may do now, decided by the Hub (absent from Hubs older than the console). */
+  actions?: { [A in WorkerAction]: boolean } & { why: Partial<Record<WorkerAction, string>> };
   /** aso build the node runs (`0.1.0+<commit>`). Optional: Hubs older than the console don't send it. */
   version?: string;
   /** Runs another build than the Hub serves: `aso update` on that machine. */

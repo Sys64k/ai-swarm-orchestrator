@@ -205,6 +205,20 @@ reports its commit, with `-dirty` for uncommitted changes). When it differs from
 the Hub serves, the console marks the worker **Update** and the Hub logs a warning. Restart
 a worker after updating it so it registers with the new build.
 
+#### Drain and restart from the console
+
+Tap a worker on the console's home page:
+
+- **Drain**: it finishes its current job but gets no new ones, for example before you take
+  the machine offline. **Resume** undoes it.
+- **Restart**: drains the worker, then restarts it once its job is done (at once when idle),
+  on the aso build installed on that machine. **Cancel restart** works until then. The worker
+  comes back under a new name a few seconds later.
+
+Restart needs a worker installed with `aso service install`, because systemd is what starts it
+again; for a hand-started worker the console says so. The Architect cannot do either: it plans,
+and the Hub schedules.
+
 > **Do not edit the target directory by hand while the Hub runs.** The Hub merges approved
 > work into its `main` checkout. If that checkout has uncommitted changes or a different branch
 > checked out, the merge is refused and the task fails with "merge blocked".
@@ -614,11 +628,13 @@ Options:
 | `GET` | `/dist/aso.tgz` | The `aso` package for installing/updating machines (public; contains no secrets) |
 | `GET` / `POST` | `/api/sync` | Push status / retry the push of `main` to `origin` |
 | `GET` | `/api/llm` | LLM status: model, queue, calls and estimated spend since start |
-| `GET` | `/api/nodes` | Registered nodes with hardware, latest heartbeat, current task, the aso build each runs (`version`) and `outdated` (a different build than the Hub serves) |
+| `GET` | `/api/nodes` | Registered nodes with hardware, latest heartbeat, current task, the aso build each runs (`version`), `outdated` (a different build than the Hub serves), `supervisor`, `draining`, `restart` and `actions` (what the console may do now, with `why` for a refusal) |
 | `GET` | `/api/tasks` | All tasks with state, nodes, commits, rework round and history |
 | `GET` | `/api/tasks/:id` | A single task (history, agent turn log, LLM cost, files touched) |
 | `GET` | `/api/tasks/:id/transcript`, `/api/plans/:id/transcript` | What the agent said and did: text, tool calls, command output, events, QA verdicts. `?after=<seq>` returns only newer entries |
 | `POST` | `/api/tasks/:id/cancel` | Stop a task that isn't finished; a worker still on it is cut off at its next model turn |
+| `POST` | `/api/nodes/:id/drain` · `/resume` | Stop or resume giving a worker new jobs; its current job finishes. Resume also cancels a pending restart |
+| `POST` | `/api/nodes/:id/restart` | Drain a service worker and restart it once idle (`restart`: `pending`, then `sent`). 409 for a hand-started worker |
 | `POST` | `/api/tasks/:id/retry` | Queue a failed or cancelled task again with fresh limits and budget |
 | `GET` | `/api/push` | Push notifications: the Hub's public key (`applicationServerKey`) and how many devices are subscribed |
 | `POST` | `/api/push/subscriptions`, `/check`, `/delete` | Add a device's `PushSubscription` (https endpoint, `p256dh`, `auth`), ask whether one is subscribed, remove one |

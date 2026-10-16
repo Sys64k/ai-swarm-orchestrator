@@ -14,6 +14,7 @@ import {
   type AgentMessageType,
   type HardwareProfile,
   type PayloadInput,
+  type Supervisor,
   UNKNOWN_VERSION,
 } from "@aso/shared";
 import { profileHardware, sampleLoad } from "./hardware.js";
@@ -47,6 +48,10 @@ export interface WorkerOptions {
   sandboxOptions?: Omit<DockerSandboxOptions, "workDir">;
   /** The aso build this worker runs (`0.1.0+<commit>`), shown on the Hub so outdated workers stand out. */
   version?: string;
+  /** The service manager that starts this worker again after it exits; lets the console restart it. */
+  supervisor?: Supervisor;
+  /** Called when the Hub asks for a restart, once no job runs: stop and exit (the CLI does). */
+  onRestart?: () => void;
 }
 
 export const DEFAULT_WORK_DIR = path.join(os.homedir(), ".aso", "work");
@@ -91,6 +96,7 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
   let attempt = 0;
   let stopped = false;
   let retryTimer: NodeJS.Timeout | undefined;
+  let restartTimer: NodeJS.Timeout | undefined;
   let heartbeatTimer: NodeJS.Timeout | undefined;
   const outbox: string[] = [];
 
@@ -124,6 +130,7 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
           createMessage("NODE_REGISTRATION", nodeId, {
             nodeKind: "worker",
             version: opts.version ?? UNKNOWN_VERSION,
+            supervisor: opts.supervisor,
             hardware: profile,
             resume: runner.current,
           }),
@@ -167,6 +174,14 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
         case "DEPENDENCY_RESPONSE":
           runner.handleDependencyResponse(msg.payload);
           break;
+        case "NODE_CONTROL":
+          if (!opts.onRestart) {
+            log.warn("the Hub asked for a restart, but this worker has no service to start it again; ignoring");
+            break;
+          }
+          log.info("restart requested from the console");
+          restartWhenIdle(opts.onRestart);
+          break;
         case "PROTOCOL_ERROR":
           log.error(`hub rejected message: ${msg.payload.reason}`, msg.payload.issues);
           break;
@@ -190,6 +205,23 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
     socket.on("error", (err) => log.debug(`socket error: ${err.message}`));
   };
 
+  /**
+   * The Hub only asks while no job runs, but a job's last messages may still be on their way:
+   * check every second until the runner is empty. A repeated request joins the waiting one.
+   */
+  const restartWhenIdle = (restart: () => void) => {
+    if (restartTimer) return;
+    const check = () => {
+      if (stopped) return;
+      if (runner.current) {
+        restartTimer = setTimeout(check, 1000);
+        return;
+      }
+      restart();
+    };
+    restartTimer = setTimeout(check, 0);
+  };
+
   connect();
 
   return {
@@ -199,6 +231,7 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
     stop() {
       stopped = true;
       clearTimeout(retryTimer);
+      clearTimeout(restartTimer);
       clearInterval(heartbeatTimer);
       ws?.close(1000, "worker stopping");
       lock.release();

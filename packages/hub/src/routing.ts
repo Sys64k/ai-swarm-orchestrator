@@ -40,6 +40,8 @@ export interface NodeSnapshot {
   /** Latest heartbeat; falls back to registration-time values when absent. */
   load?: { memoryAvailableBytes: number; cpuLoadPercent: number; dockerAvailable: boolean };
   busy: boolean;
+  /** Set from the console: finishes its current job but takes no new ones. */
+  draining?: boolean;
   /** Epoch ms of the last assignment, used to spread ties across nodes. */
   lastAssignedAt?: number;
 }
@@ -134,6 +136,7 @@ function metricsOf(node: NodeSnapshot): RankedNode["metrics"] {
 
 function rejectionReason(node: NodeSnapshot, req: RoutingRequest, policy: RoutingPolicy): string | undefined {
   if (node.busy) return "busy";
+  if (node.draining) return "draining";
   const docker = node.load?.dockerAvailable ?? node.hardware.docker.available;
   if (policy.requiresDocker && !docker) return "no Docker daemon";
   if (policy.minMemoryBytes && node.hardware.memory.totalBytes < policy.minMemoryBytes) {
