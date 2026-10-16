@@ -19,7 +19,7 @@ import {
 } from "@aso/shared";
 import { profileHardware, resolveSlots, sampleLoad } from "./hardware.js";
 import { LlmTaskExecutor } from "./agent/executor.js";
-import { JobRunner, type TaskExecutor } from "./jobs.js";
+import { JobRunner, type RunningJob, type TaskExecutor } from "./jobs.js";
 import { DockerSandbox, hostRunner, type CommandRunner, type DockerSandboxOptions } from "./sandbox.js";
 import { lockWorkDir } from "./work-dir-lock.js";
 
@@ -110,15 +110,22 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
   let heartbeatTimer: NodeJS.Timeout | undefined;
   /** Last Docker state logged, so a heartbeat logs only a change. */
   let dockerAvailable = profile.docker.available;
-  const outbox: string[] = [];
+  /** Held while disconnected; `final` marks a job's result (see `Send`). */
+  const outbox: Array<{ raw: string; final?: RunningJob }> = [];
 
-  const transmit = (raw: string) => {
+  const transmit = (raw: string, final?: RunningJob) => {
     if (ws && registered && ws.readyState === WebSocket.OPEN) return ws.send(raw);
     if (outbox.length >= OUTBOX_LIMIT) outbox.shift();
-    outbox.push(raw);
+    outbox.push({ raw, final });
   };
-  const send = <T extends AgentMessageType>(type: T, payload: PayloadInput<T>) =>
-    transmit(JSON.stringify(createMessage(type, nodeId, payload)));
+  const send = <T extends AgentMessageType>(type: T, payload: PayloadInput<T>, final?: RunningJob) =>
+    transmit(JSON.stringify(createMessage(type, nodeId, payload)), final);
+  /** Jobs to claim when registering: running ones, and finished ones whose result is still held. */
+  const claims = (): RunningJob[] => {
+    const held = outbox.flatMap((m) => (m.final ? [m.final] : []));
+    const all = [...runner.running, ...held];
+    return all.filter((j, i) => all.findIndex((k) => k.taskId === j.taskId && k.job === j.job) === i);
+  };
 
   const runner = new JobRunner({
     workDir,
@@ -147,7 +154,7 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
             updates: opts.onUpdate ? "package" : undefined,
             hardware: profile,
             slots,
-            running: runner.running,
+            running: claims(),
           }),
         ),
       );
@@ -161,7 +168,7 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
         case "REGISTRATION_ACK":
           registered = true;
           log.info(`registered as ${msg.payload.nodeId}`);
-          for (const raw of outbox.splice(0)) socket.send(raw);
+          for (const { raw } of outbox.splice(0)) socket.send(raw);
           runner.resendPending();
           clearInterval(heartbeatTimer);
           heartbeatTimer = setInterval(() => {
