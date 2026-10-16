@@ -6,8 +6,8 @@ describe("worker service unit", () => {
   it("passes on only the options that differ from start-worker's defaults", () => {
     assert.deepEqual(workerArgs({ hub: "192.168.1.10", port: 7420, sandbox: "docker" }, 7420), ["start-worker", "--hub", "192.168.1.10"]);
     assert.deepEqual(
-      workerArgs({ hub: "hub.lan", port: 9000, workDir: "/srv/aso", sandbox: "none", sandboxImage: "img:1", sandboxNetwork: "none" }, 7420),
-      ["start-worker", "--hub", "hub.lan", "--port", "9000", "--work-dir", "/srv/aso", "--sandbox", "none", "--sandbox-image", "img:1", "--sandbox-network", "none"],
+      workerArgs({ hub: "hub.lan", port: 9000, workDir: "/srv/aso", slots: 3, sandbox: "none", sandboxImage: "img:1", sandboxNetwork: "none" }, 7420),
+      ["start-worker", "--hub", "hub.lan", "--port", "9000", "--work-dir", "/srv/aso", "--slots", "3", "--sandbox", "none", "--sandbox-image", "img:1", "--sandbox-network", "none"],
     );
     assert.ok(workerArgs({ hub: "h", workDir: "rel/dir" }, 7420).at(-1)!.startsWith("/"), "relative work dirs become absolute");
   });

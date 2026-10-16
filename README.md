@@ -519,7 +519,7 @@ failure), and so do the dashboard and `aso sync`.
 | `--model <id>` | `claude-opus-5-5` | Claude model for agents |
 | `--effort <level>` | `high` | `low`, `medium`, `high`, `xhigh`, `max` |
 | `--task-budget <usd>` | `5` | Estimated LLM spend cap per task |
-| `--llm-concurrency <n>` | `2` | Concurrent model requests across all workers |
+| `--llm-concurrency <n>` | `4` | Concurrent model requests across all workers and the Architect; jobs beyond it wait their turn |
 | `--no-dashboard` | | Skip the dashboard (not supported with `--docker`) |
 | `--no-architect` | | Skip the Architect tmux session |
 
@@ -535,7 +535,8 @@ outgoing messages and sends them once it has registered again.
 |---|---|---|
 | `--hub <address>` | *required* | `192.168.1.10`, `hub.lan:7420`, or `ws://…` |
 | `-p, --port <port>` | `7420` | Hub port, if `--hub` doesn't include one |
-| `-w, --work-dir <path>` | `~/.aso/work` | Where the project checkout lives; the I/O benchmark runs here |
+| `-w, --work-dir <path>` | `~/.aso/work` | Where the project checkouts live; the I/O benchmark runs here |
+| `--slots <n>` | from the machine | Jobs to run at once, 1–16, each in its own checkout (`<project>`, `<project>.2`, …). The default is one per 2 threads and 6 GiB of RAM, at most 4, and 1 with `--sandbox none` (jobs would share ports) |
 | `--token <token>` | `ASO_TOKEN` / token file | The Hub's ASO token |
 | `--sandbox <mode>` | `docker` | `docker`: each job command runs in a throwaway container that sees only the checkout. `none`: directly on this machine as this user. The worker refuses to start if `docker` is chosen but Docker isn't usable |
 | `--sandbox-image <image>` | built on first start | Image for job commands. The default is `node:<worker's Node major>-bookworm` plus Playwright's Chromium libraries |
@@ -681,6 +682,11 @@ task's **kind** decides *where* it runs best:
 | `e2e_test` | ≥ 4 GiB total RAM | most free RAM (70%) |
 | `db_migration` | — | fastest disk writes (80%) |
 | `container_build` | running Docker daemon | balanced |
+
+**Several jobs per machine.** A worker runs as many jobs at once as it has slots (see
+`--slots`), so one big machine works through independent tasks in parallel. The Hub fills
+slots by score, scaled by each worker's share of free slots, so work spreads across machines
+before doubling up. Model calls from all jobs share the Hub's `--llm-concurrency` limit.
 
 **QA runs on another machine** than the one that wrote the code, if another worker is free, so
 the tests start from a fresh checkout and setup. With a single worker, or when every other

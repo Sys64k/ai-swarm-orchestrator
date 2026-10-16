@@ -116,7 +116,7 @@ export class ConversationManager {
     this.planBudgetUsd = opts.planBudgetUsd ?? 1;
     this.maxTurns = opts.maxTurns ?? 80;
     this.idleTimeoutMs = opts.idleTimeoutMs ?? 30 * 60_000;
-    this.slots = new Semaphore(opts.concurrency ?? 2);
+    this.slots = new Semaphore(opts.concurrency ?? 4);
     this.store = opts.store;
     this.transcripts = opts.transcripts;
   }

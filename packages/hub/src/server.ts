@@ -18,6 +18,7 @@ import {
   isAuthorized,
   parseAgentMessage,
   parseBody,
+  runningJobsOf,
   PushEndpointSchema,
   PushSubscriptionSchema,
   PushTestSchema,
@@ -221,7 +222,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       const current = hubVersion();
       if (isOutdated(p.version, current)) log.warn(`${msg.from} runs aso ${p.version}, this Hub serves ${current}: run \`aso update\` on it`);
       registry.send(msg.from, "REGISTRATION_ACK", { nodeId: msg.from });
-      for (const project of projects.list()) project.tasks.nodeRegistered(msg.from, p.nodeKind === "worker" ? p.resume : undefined);
+      for (const project of projects.list()) project.tasks.nodeRegistered(msg.from, runningJobsOf(p));
       return projects.dispatchAll();
     }
 

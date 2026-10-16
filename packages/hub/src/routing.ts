@@ -39,7 +39,9 @@ export interface NodeSnapshot {
   hardware: HardwareProfile;
   /** Latest heartbeat; falls back to registration-time values when absent. */
   load?: { memoryAvailableBytes: number; cpuLoadPercent: number; dockerAvailable: boolean };
-  busy: boolean;
+  /** Jobs it runs at once, and how many of those are free; it is busy at 0. */
+  slots: number;
+  freeSlots: number;
   /** Set from the console: finishes its current job but takes no new ones. */
   draining?: boolean;
   /** Epoch ms of the last assignment, used to spread ties across nodes. */
@@ -95,15 +97,18 @@ export function selectNode(
   const norm = (v: number, m: number) => (m > 0 ? v / m : 0);
   const { weights } = policy;
 
-  const ranking: Array<RankedNode & { lastAssignedAt: number }> = eligible
+  const ranking: Array<RankedNode & { lastAssignedAt: number; node: NodeSnapshot }> = eligible
     .map(({ node, metrics }) => ({
       nodeId: node.nodeId,
+      node,
       metrics,
       lastAssignedAt: node.lastAssignedAt ?? 0,
+      // A node already running jobs shares its machine with them: scale by its free share of slots.
       score: round(
-        weights.memory * norm(metrics.memoryAvailableBytes, max.memory) +
-          weights.io * norm(metrics.writeMBps, max.io) +
-          weights.cpu * norm(metrics.effectiveCores, max.cpu),
+        freeShare(node) *
+          (weights.memory * norm(metrics.memoryAvailableBytes, max.memory) +
+            weights.io * norm(metrics.writeMBps, max.io) +
+            weights.cpu * norm(metrics.effectiveCores, max.cpu)),
       ),
     }))
     // Highest score wins; near-ties go to the node that has waited longest for work.
@@ -118,10 +123,16 @@ export function selectNode(
     score: best.score,
     reasons: [
       ...explain(request, policy, best.metrics, eligible.length),
+      ...(best.node.slots > 1 ? [`${best.node.freeSlots} of ${best.node.slots} job slots free`] : []),
       ...(avoided ? [`not ${request.avoid}, which wrote the code`] : request.avoid === best.nodeId ? ["no other node free, so the node that wrote the code"] : []),
     ],
-    ranking: ranking.map(({ lastAssignedAt: _, ...r }) => r),
+    ranking: ranking.map(({ lastAssignedAt: _, node: __, ...r }) => r),
   };
+}
+
+/** Share of the node's slots that is free (1 for a free one-slot node). */
+function freeShare(node: NodeSnapshot): number {
+  return node.slots > 0 ? node.freeSlots / node.slots : 0;
 }
 
 function metricsOf(node: NodeSnapshot): RankedNode["metrics"] {
@@ -135,7 +146,7 @@ function metricsOf(node: NodeSnapshot): RankedNode["metrics"] {
 }
 
 function rejectionReason(node: NodeSnapshot, req: RoutingRequest, policy: RoutingPolicy): string | undefined {
-  if (node.busy) return "busy";
+  if (node.freeSlots === 0) return "busy";
   if (node.draining) return "draining";
   const docker = node.load?.dockerAvailable ?? node.hardware.docker.available;
   if (policy.requiresDocker && !docker) return "no Docker daemon";

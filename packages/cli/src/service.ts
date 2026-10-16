@@ -9,6 +9,7 @@ export interface WorkerServiceOptions {
   hub: string;
   port?: number;
   workDir?: string;
+  slots?: number;
   sandbox?: "docker" | "none";
   sandboxImage?: string;
   sandboxNetwork?: string;
@@ -19,6 +20,7 @@ export function workerArgs(o: WorkerServiceOptions, defaultPort: number): string
   const args = ["start-worker", "--hub", o.hub];
   if (o.port !== undefined && o.port !== defaultPort) args.push("--port", String(o.port));
   if (o.workDir) args.push("--work-dir", path.resolve(o.workDir));
+  if (o.slots !== undefined) args.push("--slots", String(o.slots));
   if (o.sandbox && o.sandbox !== "docker") args.push("--sandbox", o.sandbox);
   if (o.sandboxImage) args.push("--sandbox-image", o.sandboxImage);
   if (o.sandboxNetwork) args.push("--sandbox-network", o.sandboxNetwork);

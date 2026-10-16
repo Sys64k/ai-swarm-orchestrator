@@ -1,4 +1,5 @@
 import {
+  DEFAULT_SLOTS,
   HUB_NODE_ID,
   createMessage,
   type AgentMessageType,
@@ -24,7 +25,10 @@ export interface NodeEntry {
   connectedAt: number;
   lastSeenAt: number;
   heartbeat?: Heartbeat;
-  currentTaskId?: string;
+  /** Tasks (workers) or plans (Architect) the node is working on; at most `slots`. */
+  jobs: Set<string>;
+  /** Jobs it runs at once: what a worker registered with (1 for older workers and the Architect). */
+  slots: number;
   lastAssignedAt?: number;
   /** Takes no new jobs; set by a person from the console, or by a pending restart. */
   draining?: boolean;
@@ -55,7 +59,8 @@ export class NodeRegistry {
 
   register(nodeId: string, registration: Registration, transport: NodeTransport, now = Date.now()): NodeEntry {
     if (this.nodes.has(nodeId)) throw new Error(`node ${nodeId} already registered`);
-    const entry: NodeEntry = { nodeId, registration, transport, connectedAt: now, lastSeenAt: now };
+    const slots = registration.nodeKind === "worker" ? (registration.slots ?? DEFAULT_SLOTS) : DEFAULT_SLOTS;
+    const entry: NodeEntry = { nodeId, registration, transport, connectedAt: now, lastSeenAt: now, jobs: new Set(), slots };
     this.nodes.set(nodeId, entry);
     return entry;
   }
@@ -81,18 +86,23 @@ export class NodeRegistry {
     if (entry) entry.heartbeat = heartbeat;
   }
 
-  /** Mark a node busy with a task (workers) or a plan (Architect). */
+  /** Give a node a task (workers) or a plan (Architect); it is busy once all its slots are taken. */
   assign(nodeId: string, taskId: string, now = Date.now()): void {
     const entry = this.require(nodeId);
-    entry.currentTaskId = taskId;
+    entry.jobs.add(taskId);
     entry.lastAssignedAt = now;
   }
 
   release(nodeId: string, taskId: string): void {
     const entry = this.nodes.get(nodeId);
-    if (entry?.currentTaskId !== taskId) return;
-    entry.currentTaskId = undefined;
+    if (!entry?.jobs.delete(taskId)) return;
     this.restartIfIdle(entry);
+  }
+
+  /** Whether the node has no free slot. */
+  isFull(nodeId: string): boolean {
+    const entry = this.nodes.get(nodeId);
+    return !!entry && freeSlotsOf(entry) === 0;
   }
 
   /*
@@ -136,7 +146,7 @@ export class NodeRegistry {
 
   /** Sends NODE_CONTROL to a worker with a pending restart once it has no job. Called on every release. */
   private restartIfIdle(entry: NodeEntry): void {
-    if (entry.restart !== "pending" || entry.currentTaskId !== undefined) return;
+    if (entry.restart !== "pending" || entry.jobs.size > 0) return;
     try {
       this.send(entry.nodeId, "NODE_CONTROL", { action: "restart" });
       entry.restart = "sent";
@@ -171,7 +181,8 @@ export class NodeRegistry {
         nodeId: n.nodeId,
         hardware: n.registration.hardware,
         load: n.heartbeat,
-        busy: n.currentTaskId !== undefined,
+        slots: n.slots,
+        freeSlots: freeSlotsOf(n),
         draining: n.draining === true,
         lastAssignedAt: n.lastAssignedAt,
       });
@@ -186,16 +197,20 @@ export class NodeRegistry {
 
   /** JSON-safe view of one node. */
   view(n: NodeEntry) {
+    const jobs = [...n.jobs];
     return {
       nodeId: n.nodeId,
       connectedAt: new Date(n.connectedAt).toISOString(),
       lastSeenAt: new Date(n.lastSeenAt).toISOString(),
-      currentTaskId: n.currentTaskId ?? null,
+      // Consoles from before slots read only the first job.
+      currentTaskId: jobs[0] ?? null,
+      currentTaskIds: jobs,
+      slots: n.slots,
       heartbeat: n.heartbeat ?? null,
       draining: n.draining === true,
       restart: n.restart ?? null,
       actions: nodeActions(n),
-      ...n.registration,
+      ...publicRegistration(n.registration),
     };
   }
 
@@ -204,6 +219,17 @@ export class NodeRegistry {
     if (!entry) throw new Error(`unknown node ${nodeId}`);
     return entry;
   }
+}
+
+function freeSlotsOf(n: NodeEntry): number {
+  return Math.max(0, n.slots - n.jobs.size);
+}
+
+/** The registration minus what a worker was running when it registered: stale at once (`currentTaskIds` is live). */
+function publicRegistration(registration: Registration) {
+  if (registration.nodeKind !== "worker") return registration;
+  const { running: _running, resume: _resume, ...rest } = registration;
+  return rest;
 }
 
 export type NodeAction = "drain" | "resume" | "restart";

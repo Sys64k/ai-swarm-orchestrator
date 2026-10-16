@@ -32,7 +32,8 @@ function node(
   return {
     nodeId,
     hardware,
-    busy: opts.busy ?? false,
+    slots: 1,
+    freeSlots: opts.busy ? 0 : 1,
     lastAssignedAt: opts.lastAssignedAt,
     load:
       opts.load === undefined

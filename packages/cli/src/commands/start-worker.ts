@@ -9,6 +9,7 @@ export async function startWorkerCommand(opts: {
   hub: string;
   port: number;
   workDir?: string;
+  slots?: number;
   token?: string;
   sandbox: "docker" | "none";
   sandboxImage?: string;

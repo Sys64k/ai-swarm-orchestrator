@@ -138,7 +138,7 @@ export class PlanManager {
       if (plan.state !== "pending") continue;
       const architect = this.registry
         .list()
-        .find((n) => n.nodeKind === "architect" && n.currentTaskId === null);
+        .find((n) => n.nodeKind === "architect" && !this.registry.isFull(n.nodeId));
       if (!architect) return;
       this.registry.assign(architect.nodeId, plan.planId);
       plan.state = "planning";

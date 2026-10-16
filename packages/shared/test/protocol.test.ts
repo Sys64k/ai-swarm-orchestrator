@@ -58,6 +58,13 @@ describe("AgentMessageSchema", () => {
     assert.ok(parseAgentMessage(frame("NODE_REGISTRATION", { nodeKind: "architect", version: "1" })).ok);
   });
 
+  it("accepts job slots and running jobs within bounds", () => {
+    const reg = (extra: object) => frame("NODE_REGISTRATION", { nodeKind: "worker", version: "1", hardware, ...extra });
+    assert.ok(parseAgentMessage(reg({ slots: 4, running: [{ taskId: "a", job: "implement" }, { taskId: "b", job: "test" }] })).ok);
+    for (const slots of [0, 17, 1.5]) issuesOf(reg({ slots }));
+    issuesOf(reg({ running: [{ taskId: "a", job: "deploy" }] }));
+  });
+
   it("still accepts the roles older workers send, but only worker roles", () => {
     assert.ok(parseAgentMessage(frame("NODE_REGISTRATION", { nodeKind: "worker", version: "0.1.0", roles: ["backend", "qa"], hardware })).ok);
     issuesOf(frame("NODE_REGISTRATION", { nodeKind: "worker", version: "1", roles: ["architect"], hardware }));

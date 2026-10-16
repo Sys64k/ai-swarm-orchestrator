@@ -86,6 +86,14 @@ export interface JobRunnerOptions {
   modelTimeoutMs?: number;
   /** Runs every command of a job (agent commands, npm ci, QA). Default: directly on this machine. */
   commands?: CommandRunner;
+  /** Jobs that run at the same time, each in its own checkout. Default 1. */
+  slots?: number;
+}
+
+/** A job the runner holds, reported to the Hub on re-registration so it can be handed back. */
+export interface RunningJob {
+  taskId: TaskId;
+  job: "implement" | "test";
 }
 
 type DependencyResponse = MessageOf<"DEPENDENCY_RESPONSE">["payload"];
@@ -99,39 +107,52 @@ interface PendingDependency {
 const FEEDBACK_OUTPUT_CHARS = 50_000;
 
 /**
- * Runs jobs one at a time, in arrival order. A job that outlives a disconnect keeps running;
- * the Hub decides whether it may resume (see `current`).
+ * Runs up to `slots` jobs at once, each in its own checkout (slot 1 uses `<workDir>/<project>`,
+ * slot N `<workDir>/<project>.N`); more wait in arrival order. A job that outlives a disconnect
+ * keeps running; the Hub decides whether it may resume (see `running`).
  */
 export class JobRunner {
-  private queue: Promise<void> = Promise.resolve();
-  private active: { taskId: TaskId; job: "implement" | "test" } | undefined;
+  private readonly active = new Map<number, RunningJob>();
+  private readonly waiting: Array<{ job: RunningJob; run: (slot: number) => Promise<void> }> = [];
+  private readonly settled = new Set<Promise<void>>();
   private readonly pendingDependencies = new Map<string, PendingDependency>();
   private readonly model: ModelChannel;
+  readonly slots: number;
 
   constructor(private readonly opts: JobRunnerOptions) {
     this.model = new ModelChannel(opts.send, opts.modelTimeoutMs);
+    this.slots = Math.max(1, Math.floor(opts.slots ?? 1));
   }
 
   private get commands(): CommandRunner {
     return this.opts.commands ?? hostRunner;
   }
 
-  /** The job in progress, reported to the Hub on re-registration. */
-  get current() {
-    return this.active;
+  /** Jobs in progress, reported to the Hub on re-registration. */
+  get running(): RunningJob[] {
+    return [...this.active.values()];
   }
 
-  /** This worker's checkout of a project: one per project, reused across that project's jobs. */
-  repoDir(project: string): string {
-    return path.join(this.opts.workDir, project);
+  /** No job runs or waits. */
+  get isIdle(): boolean {
+    return this.active.size === 0 && this.waiting.length === 0;
+  }
+
+  /**
+   * The checkout a slot uses for a project, reused across that slot's jobs (slots count from 0).
+   * A task's next round may run in another slot: every job fetches its `task/<id>` branch from
+   * the Hub first, exactly as when the round goes to another machine.
+   */
+  repoDir(project: string, slot = 0): string {
+    return path.join(this.opts.workDir, slot === 0 ? project : `${project}.${slot + 1}`);
   }
 
   enqueueTask(task: TaskAssignment): void {
-    this.enqueue({ taskId: task.taskId, job: "implement" }, () => this.implement(task));
+    this.enqueue({ taskId: task.taskId, job: "implement" }, (slot) => this.implement(task, slot));
   }
 
   enqueueTest(job: TestExecution): void {
-    this.enqueue({ taskId: job.taskId, job: "test" }, () => this.test(job));
+    this.enqueue({ taskId: job.taskId, job: "test" }, (slot) => this.test(job, slot));
   }
 
   handleDependencyResponse(response: DependencyResponse): void {
@@ -151,26 +172,36 @@ export class JobRunner {
     this.model.resendPending();
   }
 
-  /** Resolves when all queued jobs are done (used by tests and shutdown). */
-  idle(): Promise<void> {
-    return this.queue;
+  /** Resolves when all queued and running jobs are done (used by tests and shutdown). */
+  async idle(): Promise<void> {
+    // A waiting job only waits while every slot runs one, so `settled` is never empty here when jobs wait.
+    while (!this.isIdle) await Promise.all([...this.settled]);
   }
 
-  private enqueue(job: NonNullable<JobRunner["active"]>, fn: () => Promise<void>): void {
-    this.queue = this.queue.then(async () => {
-      this.active = job;
-      try {
-        await fn();
-      } catch (err) {
-        log.error(`job ${job.job} ${job.taskId} crashed`, err);
-      } finally {
-        this.active = undefined;
-      }
-    });
+  private enqueue(job: RunningJob, run: (slot: number) => Promise<void>): void {
+    this.waiting.push({ job, run });
+    this.startWaiting();
   }
 
-  private async openRepo(project: string, role: string): Promise<AgentGitClient> {
-    const git = await AgentGitClient.cloneOrOpen(this.repoDir(project), this.opts.gitUrl(project), {
+  private startWaiting(): void {
+    for (let slot = 0; slot < this.slots && this.waiting.length; slot++) {
+      if (this.active.has(slot)) continue;
+      const { job, run } = this.waiting.shift()!;
+      this.active.set(slot, job);
+      // `done` is read inside its own `finally`, which always runs later, after the assignment.
+      const done: Promise<void> = run(slot)
+        .catch((err: unknown) => log.error(`job ${job.job} ${job.taskId} crashed`, err))
+        .finally(() => {
+          this.active.delete(slot);
+          this.settled.delete(done);
+          this.startWaiting();
+        });
+      this.settled.add(done);
+    }
+  }
+
+  private async openRepo(repoDir: string, project: string, role: string): Promise<AgentGitClient> {
+    const git = await AgentGitClient.cloneOrOpen(repoDir, this.opts.gitUrl(project), {
       author: { name: `ASO ${role} agent (${this.opts.nodeId})`, email: `${this.opts.nodeId}@aso.local` },
       token: this.opts.token,
     });
@@ -178,21 +209,22 @@ export class JobRunner {
     return git;
   }
 
-  private async implement(task: TaskAssignment): Promise<void> {
+  private async implement(task: TaskAssignment, slot: number): Promise<void> {
     const { send } = this.opts;
+    const repoDir = this.repoDir(task.project, slot);
     const status = (state: "in_progress" | "failed", detail?: string) =>
       send("STATUS_UPDATE", { state, taskId: task.taskId, detail: detail?.slice(0, 2000) });
     try {
-      const git = await this.openRepo(task.project, task.role);
+      const git = await this.openRepo(repoDir, task.project, task.role);
       const { resumed } = await git.startTask(task.taskId);
       if (resumed) await git.syncWithMain();
       status("in_progress", task.rework ? `rework round ${task.rework.round}` : undefined);
 
       const result = await this.opts.executor.implement(task, {
-        repoDir: this.repoDir(task.project),
+        repoDir,
         report: (detail) => status("in_progress", detail),
-        requestDependencies: (packages) => this.requestPackageChange(task, git, { type: "add_dependencies", packages }),
-        setPackageScripts: (scripts) => this.requestPackageChange(task, git, { type: "set_scripts", scripts }),
+        requestDependencies: (packages) => this.requestPackageChange(task, git, repoDir, { type: "add_dependencies", packages }),
+        setPackageScripts: (scripts) => this.requestPackageChange(task, git, repoDir, { type: "set_scripts", scripts }),
         callModel: (turn) => this.model.call({ taskId: task.taskId }, turn),
         fileOperation: (op) => send("FILE_OPERATION", { ...op, taskId: task.taskId } as PayloadInput<"FILE_OPERATION">),
         commands: this.commands,
@@ -213,6 +245,7 @@ export class JobRunner {
   private async requestPackageChange(
     task: TaskAssignment,
     git: AgentGitClient,
+    repoDir: string,
     input: PackageChangeInput,
   ): Promise<{ mainCommit: string }> {
     const change = PackageChangeSchema.parse(input);
@@ -246,7 +279,6 @@ export class JobRunner {
 
     await git.syncWithMain();
     // Only a new dependency needs installing; script changes don't touch node_modules.
-    const repoDir = this.repoDir(task.project);
     if (change.type === "add_dependencies" && existsSync(path.join(repoDir, "package-lock.json"))) {
       // Install scripts are code from the registry: they run where agent commands run.
       const result = await this.commands.run(["npm", "ci", "--no-audit", "--no-fund"], {
@@ -263,10 +295,11 @@ export class JobRunner {
   }
 
 
-  private async test(job: TestExecution): Promise<void> {
+  private async test(job: TestExecution, slot: number): Promise<void> {
     const { send } = this.opts;
+    const repoDir = this.repoDir(job.project, slot);
     try {
-      const git = await this.openRepo(job.project, "qa");
+      const git = await this.openRepo(repoDir, job.project, "qa");
       await git.checkoutCommit(job.taskId, job.commit);
     } catch (err) {
       return send("STATUS_UPDATE", { state: "failed", taskId: job.taskId, detail: (err as Error).message.slice(0, 2000) });
@@ -282,7 +315,7 @@ export class JobRunner {
       const label = argv.join(" ");
       let result;
       try {
-        result = await this.commands.run(argv, { cwd: this.repoDir(job.project), env, timeoutMs: Math.max(1000, deadline - Date.now()) });
+        result = await this.commands.run(argv, { cwd: repoDir, env, timeoutMs: Math.max(1000, deadline - Date.now()) });
       } catch (err) {
         // The program could not start at all: a problem with this node, not with the code.
         return send("STATUS_UPDATE", { state: "failed", taskId: job.taskId, detail: `cannot run ${label}: ${(err as Error).message}` });

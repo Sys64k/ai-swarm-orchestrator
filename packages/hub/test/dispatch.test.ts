@@ -157,7 +157,7 @@ describe("node loss", () => {
       assert.equal(record.detachedAt, undefined);
       assert.equal(record.nodeId, "a");
       assert.equal(record.drops, 0);
-      assert.equal(hub.registry.get("a")?.currentTaskId, "long-job");
+      assert.deepEqual([...hub.registry.get("a")!.jobs], ["long-job"]);
 
       back.send(createMessage("STATUS_UPDATE", "a", { state: "failed", taskId: "long-job", detail: "x" }));
       await waitFor(() => hub.tasks.get("long-job")?.state === "failed");
