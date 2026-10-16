@@ -203,7 +203,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     const why =
       p.nodeKind !== "worker" ? undefined : opts.autoUpdate === false ? "automatic updates are off" : registry.requestUpdate(nodeId, current);
     if (p.nodeKind === "worker" && why === undefined) log.info(`${nodeId} runs aso ${p.version}: updating it to ${current} once it is idle`);
-    else log.warn(`${nodeId} runs aso ${p.version}, this Hub serves ${current}: run \`aso update\` on it${why ? ` (${why})` : ""}`);
+    else log.warn(`${nodeId} runs aso ${p.version}, this Hub serves ${current}: run \`aso update\` on it${why ? `; ${why}` : ""}`);
   };
 
   const reject = (conn: Connection, reason: string, issues: string[] = [], refId?: string) => {

@@ -213,6 +213,7 @@ describe("automatic worker updates", () => {
         await waitFor(() => ctx.hub.tasks.get("greet")?.nodeId, 5000, "an outdated worker still gets jobs");
         const v = await view(ctx, "source");
         assert.deepEqual([v.restart, v.updateTo, v.draining], [null, null, false]);
+        assert.match(ctx.hub.registry.requestUpdate("source", HUB)!, /^it cannot update itself: .*predates automatic updates$/);
         for (const w of [current, manual, source]) w.ws.close();
       },
       { dist },
