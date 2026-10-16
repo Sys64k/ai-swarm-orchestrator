@@ -749,7 +749,7 @@ export class TaskManager {
       case "changes_requested":
         task.review.handled.push(outcome.reviewId);
         task.review.rounds++;
-        this.note(task, `${outcome.author} requested changes on pull request #${pr.number}`);
+        this.note(task, `${outcome.author} asked for changes on pull request #${pr.number}`);
         this.sendBack(task, { reason: `Review round ${task.review.rounds}: ${outcome.summary}`, failures: [], output: outcome.details }, "back to an agent");
         break;
       case "conflict":

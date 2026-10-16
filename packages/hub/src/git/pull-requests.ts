@@ -150,20 +150,25 @@ export class PullRequests implements ReviewGate {
 
 /**
  * The review to act on: the newest decisive one (approve or request changes) on the pull
- * request's current commit, if it requests changes and was not handled yet. A review of an
+ * request's current commit, if it asks for changes and was not handled yet. A review of an
  * older commit was answered by the commits since.
+ *
+ * GitHub lets no one request changes on (or approve) their own pull request, and the Hub opens
+ * them with its token's owner, usually the person reviewing. On their own PR the review form
+ * only offers Comment, so a submitted Comment review by the PR's author asks for changes too.
  */
-export function changesRequested(reviews: readonly Review[], pull: Pick<PullState, "headSha">, handled: readonly number[]): Review | undefined {
-  const decisive = reviews.filter((r) => r.commit === pull.headSha && (r.state === "CHANGES_REQUESTED" || r.state === "APPROVED"));
+export function changesRequested(reviews: readonly Review[], pull: Pick<PullState, "headSha" | "author">, handled: readonly number[]): Review | undefined {
+  const asksChanges = (r: Review) => r.state === "CHANGES_REQUESTED" || (r.state === "COMMENTED" && r.author === pull.author);
+  const decisive = reviews.filter((r) => r.commit === pull.headSha && (asksChanges(r) || r.state === "APPROVED"));
   const latest = decisive.reduce<Review | undefined>((a, r) => (!a || r.id > a.id ? r : a), undefined);
-  return latest?.state === "CHANGES_REQUESTED" && !handled.includes(latest.id) ? latest : undefined;
+  return latest && asksChanges(latest) && !handled.includes(latest.id) ? latest : undefined;
 }
 
 /** A review as rework for the agent: a short reason, and everything the reviewer wrote. */
 export function reviewFeedback(review: Review, comments: readonly ReviewComment[]): { summary: string; details: string } {
   const body = review.body.trim();
   const lines = comments.map((c) => `- ${c.path}${c.line ? `:${c.line}` : ""}: ${c.body.trim()}`);
-  const summary = `${review.author} requested changes on GitHub: ${body || "see the comments on the code"}`;
+  const summary = `${review.author} asked for changes on GitHub: ${body || "see the comments on the code"}`;
   const details = [`Review by ${review.author}:`, body || "(no summary)", ...(lines.length ? ["", "Comments on the code:", ...lines] : [])].join("\n");
   return { summary: summary.length > REASON_MAX ? `${summary.slice(0, REASON_MAX - 1)}…` : summary, details: details.slice(0, OUTPUT_MAX) };
 }
@@ -183,7 +188,7 @@ export function pullRequestBody(task: TaskRecord): string {
     `**Task:** \`${s.taskId}\` (${s.role}, ${s.kind})${rounds ? `, after ${rounds}` : ""}; model cost about $${task.llm.costUsd.toFixed(2)}`,
     "",
     "---",
-    "Opened by the ASO Hub. **Merge** to accept it. **Request changes** to send it back to an agent with your review. **Close** to cancel the task.",
+    "Opened by the ASO Hub. **Merge** to accept it. To send it back to an agent, submit a review that **requests changes** (on a pull request you opened yourself, GitHub only offers **Comment**: that works too). **Close** to cancel the task.",
   ].join("\n");
 }
 

@@ -533,11 +533,14 @@ linking to the pull request. Then, on GitHub:
 | You… | The task |
 |---|---|
 | **Merge** the pull request | is merged. The Hub's `main` catches up with GitHub's, and tasks that depend on it start |
-| Submit a review with **Request changes** | goes back to an agent with your review and its comments on the code. Its new commits go through QA and update the same pull request, which waits for you again. These rounds have no limit |
+| Submit a review with **Request changes**, or with **Comment** on a pull request opened as you | goes back to an agent with your review and its comments on the code. Its new commits go through QA and update the same pull request, which waits for you again. These rounds have no limit |
 | **Close** the pull request | is cancelled (and cancelling it in the console closes the pull request) |
 
-A pull request that conflicts with `main` goes back to an agent to rebase, like a merge
-conflict. The Hub checks pull requests every 30 seconds; `aso sync` checks now.
+The Hub opens pull requests as the token's owner, usually you, and GitHub lets no one request
+changes on their own pull request: there the review form offers only **Comment**, so a
+submitted Comment review from you sends the work back too. Comments in the conversation (not
+in a review) don't. A pull request that conflicts with `main` goes back to an agent to rebase,
+like a merge conflict. The Hub checks pull requests every 30 seconds; `aso sync` checks now.
 
 The token needs **Pull requests: read and write** as well as *Contents: read and write*. Set
 `ASO_PULL_REQUESTS=0` to merge on the Hub instead. A project's page in the console says which
