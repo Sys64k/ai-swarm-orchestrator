@@ -680,7 +680,15 @@ lock it shares with dependency installs:
 
 ### Worker side: `AgentGitClient`
 
-Agents cannot run `git`. The worker wraps `simple-git`:
+Agents cannot run `git`. The worker wraps `simple-git`.
+
+**Dependencies.** Agents may not install packages, so before the agent starts, the job runner
+runs `npm ci` when the checkout has a `package-lock.json` that its `node_modules` was not
+installed from (`installDependencies`). A stamp in `node_modules` holds the lockfile's
+SHA-256, so a reused slot reinstalls only after `main` gained dependencies. The same check runs
+after a dependency request. A failed install is reported and the agent may run `npm ci`
+itself. `cloneOrOpen` adds `node_modules/` to the checkout's `.git/info/exclude`, so
+`git add -A` never commits it, whatever the project's `.gitignore` says.
 
 | Method | Behaviour |
 |---|---|

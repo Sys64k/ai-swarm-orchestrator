@@ -1,5 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import {
@@ -103,6 +104,10 @@ interface PendingDependency {
   resolve(response: DependencyResponse): void;
 }
 
+/** Written into node_modules after `npm ci`: the lockfile's hash it was installed from. */
+const INSTALL_STAMP = ".aso-lockfile-sha256";
+const NPM_CI_TIMEOUT_MS = 10 * 60_000;
+
 /** Feedback output budget (schema allows 100k; leave room for the envelope). */
 const FEEDBACK_OUTPUT_CHARS = 50_000;
 
@@ -200,6 +205,25 @@ export class JobRunner {
     }
   }
 
+  /**
+   * `npm ci` when the checkout has a lockfile its node_modules wasn't installed from (a fresh
+   * checkout, or main gained dependencies since this slot last ran). A stamp in node_modules
+   * records the lockfile it came from. Install scripts are code from the registry: they run
+   * where agent commands run.
+   */
+  async installDependencies(repoDir: string): Promise<{ ok: boolean; ran: boolean; output: string }> {
+    const lockfile = await readFile(path.join(repoDir, "package-lock.json")).catch(() => undefined);
+    if (!lockfile) return { ok: true, ran: false, output: "" };
+    const hash = createHash("sha256").update(lockfile).digest("hex");
+    const stamp = path.join(repoDir, "node_modules", INSTALL_STAMP);
+    if ((await readFile(stamp, "utf8").catch(() => "")) === hash) return { ok: true, ran: false, output: "" };
+    const result = await this.commands.run(["npm", "ci", "--no-audit", "--no-fund"], { cwd: repoDir, timeoutMs: NPM_CI_TIMEOUT_MS });
+    if (result.exitCode !== 0) return { ok: false, ran: true, output: result.output };
+    await writeFile(stamp, hash).catch((err: Error) => log.warn(`could not write ${stamp}: ${err.message}`));
+    log.info(`npm ci in ${repoDir} (${(result.durationMs / 1000).toFixed(1)}s)`);
+    return { ok: true, ran: true, output: result.output };
+  }
+
   private async openRepo(repoDir: string, project: string, role: string): Promise<AgentGitClient> {
     const git = await AgentGitClient.cloneOrOpen(repoDir, this.opts.gitUrl(project), {
       author: { name: `ASO ${role} agent (${this.opts.nodeId})`, email: `${this.opts.nodeId}@aso.local` },
@@ -218,6 +242,9 @@ export class JobRunner {
       const git = await this.openRepo(repoDir, task.project, task.role);
       const { resumed } = await git.startTask(task.taskId);
       if (resumed) await git.syncWithMain();
+      // The agent may not install packages itself, so the checkout's dependencies are its to provide.
+      const install = await this.installDependencies(repoDir);
+      if (!install.ok) status("in_progress", `npm ci failed; the agent can retry it: ${install.output.slice(-500)}`);
       status("in_progress", task.rework ? `rework round ${task.rework.round}` : undefined);
 
       const result = await this.opts.executor.implement(task, {
@@ -279,15 +306,9 @@ export class JobRunner {
 
     await git.syncWithMain();
     // Only a new dependency needs installing; script changes don't touch node_modules.
-    if (change.type === "add_dependencies" && existsSync(path.join(repoDir, "package-lock.json"))) {
-      // Install scripts are code from the registry: they run where agent commands run.
-      const result = await this.commands.run(["npm", "ci", "--no-audit", "--no-fund"], {
-        cwd: repoDir,
-        timeoutMs: 10 * 60_000,
-      });
-      if (result.exitCode !== 0) {
-        throw new Error(`npm ci failed after adding ${label}: ${result.output.slice(-2000)}`);
-      }
+    if (change.type === "add_dependencies") {
+      const install = await this.installDependencies(repoDir);
+      if (!install.ok) throw new Error(`npm ci failed after adding ${label}: ${install.output.slice(-2000)}`);
     }
     send("STATUS_UPDATE", { state: "in_progress", taskId: task.taskId, detail: `${label} applied` });
     log.info(`${label} applied (main @ ${response.mainCommit.slice(0, 8)})`);
