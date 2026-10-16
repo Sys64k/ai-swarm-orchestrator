@@ -6,7 +6,7 @@ import { hubAction, usePoll } from "./use-poll.ts";
 import { Terminal } from "./terminal.tsx";
 import { ActionButton, Badge, Banner, LoadingPage, Section, TopBar } from "./ui.tsx";
 import type { Task } from "../lib/types.ts";
-import { formatUsd, isLive, reviewView, taskActions, taskBadge, timeAgo } from "../lib/view.ts";
+import { formatUsd, isLive, reviewLink, reviewView, taskActions, taskBadge, timeAgo } from "../lib/view.ts";
 
 export function TaskPage({ id }: { id: string }) {
   const { data: task, error, refresh } = usePoll<Task>(`tasks/${id}`);
@@ -16,6 +16,8 @@ export function TaskPage({ id }: { id: string }) {
 
   const live = isLive(task.state);
   const can = taskActions(task);
+  const review = reviewView(task);
+  const pr = reviewLink(task);
   const act = (action: "cancel" | "retry") => async () => {
     const err = await hubAction(`tasks/${id}/${action}`);
     refresh();
@@ -40,7 +42,18 @@ export function TaskPage({ id }: { id: string }) {
           </div>
           {task.state === "failed" && task.detail && <Banner tone="bad">{task.detail}</Banner>}
           {task.state === "pending" && task.waitingReason && <p className="muted small">{task.waitingReason}</p>}
+          {review && (
+            <p className="muted small">
+              {review.text}
+              {review.error && <> · last try failed: {review.error}</>}
+            </p>
+          )}
           <div className="actions">
+            {pr && (
+              <a href={pr.url} target="_blank" rel="noreferrer" className={`button ${pr.primary ? "button-primary" : "button-plain"} button-link`}>
+                {pr.label}
+              </a>
+            )}
             {can.retry && <ActionButton label="Retry" run={act("retry")} />}
             {can.cancel && (
               <ActionButton label="Cancel task" variant="danger" confirm="Cancel this task? A worker on it stops at its next step." run={act("cancel")} />
@@ -68,7 +81,6 @@ export function TaskPage({ id }: { id: string }) {
 }
 
 function Details({ task }: { task: Task }) {
-  const review = reviewView(task);
   return (
     <>
       <Section title="Task">
@@ -92,18 +104,6 @@ function Details({ task }: { task: Task }) {
                 <Link href={`/tasks/${d}`}>{d}</Link>
               </span>
             ))}
-          </p>
-        )}
-        {review && (
-          <p className="small">
-            {review.url ? (
-              <a href={review.url} target="_blank" rel="noreferrer">
-                {review.text}
-              </a>
-            ) : (
-              review.text
-            )}
-            {review.error && <span className="muted"> · last try failed: {review.error}</span>}
           </p>
         )}
         {(task.mainCommit ?? task.commit) && (

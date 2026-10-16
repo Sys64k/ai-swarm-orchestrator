@@ -145,6 +145,29 @@ export function reviewView(task: Pick<Task, "state" | "review">): { text: string
   return { text: `Changes requested on pull request #${r.pr.number}; an agent is on it${rounds}`, url: r.pr.url };
 }
 
+/** The task page's button to its pull request: the main action while it waits for review. */
+export function reviewLink(task: Pick<Task, "state" | "review">): { label: string; url: string; primary: boolean } | undefined {
+  const pr = task.review?.pr;
+  if (!pr) return undefined;
+  const waiting = task.state === "awaiting_review";
+  return { label: waiting ? `Review pull request #${pr.number} on GitHub` : `Pull request #${pr.number} on GitHub`, url: pr.url, primary: waiting };
+}
+
+/** Text split into plain parts and web links, so the terminal can make links clickable. */
+export function linkParts(text: string): Array<{ text: string; url?: string }> {
+  const parts: Array<{ text: string; url?: string }> = [];
+  let last = 0;
+  for (const m of text.matchAll(/https?:\/\/[^\s<>"'`)\]]+/g)) {
+    // A sentence's full stop or comma after a link is not part of it.
+    const url = m[0].replace(/[.,;:!?]+$/, "");
+    if (m.index > last) parts.push({ text: text.slice(last, m.index) });
+    parts.push({ text: url, url });
+    last = m.index + url.length;
+  }
+  if (last < text.length) parts.push({ text: text.slice(last) });
+  return parts;
+}
+
 /** Where a project's QA-approved work goes, for its page. */
 export function mergeNote(project: Pick<Project, "pullRequests">): string | undefined {
   const pr = project.pullRequests;

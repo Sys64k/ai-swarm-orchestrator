@@ -20,6 +20,8 @@ import {
   workerViews,
   buildOf,
   mergeNote,
+  linkParts,
+  reviewLink,
   reviewView,
 } from "../lib/view.ts";
 import type { HubNode, Plan, PlannedTask, Project, Task, TranscriptEntry } from "../lib/types.ts";
@@ -72,6 +74,29 @@ describe("pull request reviews", () => {
     assert.deepEqual(view("merged", { pr, rounds: 0 }), { text: "Merged on GitHub as pull request #7", url: pr.url });
     assert.deepEqual(view("cancelled", { pr, rounds: 0 }), { text: "Pull request #7 was closed", url: pr.url });
     assert.equal(view("in_progress", { rounds: 0 }), undefined, "no pull request yet, nothing to say");
+  });
+
+  it("puts the pull request one tap away on the task page", () => {
+    assert.deepEqual(reviewLink(task("t", "awaiting_review", { review: { pr, rounds: 0 } })), { label: "Review pull request #7 on GitHub", url: pr.url, primary: true });
+    assert.deepEqual(reviewLink(task("t", "merged", { review: { pr, rounds: 0 } })), { label: "Pull request #7 on GitHub", url: pr.url, primary: false });
+    assert.equal(reviewLink(task("t", "awaiting_review", { review: { rounds: 0 } })), undefined, "not opened yet");
+    assert.equal(reviewLink(task("t", "in_progress")), undefined);
+  });
+
+  it("makes links in the terminal clickable, without the full stop after them", () => {
+    assert.deepEqual(linkParts("pull request #1 opened for review: https://github.com/me/shop/pull/1."), [
+      { text: "pull request #1 opened for review: " },
+      { text: "https://github.com/me/shop/pull/1", url: "https://github.com/me/shop/pull/1" },
+      { text: "." },
+    ]);
+    assert.deepEqual(linkParts("see (https://a.example/x) and http://b.example"), [
+      { text: "see (" },
+      { text: "https://a.example/x", url: "https://a.example/x" },
+      { text: ") and " },
+      { text: "http://b.example", url: "http://b.example" },
+    ]);
+    assert.deepEqual(linkParts("no links here"), [{ text: "no links here" }]);
+    assert.deepEqual(linkParts(""), []);
   });
 
   it("says where a project's work goes", () => {

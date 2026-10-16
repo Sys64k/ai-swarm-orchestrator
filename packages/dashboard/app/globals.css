@@ -346,6 +346,13 @@ code,
   border-color: var(--border);
 }
 
+/* A link that looks like a button (e.g. to a pull request on GitHub). */
+.button-link {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
 .button-wide {
   width: 100%;
   margin-top: 12px;
