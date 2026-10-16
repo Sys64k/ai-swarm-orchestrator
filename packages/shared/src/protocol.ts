@@ -122,6 +122,15 @@ export type HardwareProfile = z.infer<typeof HardwareProfileSchema>;
 // Payloads
 // ---------------------------------------------------------------------------
 
+/** Upper bound on a worker's parallel jobs. */
+export const MAX_WORKER_SLOTS = 16;
+
+/** Jobs a worker runs at once when it does not say (workers from before slots, and the Architect). */
+export const DEFAULT_SLOTS = 1;
+
+const ResumeClaimSchema = z.strictObject({ taskId: TaskIdSchema, job: z.enum(["implement", "test"]) });
+export type ResumeClaim = z.infer<typeof ResumeClaimSchema>;
+
 /** Service managers that start a worker again after it exits (so the Hub may restart it). */
 export const SupervisorSchema = z.enum(["systemd"]);
 export type Supervisor = z.infer<typeof SupervisorSchema>;
@@ -135,10 +144,12 @@ const NodeRegistrationPayload = z.discriminatedUnion("nodeKind", [
     /** Set when a service manager starts the worker again after it exits, so the Hub can restart it. */
     supervisor: SupervisorSchema.optional(),
     hardware: HardwareProfileSchema,
-    /** Job the worker is still running after a reconnect; lets the Hub hand it back. */
-    resume: z
-      .strictObject({ taskId: TaskIdSchema, job: z.enum(["implement", "test"]) })
-      .optional(),
+    /** Jobs the worker runs at once, each in its own checkout. Absent (older workers): 1. */
+    slots: z.number().int().min(1).max(MAX_WORKER_SLOTS).optional(),
+    /** Jobs the worker is still running after a reconnect; lets the Hub hand them back. */
+    running: z.array(ResumeClaimSchema).max(MAX_WORKER_SLOTS).optional(),
+    /** The single running job, as workers sent it before slots. */
+    resume: ResumeClaimSchema.optional(),
   }),
   z.strictObject({
     nodeKind: z.literal("architect"),
@@ -456,6 +467,12 @@ const ProtocolErrorPayload = z.strictObject({
   reason: z.string(),
   issues: z.array(z.string()).default([]),
 });
+
+/** The jobs a registering worker still runs: `running`, or the single `resume` of older workers. */
+export function runningJobsOf(registration: z.infer<typeof NodeRegistrationPayload>): ResumeClaim[] {
+  if (registration.nodeKind !== "worker") return [];
+  return registration.running ?? (registration.resume ? [registration.resume] : []);
+}
 
 // ---------------------------------------------------------------------------
 // Envelope + discriminated union

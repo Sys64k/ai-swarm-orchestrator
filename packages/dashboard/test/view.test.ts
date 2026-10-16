@@ -199,8 +199,8 @@ describe("formatting", () => {
     const [w, ...rest] = workerViews(nodes);
     assert.equal(rest.length, 0);
     assert.deepEqual(
-      { nodeId: w.nodeId, name: w.name, taskId: w.taskId, detail: w.detail, status: w.status },
-      { nodeId: "avalon-1", name: "avalon", taskId: "api", detail: "12 cores, 32 GiB · CPU 37%", status: { label: "Busy", tone: "active" } },
+      { nodeId: w.nodeId, name: w.name, taskIds: w.taskIds, detail: w.detail, status: w.status },
+      { nodeId: "avalon-1", name: "avalon", taskIds: ["api"], detail: "12 cores, 32 GiB · CPU 37%", status: { label: "Busy", tone: "active" } },
     );
   });
 
@@ -234,6 +234,16 @@ describe("formatting", () => {
     const manual = view({ actions: allow(true, false, false, { restart: "started by hand: run aso service install" }) });
     assert.equal(manual.actions.restart, false);
     assert.match(manual.actions.restartNote!, /aso service install/);
+
+    const slots = (ids: string[], extra: Partial<HubNode> = {}) => view({ slots: 4, currentTaskIds: ids, currentTaskId: ids[0] ?? null, ...extra });
+    assert.deepEqual(
+      [slots([]), slots(["a"]), slots(["a", "b", "c", "d"]), slots(["a", "b"], { draining: true })].map((w) => w.status.label),
+      ["Idle", "1 of 4 jobs", "Busy", "2 of 4 jobs, draining"],
+    );
+    assert.equal(slots(["a", "b"], { draining: true, restart: "pending" }).status.label, "Restart after jobs");
+    assert.match(slots(["a", "b"], { actions: allow(true, false, true) }).actions.restartConfirm, /its 2 current jobs first/);
+    assert.deepEqual(slots(["a", "b"]).taskIds, ["a", "b"]);
+    assert.match(slots([]).detail, /4 job slots/);
 
     const oldHub = view({}).actions;
     assert.deepEqual([oldHub.drain, oldHub.resume, oldHub.restart, oldHub.restartNote], [false, false, false, undefined], "a Hub without actions gets no buttons");

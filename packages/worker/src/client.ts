@@ -17,7 +17,7 @@ import {
   type Supervisor,
   UNKNOWN_VERSION,
 } from "@aso/shared";
-import { profileHardware, sampleLoad } from "./hardware.js";
+import { profileHardware, resolveSlots, sampleLoad } from "./hardware.js";
 import { LlmTaskExecutor } from "./agent/executor.js";
 import { JobRunner, type TaskExecutor } from "./jobs.js";
 import { DockerSandbox, hostRunner, type CommandRunner, type DockerSandboxOptions } from "./sandbox.js";
@@ -48,6 +48,8 @@ export interface WorkerOptions {
   sandboxOptions?: Omit<DockerSandboxOptions, "workDir">;
   /** The aso build this worker runs (`0.1.0+<commit>`), shown on the Hub so outdated workers stand out. */
   version?: string;
+  /** Jobs to run at once, each in its own checkout. Default: `defaultSlots` for this machine. */
+  slots?: number;
   /** The service manager that starts this worker again after it exits; lets the console restart it. */
   supervisor?: Supervisor;
   /** Called when the Hub asks for a restart, once no job runs: stop and exit (the CLI does). */
@@ -84,11 +86,12 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
     throw err;
   }
   const nodeId = opts.nodeId ?? `${profile.hostname}-${randomUUID().slice(0, 8)}`;
+  const slots = resolveSlots(opts.slots, profile, typeof opts.sandbox === "object" ? "custom" : (opts.sandbox ?? "docker"));
   log.info(
     `${profile.hostname}: ${profile.cpu.logicalCores} threads, ` +
       `${(profile.memory.totalBytes / 1024 ** 3).toFixed(1)} GiB RAM, ` +
       `docker ${profile.docker.available ? (profile.docker.version ?? "available") : "unavailable"}, ` +
-      `work dir ${workDir} @ ${profile.storage.writeMBps} MB/s`,
+      `work dir ${workDir} @ ${profile.storage.writeMBps} MB/s, ${slots} job slot${slots === 1 ? "" : "s"}`,
   );
 
   let ws: WebSocket | undefined;
@@ -116,6 +119,7 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
     send,
     token: opts.token,
     commands,
+    slots,
   });
 
   const connect = () => {
@@ -132,7 +136,8 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
             version: opts.version ?? UNKNOWN_VERSION,
             supervisor: opts.supervisor,
             hardware: profile,
-            resume: runner.current,
+            slots,
+            running: runner.running,
           }),
         ),
       );
@@ -213,7 +218,7 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
     if (restartTimer) return;
     const check = () => {
       if (stopped) return;
-      if (runner.current) {
+      if (!runner.isIdle) {
         restartTimer = setTimeout(check, 1000);
         return;
       }

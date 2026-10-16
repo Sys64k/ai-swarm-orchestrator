@@ -9,6 +9,7 @@ import {
   DEFAULT_DASHBOARD_PORT,
   DEFAULT_HUB_PORT,
   DEFAULT_PROJECTS_DIR,
+  MAX_WORKER_SLOTS,
 } from "@aso/shared";
 import type { Effort } from "@aso/hub";
 import { startArchitect } from "@aso/architect";
@@ -31,6 +32,14 @@ function parsePort(value: string): number {
   const n = Number(value);
   if (!Number.isInteger(n) || n < 1 || n > 65535) {
     throw new InvalidArgumentError("must be an integer between 1 and 65535");
+  }
+  return n;
+}
+
+function parseSlots(value: string): number {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1 || n > MAX_WORKER_SLOTS) {
+    throw new InvalidArgumentError(`must be a whole number from 1 to ${MAX_WORKER_SLOTS}`);
   }
   return n;
 }
@@ -87,7 +96,7 @@ program
   .option("--model <id>", "Claude model for agents", process.env.ASO_MODEL || "claude-opus-5-5")
   .option("--effort <level>", `model effort: ${EFFORTS.join(", ")}`, parseEffort, (process.env.ASO_EFFORT as Effort) || "high")
   .option("--task-budget <usd>", "estimated LLM spend cap per task", parseUsd, Number(process.env.ASO_TASK_BUDGET) || 5)
-  .option("--llm-concurrency <n>", "concurrent model requests", parsePort, Number(process.env.ASO_LLM_CONCURRENCY) || 2)
+  .option("--llm-concurrency <n>", "concurrent model requests", parsePort, Number(process.env.ASO_LLM_CONCURRENCY) || 4)
   .action(startHubCommand);
 
 /**
@@ -99,6 +108,7 @@ function workerOptions(cmd: Command): Command {
     .requiredOption("--hub <ip_address>", "Hub address (IP, host:port, or ws:// URL)")
     .option("-p, --port <port>", "Hub port if not given in --hub", parsePort, DEFAULT_HUB_PORT)
     .option("-w, --work-dir <path>", "directory for task checkouts (default: ~/.aso/work)")
+    .option("--slots <n>", "jobs to run at once (default: from cores and RAM, at most 4; 1 with --sandbox none)", parseSlots)
     .option("--token <token>", "ASO token from the Hub (default: ASO_TOKEN or the local token file)")
     .option(
       "--sandbox <mode>",

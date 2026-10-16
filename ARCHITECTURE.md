@@ -135,7 +135,7 @@ flowchart LR
 | `@aso/hub` | `dependencies.ts` | `DependencyManager` (ownership, allowlist, limits, dedup) and `npmInstaller` |
 | | `push/notifier.ts`, `push/web-push.ts` | `Notifier` (subscriptions, `notableChanges`) and Web Push delivery (RFC 8291 encryption, VAPID) with `node:crypto` |
 | | `server.ts` | HTTP API, WebSocket validation pipeline, Git route, liveness and reclaim sweep |
-| | `registry.ts` | `NodeRegistry`: connected nodes, heartbeats, busy state |
+| | `registry.ts` | `NodeRegistry`: connected nodes, heartbeats, the jobs each runs (up to its slots), drain/restart |
 | | `routing.ts` | `selectNode()`: a pure, deterministic routing function |
 | | `tasks.ts` | `TaskManager`: queue, dispatch, verification, QA, rework, merge, node-loss handling |
 | | `git/http-backend.ts` | Git smart-HTTP via a `git http-backend` CGI bridge, with the push policy |
@@ -147,8 +147,8 @@ flowchart LR
 | | `projects.ts` | `ProjectSet`: finds and creates projects; each has its own repo, tasks, plans, dependencies, push sync, state and transcripts. Hub-wide dispatch and lookup by task/plan id |
 | | `state-store.ts` | `StateStore`: saves tasks and plans (per project, `.git/aso/`) and conversations (Hub-wide) and loads them on start |
 | `@aso/architect` | `client.ts`, `planner.ts` | Architect node: registers, plans each `PLAN_REQUEST` with read-only tools via the Hub, submits `PLAN_RESULT`. Run by the CLI's hidden `aso architect` command in tmux |
-| `@aso/worker` | `client.ts` | Connect, register (with resume claim), heartbeat, offline outbox, dispatch jobs |
-| | `jobs.ts` | `JobRunner`: implementation jobs (via a `TaskExecutor`, with `requestDependencies` / `callModel`) and QA runs |
+| `@aso/worker` | `client.ts` | Connect, register (slots, running jobs as resume claims), heartbeat, offline outbox, dispatch jobs |
+| | `jobs.ts` | `JobRunner`: up to `slots` jobs at once, each in its own checkout; implementation jobs (via a `TaskExecutor`, with `requestDependencies` / `callModel`) and QA runs |
 | | `agent/executor.ts` | `LlmTaskExecutor`: the agent loop (model turn via Hub → run tools → repeat until `finish`) |
 | | `agent/tools.ts` | `AgentTools`: executes the model's tool calls inside the checkout |
 | | `run-command.ts` | Shell-free command runner with process-group timeout |
@@ -183,7 +183,7 @@ keys are rejected.
 
 | Type | Direction | Phase | Purpose |
 |---|---|---|---|
-| `NODE_REGISTRATION` | node → hub | 1 | First message. Workers send their hardware profile and an optional `resume` claim (the job they are still running after a reconnect) |
+| `NODE_REGISTRATION` | node → hub | 1 | First message. Workers send their hardware profile, `slots` (jobs at once; absent means 1) and `running`, the jobs they are still running after a reconnect (older workers send one `resume` claim instead) |
 | `REGISTRATION_ACK` | hub → node | 1 | Registration accepted |
 | `NODE_HEARTBEAT` | node → hub | 2 | Every 15 s: free RAM, CPU load, Docker availability |
 | `TASK_ASSIGNMENT` | hub → node | 2 | A `TaskSpec` with its `project` (the worker checks out `/git/<project>.git`), plus `rework` (round, reason, failures, test output) when the task comes back |
@@ -381,7 +381,7 @@ flowchart TD
   AV -- yes --> DROP["drop the implementer"]
   AV -- no --> N
   DROP --> N["Normalise each metric against<br/>the best eligible node (0..1)"]
-  N --> S["score = w_mem·mem + w_io·io + w_cpu·cpu"]
+  N --> S["score = free share of slots ×<br/>(w_mem·mem + w_io·io + w_cpu·cpu)"]
   S --> SORT["Sort by score;<br/>ties within 0.01 → longest idle first"]
   SORT --> PICK["Assign to top node,<br/>record score and reasons"]
   X2 & X3 & X4 --> W{"any eligible?"}
@@ -450,8 +450,16 @@ stateDiagram-v2
   (`waitingReason: waiting for … to be merged`). If a dependency fails, its dependants stay
   pending as `blocked`. Dependants branch from `main`, so they start with the dependencies'
   code.
-- **One task per node.** The node is marked busy at assignment and released when its part
-  ends: implementation completed or failed, or QA verdict reported.
+- **Job slots.** A worker registers with `slots` (`--slots`, or `defaultSlots`: one per 2
+  threads and 6 GiB, at most 4, 1 without the Docker sandbox). The registry keeps the set of
+  jobs each node runs; a job is added at assignment and removed when its part ends
+  (implementation completed or failed, or QA verdict reported). A node is busy once the set
+  fills its slots, and the router scales each node's score by its free share of slots, so
+  work spreads across machines before doubling up. On the worker, `JobRunner` gives each job a
+  slot and a checkout of its own (`<workDir>/<project>` for slot 1, `<project>.N` after it; dots
+  never appear in project names), so the sandbox mounts only that job's checkout. A worker
+  that reconnects reports all its `running` jobs and gets each one back. The Architect has one
+  slot.
 - **Ownership.** Status updates and verdicts are accepted only from the node that currently
   owns that stage of the task.
 - **History.** Every task keeps an event history (last 50 entries), shown by

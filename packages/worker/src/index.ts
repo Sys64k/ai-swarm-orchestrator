@@ -1,5 +1,5 @@
 export { DEFAULT_WORK_DIR, startWorker, type WorkerOptions, type WorkerHandle } from "./client.js";
-export { profileHardware, sampleLoad, type LoadMetrics } from "./hardware.js";
+export { defaultSlots, resolveSlots, profileHardware, sampleLoad, type LoadMetrics } from "./hardware.js";
 export {
   AgentGitClient,
   AgentGitError,
@@ -15,6 +15,7 @@ export {
   type DependencyRequest,
   type ModelReply,
   type ModelTurn,
+  type RunningJob,
   type ExecutionContext,
   type TaskAssignment,
   type TaskExecutor,

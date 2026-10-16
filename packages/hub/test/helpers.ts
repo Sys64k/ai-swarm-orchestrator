@@ -157,6 +157,8 @@ export async function worker(
     mbps?: number;
     resume?: { taskId: string; job: "implement" | "test" };
     supervisor?: "systemd";
+    slots?: number;
+    running?: Array<{ taskId: string; job: "implement" | "test" }>;
   } = {},
 ) {
   const c = await connect(port);
@@ -167,6 +169,8 @@ export async function worker(
       hardware: hardware(opts),
       resume: opts.resume,
       supervisor: opts.supervisor,
+      slots: opts.slots,
+      running: opts.running,
     }),
   );
   const ack = await c.next();

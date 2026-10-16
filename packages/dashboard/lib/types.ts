@@ -91,6 +91,10 @@ export interface HubNode {
   hardware?: { hostname: string; cpu: { logicalCores: number }; memory: { totalBytes: number } };
   heartbeat: { memoryAvailableBytes: number; cpuLoadPercent: number } | null;
   currentTaskId: string | null;
+  /** Every job it runs (Hubs from before job slots send only `currentTaskId`). */
+  currentTaskIds?: string[];
+  /** Jobs it runs at once. */
+  slots?: number;
   lastSeenAt: string;
   /** Takes no new jobs (set from the console). */
   draining?: boolean;

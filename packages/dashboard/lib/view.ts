@@ -148,7 +148,8 @@ function planFinished(plan: Plan, tasks: readonly Task[]): boolean {
 export interface WorkerView {
   nodeId: string;
   name: string;
-  taskId: string | null;
+  /** Tasks it is working on now (one per busy slot). */
+  taskIds: string[];
   detail: string;
   outdated: boolean;
   status: { label: string; tone: Tone };
@@ -176,34 +177,50 @@ export function workerView(n: HubNode): WorkerView {
   const cpu = n.heartbeat ? `CPU ${Math.round(n.heartbeat.cpuLoadPercent)}%` : undefined;
   const build = n.version ? `build ${buildOf(n.version)}` : undefined;
   const name = n.hardware?.hostname ?? n.nodeId;
+  const taskIds = runningTasks(n);
+  const slots = n.slots ?? 1;
   return {
     nodeId: n.nodeId,
     name,
-    taskId: n.currentTaskId,
-    detail: [size, cpu, build].filter(Boolean).join(" · "),
+    taskIds,
+    detail: [size, slots > 1 ? `${slots} job slots` : undefined, cpu, build].filter(Boolean).join(" · "),
     outdated: n.outdated === true,
-    status: workerStatus(n),
-    actions: workerActions(n, name),
+    status: workerStatus(n, taskIds.length, slots),
+    actions: workerActions(n, name, taskIds.length),
   };
 }
 
-function workerStatus(n: HubNode): { label: string; tone: Tone } {
+function runningTasks(n: HubNode): string[] {
+  return n.currentTaskIds ?? (n.currentTaskId !== null ? [n.currentTaskId] : []);
+}
+
+const jobs = (n: number) => (n === 1 ? "job" : "jobs");
+
+function workerStatus(n: HubNode, running: number, slots: number): { label: string; tone: Tone } {
   if (n.restart === "sent") return { label: "Restarting", tone: "active" };
-  if (n.restart === "pending") return { label: "Restart after job", tone: "waiting" };
-  if (n.currentTaskId !== null) return { label: n.draining ? "Busy, draining" : "Busy", tone: "active" };
+  if (n.restart === "pending") return { label: `Restart after ${jobs(running)}`, tone: "waiting" };
+  if (running > 0) {
+    const busy = running < slots ? `${running} of ${slots} jobs` : "Busy";
+    return { label: n.draining ? `${busy}, draining` : busy, tone: "active" };
+  }
   if (n.draining) return { label: "Drained", tone: "waiting" };
   if (n.outdated) return { label: "Update", tone: "waiting" };
   return { label: "Idle", tone: "muted" };
 }
 
-function workerActions(n: HubNode, name: string): WorkerActions {
+function restartWhen(running: number): string {
+  if (running === 0) return "It restarts now.";
+  return `It finishes its ${running === 1 ? "" : `${running} `}current ${jobs(running)} first and takes no new ones meanwhile.`;
+}
+
+function workerActions(n: HubNode, name: string, running: number): WorkerActions {
   const allowed = n.actions;
   return {
     drain: allowed?.drain === true,
     resume: allowed?.resume === true,
     restart: allowed?.restart === true,
     resumeLabel: n.restart === "pending" ? "Cancel restart" : "Resume",
-    restartConfirm: `Restart ${name}? ${n.currentTaskId !== null ? "It finishes its current job first and takes no new ones meanwhile." : "It restarts now."}`,
+    restartConfirm: `Restart ${name}? ${restartWhen(running)}`,
     restartNote: allowed?.why.restart,
   };
 }

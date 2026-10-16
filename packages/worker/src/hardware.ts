@@ -3,10 +3,36 @@ import { mkdir, open, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import si from "systeminformation";
-import type { HardwareProfile } from "@aso/shared";
+import { MAX_WORKER_SLOTS, type HardwareProfile } from "@aso/shared";
 
 const BENCH_BYTES = 64 * 1024 * 1024;
 const BENCH_CHUNK = 4 * 1024 * 1024;
+
+const GiB = 1024 ** 3;
+/** What one job needs: an agent's npm installs and builds, or a headless browser for e2e tests. */
+const THREADS_PER_SLOT = 2;
+const RAM_PER_SLOT = 6 * GiB;
+/** The default stays modest; `--slots` goes up to MAX_WORKER_SLOTS. */
+const DEFAULT_MAX_SLOTS = 4;
+
+export type SandboxKind = "docker" | "none" | "custom";
+
+/**
+ * How many jobs a worker runs at once unless told otherwise: one per THREADS_PER_SLOT and
+ * RAM_PER_SLOT, at most DEFAULT_MAX_SLOTS. Without the Docker sandbox, jobs share this
+ * machine's ports and processes, so they run one at a time.
+ */
+export function defaultSlots(hardware: Pick<HardwareProfile, "cpu" | "memory">, sandbox: SandboxKind): number {
+  if (sandbox === "none") return 1;
+  const fit = Math.min(Math.floor(hardware.cpu.logicalCores / THREADS_PER_SLOT), Math.floor(hardware.memory.totalBytes / RAM_PER_SLOT));
+  return Math.max(1, Math.min(DEFAULT_MAX_SLOTS, fit));
+}
+
+/** The slots a worker uses: what was asked for (clamped to 1..MAX_WORKER_SLOTS), else `defaultSlots`. */
+export function resolveSlots(requested: number | undefined, hardware: Pick<HardwareProfile, "cpu" | "memory">, sandbox: SandboxKind): number {
+  if (requested === undefined) return defaultSlots(hardware, sandbox);
+  return Math.max(1, Math.min(MAX_WORKER_SLOTS, Math.floor(requested)));
+}
 
 /** Collect the hardware profile the Hub uses for capability-based task routing. */
 export async function profileHardware(workDir: string): Promise<HardwareProfile> {

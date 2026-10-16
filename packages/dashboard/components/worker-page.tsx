@@ -42,11 +42,11 @@ export function WorkerPage({ id }: { id: string }) {
           <Badge {...w.status} />
           <div className="chips">
             <span className="chip">{w.nodeId}</span>
-            {w.taskId && (
-              <Link href={`/tasks/${w.taskId}`} className="chip chip-link">
-                on {w.taskId}
+            {w.taskIds.map((taskId) => (
+              <Link key={taskId} href={`/tasks/${taskId}`} className="chip chip-link">
+                on {taskId}
               </Link>
-            )}
+            ))}
           </div>
           <p className="muted small">{w.detail}</p>
           {w.outdated && <Banner tone="waiting">This worker runs an older aso than the Hub: run aso update on it.</Banner>}

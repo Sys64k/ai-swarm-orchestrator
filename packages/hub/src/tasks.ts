@@ -573,15 +573,15 @@ export class TaskManager {
     this.kick();
   }
 
-  /** A node (re)registered. Give back a held job it is still running; requeue ones it lost. */
-  nodeRegistered(nodeId: string, resume?: { taskId: string; job: "implement" | "test" }): void {
+  /** A node (re)registered. Give back held jobs it is still running; requeue ones it lost. */
+  nodeRegistered(nodeId: string, running: ReadonlyArray<{ taskId: string; job: "implement" | "test" }>): void {
     for (const task of this.tasks.values()) {
       if (task.detachedAt === undefined) continue;
       const owner = task.state === "testing" ? task.qaNodeId : task.nodeId;
       if (owner !== nodeId) continue;
 
       const job = task.state === "testing" ? "test" : "implement";
-      if (resume?.taskId === task.spec.taskId && resume.job === job) {
+      if (running.some((r) => r.taskId === task.spec.taskId && r.job === job)) {
         task.detachedAt = undefined;
         this.registry.assign(nodeId, task.spec.taskId);
         this.note(task, `${nodeId} reconnected and resumed`);
