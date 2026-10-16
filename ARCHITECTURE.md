@@ -392,7 +392,7 @@ flowchart TD
   AV -- no --> N
   DROP --> N["Normalise each metric against<br/>the best eligible node (0..1)"]
   N --> S["score = free share of slots ×<br/>(w_mem·mem + w_io·io + w_cpu·cpu)"]
-  S --> SORT["Sort by score;<br/>ties within 0.01 → longest idle first"]
+  S --> SORT["Sort by jobs running (fewest first),<br/>then score; ties within 0.01 → longest idle first"]
   SORT --> PICK["Assign to top node,<br/>record score and reasons"]
   X2 & X3 & X4 --> W{"any eligible?"}
   W -- "none" --> PEND["Task stays pending,<br/>waitingReason lists every rejection"]
@@ -403,6 +403,14 @@ The metrics are:
 - **Memory:** free RAM from the latest heartbeat, falling back to the registration value.
 - **I/O:** the measured disk write speed.
 - **CPU:** effective cores, calculated as logical cores × (1 − CPU load).
+
+**Fewest jobs first.** The sort puts the number of jobs a node runs ahead of its score, so a
+job goes to an idle machine over a stronger busy one. Parallel tasks then run on parallel
+machines: agents mostly wait for the model, and builds and tests on one machine compete for
+its CPU. The score still decides among equally busy nodes, and the reasons name the busier
+nodes passed over ("over avalon-…, which is busier"). This came from the first real run, where
+a 12-core worker with a job running outscored an idle 8-core one, so one machine implemented
+every task.
 
 ### Policies
 

@@ -3,8 +3,10 @@ import type { HardwareProfile, TaskKind, WorkerRole } from "@aso/shared";
 const GiB = 1024 ** 3;
 
 /**
- * Hard constraints filter nodes out; weights rank the rest. Each weighted metric is
- * normalised against the best eligible node, so scores are relative to the current fleet.
+ * Hard constraints filter nodes out. The rest are ranked by how many jobs they already run
+ * (fewest first, so work spreads over the fleet's machines), then by the weights. Each
+ * weighted metric is normalised against the best eligible node, so scores are relative to the
+ * current fleet.
  */
 export interface RoutingPolicy {
   requiresDocker?: boolean;
@@ -97,11 +99,12 @@ export function selectNode(
   const norm = (v: number, m: number) => (m > 0 ? v / m : 0);
   const { weights } = policy;
 
-  const ranking: Array<RankedNode & { lastAssignedAt: number; node: NodeSnapshot }> = eligible
+  const ranking: Array<RankedNode & { running: number; lastAssignedAt: number; node: NodeSnapshot }> = eligible
     .map(({ node, metrics }) => ({
       nodeId: node.nodeId,
       node,
       metrics,
+      running: runningJobs(node),
       lastAssignedAt: node.lastAssignedAt ?? 0,
       // A node already running jobs shares its machine with them: scale by its free share of slots.
       score: round(
@@ -111,12 +114,19 @@ export function selectNode(
             weights.cpu * norm(metrics.effectiveCores, max.cpu)),
       ),
     }))
-    // Highest score wins; near-ties go to the node that has waited longest for work.
+    // The machine running the fewest jobs wins, so parallel work runs on parallel machines:
+    // agents mostly wait for the model, and builds and tests on one machine compete for it.
+    // Among those, the highest score; near-ties go to the node that has waited longest.
     .sort((a, b) =>
-      Math.abs(a.score - b.score) > 0.01 ? b.score - a.score : a.lastAssignedAt - b.lastAssignedAt,
+      a.running !== b.running
+        ? a.running - b.running
+        : Math.abs(a.score - b.score) > 0.01
+          ? b.score - a.score
+          : a.lastAssignedAt - b.lastAssignedAt,
     );
 
   const best = ranking[0];
+  const busier = ranking.filter((r) => r.running > best.running);
   return {
     ok: true,
     nodeId: best.nodeId,
@@ -124,10 +134,16 @@ export function selectNode(
     reasons: [
       ...explain(request, policy, best.metrics, eligible.length),
       ...(best.node.slots > 1 ? [`${best.node.freeSlots} of ${best.node.slots} job slots free`] : []),
+      ...(busier.length ? [`over ${busier.map((r) => r.nodeId).join(", ")}, which ${busier.length === 1 ? "is" : "are"} busier`] : []),
       ...(avoided ? [`not ${request.avoid}, which wrote the code`] : request.avoid === best.nodeId ? ["no other node free, so the node that wrote the code"] : []),
     ],
-    ranking: ranking.map(({ lastAssignedAt: _, node: __, ...r }) => r),
+    ranking: ranking.map(({ lastAssignedAt: _, node: __, running: ___, ...r }) => r),
   };
+}
+
+/** Jobs the node runs now. */
+function runningJobs(node: NodeSnapshot): number {
+  return Math.max(0, node.slots - node.freeSlots);
 }
 
 /** Share of the node's slots that is free (1 for a free one-slot node). */

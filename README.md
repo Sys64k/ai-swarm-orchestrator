@@ -788,9 +788,14 @@ task's **kind** decides *where* it runs best:
 | `container_build` | running Docker daemon | balanced |
 
 **Several jobs per machine.** A worker runs as many jobs at once as it has slots (see
-`--slots`), so one big machine works through independent tasks in parallel. The Hub fills
-slots by score, scaled by each worker's share of free slots, so work spreads across machines
-before doubling up. Model calls from all jobs share the Hub's `--llm-concurrency` limit.
+`--slots`), so one big machine works through independent tasks in parallel.
+
+**Work spreads over the machines first.** A job goes to the eligible machine running the
+fewest jobs, so two tasks at once run on two machines when there are two, however different
+their hardware. Only among equally busy machines do the kind's preferences pick the strongest.
+Agents spend most of their time waiting for the model, so a stronger machine barely speeds them
+up, while builds and tests on one machine compete for it. Model calls from all jobs share the
+Hub's `--llm-concurrency` limit.
 
 **QA runs on another machine** than the one that wrote the code, if another worker is free, so
 the tests start from a fresh checkout and setup. With a single worker, or when every other
