@@ -761,11 +761,14 @@ Answers can gain fields over time: clients should ignore fields they don't know.
 | Architect | Planning and task delegation. Writes no code | Nothing (read-only tools + `submit_plan`) |
 | `backend` | Data models, database, API routes (Prisma + PostgreSQL, Hono) | Anything except `package.json`/lockfiles |
 | `frontend` | UI pages, components, styling (Next.js App Router, Tailwind, shadcn/ui) | Anything except `package.json`/lockfiles |
-| `qa` | Tests only, never feature code (Vitest, Playwright) | Test files and test config (`**/*.test.*`, `**/*.spec.*`, `**/test/**`, `**/e2e/**`, `vitest/playwright/jest` config, …) |
+| `qa` | Tests only, never feature code (Vitest, Playwright) | Test files, fixtures and test config (`**/*.test.*`, `**/*.spec.*`, `**/test/**`, `**/e2e/**`, `**/fixtures/**`, `**/__fixtures__/**`, `vitest/playwright/jest` config, …) |
 | `devops` | Containers and CI (Docker, GitHub Actions) | `Dockerfile`s, compose files, `.github/**`, `infra/**`, `deploy/**`, `scripts/**`, `Makefile`, … |
 
 **Where the scopes are enforced:**
 
+- **The Architect's plan.** Its instructions list every role's scope, generated from the same
+  patterns, and tell it to give each task a role that may change every file it needs, or to
+  split the task.
 - **Worker tools.** A QA agent's attempt to edit `src/app.ts` is refused with an explanation.
 - **Hub, before QA.** A task branch that touches files outside its role's scope goes back for
   rework.

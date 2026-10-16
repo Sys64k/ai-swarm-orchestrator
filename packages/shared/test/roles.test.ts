@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { ROLE_POLICIES, globToRegExp, orderPlan, writeDenial, type PlannedTask } from "@aso/shared";
+import { DEVOPS_WRITABLE, QA_WRITABLE, ROLE_POLICIES, describeWritable, globToRegExp, orderPlan, writeDenial, type PlannedTask } from "@aso/shared";
 
 describe("globs", () => {
   it("matches ** across directories and * within a segment", () => {
@@ -41,6 +41,21 @@ describe("role policies", () => {
       assert.ok(ROLE_POLICIES[role].tools.includes("finish"));
       assert.ok(!ROLE_POLICIES[role].tools.includes("submit_plan") && !ROLE_POLICIES[role].tools.includes("ask_questions"));
     }
+  });
+});
+
+describe("role scopes in words", () => {
+  it("lets QA keep fixtures in __fixtures__, as many projects do, but not feature code", () => {
+    // From the aso-ui run: a QA task was refused this file.
+    assert.equal(writeDenial("qa", "src/lib/scene/__fixtures__/snapshots.ts"), undefined);
+    assert.ok(writeDenial("qa", "src/lib/scene/buildScene.ts"));
+  });
+
+  it("describes each role's scope from the patterns that are enforced", () => {
+    assert.match(describeWritable("backend"), /^any file except package\.json and lockfiles/);
+    assert.equal(describeWritable("architect"), "nothing (read-only)");
+    assert.equal(describeWritable("qa"), `only files matching ${QA_WRITABLE.join(", ")}`);
+    assert.equal(describeWritable("devops"), `only files matching ${DEVOPS_WRITABLE.join(", ")}`);
   });
 });
 
