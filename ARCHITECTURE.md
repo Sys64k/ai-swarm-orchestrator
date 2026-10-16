@@ -354,6 +354,9 @@ distributions `/tmp` is tmpfs and would report RAM speed.
 QA runs use the same router with `role: "qa"` and the configured QA kind (default
 `unit_test`). The role never filters nodes: the Architect assigns roles to tasks, and any worker
 runs any role. (Workers built before this sent the roles they accepted; the Hub ignores them.)
+QA passes `avoid: <implementer>`: the implementer is dropped from the eligible nodes when any
+other node is eligible, and gets the run only when it is the sole eligible node, so QA never
+waits for independence.
 
 ```mermaid
 flowchart TD
@@ -366,7 +369,10 @@ flowchart TD
   R3 -- no --> R4{"total RAM ≥<br/>policy minimum?"}
   R4 -- no --> X4["rejected: RAM below minimum"]
   R4 -- yes --> OK["eligible"]
-  OK --> N["Normalise each metric against<br/>the best eligible node (0..1)"]
+  OK --> AV{"QA: other eligible node<br/>than the implementer?"}
+  AV -- yes --> DROP["drop the implementer"]
+  AV -- no --> N
+  DROP --> N["Normalise each metric against<br/>the best eligible node (0..1)"]
   N --> S["score = w_mem·mem + w_io·io + w_cpu·cpu"]
   S --> SORT["Sort by score;<br/>ties within 0.01 → longest idle first"]
   SORT --> PICK["Assign to top node,<br/>record score and reasons"]

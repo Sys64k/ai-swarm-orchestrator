@@ -26,6 +26,11 @@ export const DEFAULT_ROUTING_POLICIES: RoutingPolicies = {
 export interface RoutingRequest {
   role: WorkerRole;
   kind: TaskKind;
+  /**
+   * A node to keep off this job while another one is eligible, e.g. QA avoids the node that wrote
+   * the code. It still gets the job when it is the only eligible node.
+   */
+  avoid?: string;
 }
 
 /** What the router needs to know about a worker. */
@@ -66,6 +71,10 @@ export function selectNode(
     else eligible.push({ node, metrics });
   }
 
+  const others = request.avoid ? eligible.filter((e) => e.node.nodeId !== request.avoid) : eligible;
+  const avoided = others.length > 0 && others.length < eligible.length;
+  if (avoided) eligible.splice(0, eligible.length, ...others);
+
   if (eligible.length === 0) {
     return {
       ok: false,
@@ -105,7 +114,10 @@ export function selectNode(
     ok: true,
     nodeId: best.nodeId,
     score: best.score,
-    reasons: explain(request, policy, best.metrics, eligible.length),
+    reasons: [
+      ...explain(request, policy, best.metrics, eligible.length),
+      ...(avoided ? [`not ${request.avoid}, which wrote the code`] : request.avoid === best.nodeId ? ["no other node free, so the node that wrote the code"] : []),
+    ],
     ranking: ranking.map(({ lastAssignedAt: _, ...r }) => r),
   };
 }

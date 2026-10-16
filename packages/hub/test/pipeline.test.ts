@@ -145,6 +145,17 @@ describe("QA pipeline (fake nodes)", () => {
       { qa: { enabled: false } },
     ));
 
+  it("runs QA on another node than the one that wrote the code, if one is free", () =>
+    withHub(async (ctx) => {
+      const dev = await worker(ctx.port, "dev", { ramGiB: 64 });
+      const qa = await worker(ctx.port, "qa", { ramGiB: 4 });
+      await postTask(ctx.port, task("independent"));
+      const { commit } = await implement(ctx, dev, "dev", { "i.txt": "i\n" });
+      assert.equal(expectType(await qa.next(), "TEST_EXECUTION").payload.commit, commit);
+      assert.equal(ctx.hub.tasks.get("independent")?.qaNodeId, "qa");
+      for (const c of [dev, qa]) c.ws.close();
+    }));
+
   it("retries QA on another node when the QA node cannot run tests", () =>
     withHub(async (ctx) => {
       const dev = await worker(ctx.port, "dev");

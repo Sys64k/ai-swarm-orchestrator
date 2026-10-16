@@ -88,6 +88,24 @@ describe("selectNode", () => {
     assert.deepEqual(none.rejected, [{ nodeId: "busy", reason: "busy" }]);
   });
 
+  it("keeps a job off the avoided node while another node is free", () => {
+    const nodes = [node("writer", { cores: 32 }), node("other", { cores: 4 })];
+    const d = selectNode({ role: "qa", kind: "unit_test", avoid: "writer" }, nodes);
+    assert.equal(chosen(d), "other", "even though the writer scores higher");
+    assert.ok(d.ok && d.reasons.includes("not writer, which wrote the code"));
+    assert.ok(d.ok && d.ranking.every((r) => r.nodeId !== "writer"));
+  });
+
+  it("falls back to the avoided node when no other node can take the job", () => {
+    for (const nodes of [[node("writer")], [node("writer"), node("busy", { busy: true })]]) {
+      const d = selectNode({ role: "qa", kind: "unit_test", avoid: "writer" }, nodes);
+      assert.equal(chosen(d), "writer");
+      assert.ok(d.ok && d.reasons.includes("no other node free, so the node that wrote the code"));
+    }
+    const none = selectNode({ role: "qa", kind: "unit_test", avoid: "writer" }, [node("writer", { busy: true })]);
+    assert.ok(!none.ok);
+  });
+
   it("discounts CPU cores by current load", () => {
     const nodes = [node("loaded", { cores: 16, load: 90 }), node("quiet", { cores: 8, load: 0 })];
     assert.equal(chosen(selectNode({ role: "backend", kind: "feature" }, nodes)), "quiet");

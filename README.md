@@ -662,6 +662,10 @@ task's **kind** decides *where* it runs best:
 | `db_migration` | — | fastest disk writes (80%) |
 | `container_build` | running Docker daemon | balanced |
 
+**QA runs on another machine** than the one that wrote the code, if another worker is free, so
+the tests start from a fresh checkout and setup. With a single worker, or when every other
+worker is busy, the writer runs QA itself rather than waiting.
+
 For the scoring formula, see [ARCHITECTURE.md](ARCHITECTURE.md#6-hardware-aware-routing).
 
 ## Configuration
