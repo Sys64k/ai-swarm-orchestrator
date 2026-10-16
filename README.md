@@ -183,6 +183,10 @@ aso service uninstall
   runs at boot without you logging in and keeps running after you log out. If your system
   needs root for that, it prints the `sudo` command to run once.
 - **To change options,** run `aso service install` again with the new ones.
+- **One worker per work directory.** A worker locks its work directory (`worker.lock`), so a
+  second `aso start-worker` on the same machine refuses to start while the service runs, and
+  says which pid holds it. Stop the other one, or give the second worker its own `--work-dir`.
+  A lock left by a crashed worker, or from before a reboot, is taken over automatically.
 
 ### Updating
 
