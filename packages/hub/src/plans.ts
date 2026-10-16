@@ -4,12 +4,14 @@ import {
   createLogger,
   MAX_PLAN_REPLIES,
   MAX_PLAN_REPLY_LENGTH,
+  MAX_REQUIREMENT_LENGTH,
   orderPlan,
   replyMode,
   type PlanDialogueEntry,
   type LlmUsage,
   type MessageOf,
   type PlannedTask,
+  type PlanState,
 } from "@aso/shared";
 import type { NodeRegistry } from "./registry.js";
 import type { AgentTurn, TaskManager } from "./tasks.js";
@@ -25,7 +27,7 @@ const log = createLogger("plans");
  * again with the whole conversation.
  * planning → failed (Architect error) · planning → pending (Architect lost)
  */
-export type PlanState = "pending" | "planning" | "awaiting_input" | "proposed" | "approved" | "rejected" | "failed";
+export type { PlanState } from "@aso/shared";
 
 /** 0 for the first planning run, then one more per reply. */
 export function planRound(plan: Pick<PlanRecord, "dialogue">): number {
@@ -113,7 +115,7 @@ export class PlanManager {
 
   create(requirement: unknown): PlanRecord {
     if (typeof requirement !== "string" || !requirement.trim()) throw new PlanError("requirement must be a non-empty string", "invalid");
-    if (requirement.length > 50_000) throw new PlanError("requirement is too long (max 50000 characters)", "invalid");
+    if (requirement.length > MAX_REQUIREMENT_LENGTH) throw new PlanError(`requirement is too long (max ${MAX_REQUIREMENT_LENGTH} characters)`, "invalid");
     const now = new Date().toISOString();
     const plan: PlanRecord = {
       planId: `plan-${randomBytes(4).toString("hex")}`,
