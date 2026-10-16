@@ -344,7 +344,8 @@ keeps itself alive by sending `STATUS_UPDATE {state: "idle"}` every 15 s.
 |---|---|---|
 | Logical cores, total RAM, disks, OS | `systeminformation` at boot | Registration |
 | Disk write MB/s | 64 MiB sequential write + `fsync` in the worker's work dir | Registration |
-| Free RAM, CPU load %, Docker daemon reachable | `systeminformation` | Every heartbeat (15 s) |
+| Free RAM, CPU load % | `systeminformation` | Every heartbeat (15 s) |
+| Docker daemon reachable (and its version) | `docker version`, so it follows the Docker context and `DOCKER_HOST` like the sandbox (rootless Docker and Docker Desktop are not on `/var/run/docker.sock`) | Registration and every heartbeat |
 
 Before anything else the worker takes `<workDir>/worker.lock` (`lockWorkDir` in
 `packages/worker/src/work-dir-lock.ts`): its pid, boot id and a token, created with `O_EXCL`.
