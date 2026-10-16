@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdir, open, rm } from "node:fs/promises";
+import { mkdir, open, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -40,26 +40,51 @@ export function resolveSlots(requested: number | undefined, hardware: Pick<Hardw
 
 /** Collect the hardware profile the Hub uses for capability-based task routing. */
 export async function profileHardware(workDir: string): Promise<HardwareProfile> {
-  const [cpu, mem, osInfo, disks, docker, writeMBps] = await Promise.all([
+  // Before the scan, not beside it: systeminformation runs some commands synchronously, and
+  // while they block the event loop the probe's timeout fires late and discards Docker's answer.
+  const docker = await probeDocker();
+  if ("error" in docker) log.warn(`Docker is not available: ${docker.error}`);
+  const [cpu, mem, distro, disks, writeMBps] = await Promise.all([
     si.cpu(),
     si.mem(),
-    si.osInfo(),
+    distroName(),
     si.diskLayout().catch(() => []),
-    probeDocker(),
     measureWriteMBps(workDir),
   ]);
-  if ("error" in docker) log.warn(`Docker is not available: ${docker.error}`);
 
   return {
     hostname: os.hostname(),
-    platform: osInfo.platform,
-    distro: `${osInfo.distro} ${osInfo.release}`.trim(),
+    platform: os.platform(),
+    distro,
     cpu: { brand: cpu.brand, physicalCores: cpu.physicalCores, logicalCores: cpu.cores },
     memory: { totalBytes: mem.total, availableBytes: mem.available },
     disks: disks.map((d) => ({ name: d.name, type: d.type, sizeBytes: d.size })),
     docker: "version" in docker ? { available: true, version: docker.version } : { available: false },
     storage: { workDir, writeMBps },
   };
+}
+
+/**
+ * The OS name and version, such as "Ubuntu 26.04.1 LTS", from os-release on Linux. Not
+ * systeminformation's osInfo(): it runs `hostname -f` synchronously, which blocks the worker
+ * for minutes on a machine whose own name does not resolve.
+ */
+export async function distroName(files = ["/etc/os-release", "/usr/lib/os-release"]): Promise<string> {
+  for (const file of files) {
+    const text = await readFile(file, "utf8").catch(() => undefined);
+    if (text !== undefined) return osReleaseName(text) || `${os.type()} ${os.release()}`;
+  }
+  return `${os.type()} ${os.release()}`;
+}
+
+/** PRETTY_NAME from os-release, else NAME and VERSION_ID; empty when it has neither. */
+export function osReleaseName(text: string): string {
+  const fields = new Map<string, string>();
+  for (const line of text.split("\n")) {
+    const m = /^([A-Z_]+)=(.*)$/.exec(line.trim());
+    if (m) fields.set(m[1], m[2].replace(/^(["'])(.*)\1$/, "$2"));
+  }
+  return fields.get("PRETTY_NAME") || [fields.get("NAME"), fields.get("VERSION_ID")].filter(Boolean).join(" ");
 }
 
 export interface LoadMetrics {
