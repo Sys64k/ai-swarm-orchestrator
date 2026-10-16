@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, describe, it } from "node:test";
-import { dockerFailure, dockerServerVersion, probeDocker } from "@aso/worker";
+import { distroName, dockerFailure, dockerServerVersion, osReleaseName, probeDocker, profileHardware } from "@aso/worker";
 
 const dir = mkdtempSync(path.join(os.tmpdir(), "aso-docker-"));
 after(() => rmSync(dir, { recursive: true, force: true }));
@@ -52,5 +52,41 @@ describe("Docker detection", () => {
       expected = undefined;
     }
     assert.equal(await dockerServerVersion(), expected);
+  });
+});
+
+describe("hardware profile", () => {
+  it("names the OS from os-release", async () => {
+    assert.equal(osReleaseName('NAME="Ubuntu"\nVERSION_ID="26.04"\nPRETTY_NAME="Ubuntu 26.04.1 LTS"\n'), "Ubuntu 26.04.1 LTS");
+    assert.equal(osReleaseName("NAME='Pop!_OS'\nVERSION_ID=24.04\n"), "Pop!_OS 24.04", "no PRETTY_NAME");
+    assert.equal(osReleaseName("# comment\nID=alpine\n"), "");
+
+    const file = path.join(dir, "os-release");
+    writeFileSync(file, 'PRETTY_NAME="Linux Mint 22.2"\n');
+    assert.equal(await distroName([path.join(dir, "absent"), file]), "Linux Mint 22.2", "the first file that exists");
+    assert.equal(await distroName([path.join(dir, "absent")]), `${os.type()} ${os.release()}`, "no os-release");
+    writeFileSync(file, "ID=x\n");
+    assert.equal(await distroName([file]), `${os.type()} ${os.release()}`, "os-release without a name");
+  });
+
+  it("does not wait on a slow `hostname -f`, and still finds Docker", async () => {
+    // avalon's own name took 130 s to resolve; the scan used to run `hostname -f` synchronously,
+    // which also made the Docker probe beside it time out.
+    const bin = path.join(dir, "slow-bin");
+    mkdirSync(bin);
+    writeFileSync(path.join(bin, "hostname"), "#!/bin/sh\nsleep 20\n");
+    chmodSync(path.join(bin, "hostname"), 0o755);
+    const savedPath = process.env.PATH;
+    process.env.PATH = `${bin}:${savedPath}`;
+    try {
+      const started = Date.now();
+      const profile = await profileHardware(path.join(dir, "work"));
+      assert.ok(Date.now() - started < 10_000, `scan took ${Date.now() - started} ms`);
+      assert.equal(profile.docker.version, await dockerServerVersion());
+      assert.equal(profile.platform, os.platform());
+      assert.ok(profile.distro);
+    } finally {
+      process.env.PATH = savedPath;
+    }
   });
 });
