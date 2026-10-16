@@ -23,7 +23,7 @@ const RULES: ReadonlyArray<{ method: "GET" | "POST"; pattern: RegExp }> = [
   { method: "POST", pattern: /^plans$/ },
   { method: "GET", pattern: new RegExp(`^plans/${ID}$`) },
   { method: "GET", pattern: new RegExp(`^plans/${ID}/transcript$`) },
-  { method: "POST", pattern: new RegExp(`^plans/${ID}/(approve|reject)$`) },
+  { method: "POST", pattern: new RegExp(`^plans/${ID}/(approve|reject|reply)$`) },
 ];
 
 /** A readable message for a failed response: the API's `error` field, or the status. */

@@ -433,6 +433,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
         merged: count(["merged"]),
       },
       plansAwaitingApproval: p.plans.list().filter((pl) => pl.state === "proposed").length,
+      plansWithQuestions: p.plans.list().filter((pl) => pl.state === "awaiting_input").length,
     };
   };
   app.get("/api/projects", (c) => c.json(projects.list().map(projectView)));
@@ -499,6 +500,10 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   };
   app.post("/api/plans/:id/approve", (c) => planAction(c, (p, id) => p.plans.approve(id)));
   app.post("/api/plans/:id/reject", (c) => planAction(c, (p, id) => p.plans.reject(id)));
+  app.post("/api/plans/:id/reply", async (c) => {
+    const message = (await body(c))?.message;
+    return planAction(c, (p, id) => p.plans.reply(id, message));
+  });
 
   app.get("/api/tasks", (c) => c.json(inProject(c, tasks.list())));
 

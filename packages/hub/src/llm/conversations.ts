@@ -191,7 +191,7 @@ export class ConversationManager {
       id,
       role,
       budgetUsd: this.planBudgetUsd,
-      spentUsd: () => this.plans.get(id)?.llm.costUsd ?? 0,
+      spentUsd: () => this.plans.spentSinceReply(id),
       firstPrompt: () => planPrompt(this.plans.get(id)!),
       active: () => this.plans.isPlanning(nodeId, id),
       recordUsage: (u) => this.plans.recordLlmUsage(id, u),

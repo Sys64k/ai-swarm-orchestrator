@@ -1,4 +1,4 @@
-import { DEVOPS_WRITABLE, QA_WRITABLE, type WorkerRole } from "@aso/shared";
+import { DEVOPS_WRITABLE, lastReplyAsksForChanges, QA_WRITABLE, type PlannedTask, type WorkerRole } from "@aso/shared";
 import type { PlanRecord } from "../plans.js";
 import type { TaskRecord } from "../tasks.js";
 
@@ -50,11 +50,40 @@ How to plan:
 - Each task runs QA (the project's test command) before it is merged, so tasks should leave the test suite passing.
 - Agents cannot edit package.json directly; they request dependencies and npm scripts through the Hub themselves. Mention needed packages and scripts in the description. If the project has no package.json or no "test" script yet, make the first task set one up (QA runs \`npm test\` on every task).
 
-When the plan is ready, call submit_plan with a summary of the approach and the tasks. A human reviews it before any work starts.`;
+When the plan is ready, call submit_plan with a summary of the approach and the tasks. A human reviews it before any work starts: they approve it, or reply asking for changes.
+
+Asking instead of guessing:
+- If the requirement leaves open something that would change the plan substantially (what the feature should do, who uses it, what data it keeps, which of several reasonable approaches to take), call ask_questions with a few short, specific questions instead of submitting a plan. Explore the project first so you only ask what the code can't tell you.
+- Don't ask about details you can reasonably decide yourself; decide them and state the assumption in the plan summary. Never ask and submit in the same turn.
+- The human's answers and change requests come back in the requirement message under "Conversation so far"; they take precedence over the original requirement. When asked for changes, revise your previous plan rather than starting over.`;
 }
 
 export function planPrompt(plan: PlanRecord): string {
-  return `# Requirement (${plan.planId})\n\n${plan.requirement}`;
+  const parts = [`# Requirement (${plan.planId})`, "", plan.requirement];
+  if (plan.dialogue?.length) {
+    parts.push("", "# Conversation so far");
+    for (const d of plan.dialogue) {
+      if (d.kind === "questions") {
+        parts.push("", "## You asked", ...(d.context ? [d.context, ""] : []), ...d.questions.map((q, i) => `${i + 1}. ${q}`));
+      } else if (d.kind === "proposal") {
+        parts.push("", "## You proposed", d.summary, "", ...d.tasks.map(describePlannedTask));
+      } else {
+        parts.push("", "## The human replied", d.text);
+      }
+    }
+    parts.push(
+      "",
+      lastReplyAsksForChanges(plan.dialogue)
+        ? "Revise your proposed plan according to the human's reply, then submit it (or ask if the reply leaves something important open)."
+        : "Plan with these answers. Ask again only if something important is still open.",
+    );
+  }
+  return parts.join("\n");
+}
+
+function describePlannedTask(t: PlannedTask): string {
+  const deps = t.dependsOn.length ? ` (after ${t.dependsOn.join(", ")})` : "";
+  return [`- ${t.key} [${t.role}, ${t.kind}]${deps}: ${t.title}`, `  ${t.description.replace(/\n/g, "\n  ")}`, ...t.acceptanceCriteria.map((c) => `  - accept: ${c}`)].join("\n");
 }
 
 /**

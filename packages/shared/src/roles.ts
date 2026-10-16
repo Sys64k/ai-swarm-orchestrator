@@ -66,7 +66,7 @@ export const DEVOPS_WRITABLE = [
  * paths, because project layouts vary too much for a fixed rule.
  */
 export const ROLE_POLICIES: Record<AgentRole, RolePolicy> = {
-  architect: { tools: [...EXPLORE, "submit_plan"], writable: "none" },
+  architect: { tools: [...EXPLORE, "submit_plan", "ask_questions"], writable: "none" },
   backend: { tools: BUILD, writable: "any" },
   frontend: { tools: BUILD, writable: "any" },
   qa: { tools: BUILD, writable: QA_WRITABLE },

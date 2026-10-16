@@ -54,7 +54,7 @@ export function startArchitect(opts: ArchitectOptions): ArchitectHandle {
   let retryTimer: NodeJS.Timeout | undefined;
   let keepalive: NodeJS.Timeout | undefined;
   const outbox: string[] = [];
-  /** Plans already answered: a requeued duplicate request after a reconnect is answered again, not re-planned. */
+  /** Plan rounds already answered: a requeued duplicate request after a reconnect is answered again, not re-planned. */
   const answered = new Map<string, PayloadInput<"PLAN_RESULT">>();
   let queue: Promise<void> = Promise.resolve();
 
@@ -91,11 +91,12 @@ export function startArchitect(opts: ArchitectOptions): ArchitectHandle {
           keepalive = setInterval(() => send("STATUS_UPDATE", { state: "idle" }), HEARTBEAT_INTERVAL_MS);
           break;
         case "PLAN_REQUEST": {
-          const { planId, project } = msg.payload;
-          log.info(`planning ${planId} for ${project}`);
+          const { planId, project, round = 0 } = msg.payload;
+          const key = `${planId}#${round}`;
+          log.info(`planning ${planId} for ${project}${round ? ` (round ${round + 1})` : ""}`);
           queue = queue.then(async () => {
-            const result = answered.get(planId) ?? (await planner.plan(planId, project));
-            answered.set(planId, result);
+            const result = answered.get(key) ?? (await planner.plan(planId, project));
+            answered.set(key, result);
             send("PLAN_RESULT", result);
           });
           break;

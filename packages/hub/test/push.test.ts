@@ -146,6 +146,13 @@ describe("notableChanges", () => {
     ]);
   });
 
+  it("tells you when the Architect has questions", () => {
+    const seen = new Map([["plan:p", "planning"]]);
+    assert.deepEqual(notableChanges(seen, { id: "shop", tasks: [], plans: [plan("p", "awaiting_input", { questions: ["Which DB?", "Who sees it?"] })] }), [
+      { title: "shop: the Architect has questions", body: "Build p\nWhich DB?", url: "/plans/p", tag: "plan-p" },
+    ]);
+  });
+
   it("keeps notification text short", () => {
     const seen = new Map([["task:t", "in_progress"]]);
     const [n] = notableChanges(seen, { id: "shop", tasks: [task("t", "failed", { detail: "x".repeat(5000) })], plans: [] });

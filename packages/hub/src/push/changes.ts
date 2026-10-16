@@ -37,6 +37,7 @@ export function notableChanges(seen: Map<string, string>, project: ProjectState)
 function planNotification(project: string, plan: PlanRecord): PushNotification | undefined {
   const what = firstLine(plan.requirement);
   if (plan.state === "proposed") return notification(project, "plan ready for approval", [what, `${plural(plan.tasks?.length ?? 0, "task")} proposed`], "plan", plan.planId);
+  if (plan.state === "awaiting_input") return notification(project, "the Architect has questions", [what, plan.questions?.[0]], "plan", plan.planId);
   if (plan.state === "failed") return notification(project, "planning failed", [what, plan.error], "plan", plan.planId);
   return undefined;
 }

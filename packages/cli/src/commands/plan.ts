@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
-import { authorizationHeader, resolveHubUrl, resolveToken } from "@aso/shared";
+import { authorizationHeader, resolveHubUrl, resolveToken, type PlanDialogueEntry } from "@aso/shared";
 
 interface PlanView {
   planId: string;
@@ -10,6 +10,8 @@ interface PlanView {
   error?: string;
   tasks?: Array<{ key: string; role: string; kind: string; title: string; dependsOn: string[]; acceptanceCriteria: string[] }>;
   taskIds?: Record<string, string>;
+  questions?: string[];
+  dialogue?: PlanDialogueEntry[];
   llm: { calls: number; costUsd: number };
   agentLog: Array<{ turn: number; actions: string[] }>;
 }
@@ -43,34 +45,78 @@ export async function planCommand(words: string[], opts: { hub: string; file?: s
 
   let plan = await api<PlanView>(base, "/api/plans", { method: "POST", body: JSON.stringify({ requirement, project: opts.project }) });
   console.log(`${plan.planId} (${plan.project}): waiting for the Architect...`);
-  let shown = 0;
+  const interactive = process.stdin.isTTY && !opts.yes;
+  const shown = { turns: 0 };
+  // Each reply (answers, or changes to a proposal) is another planning round.
+  for (;;) {
+    plan = await waitForArchitect(base, plan, shown);
+    if (plan.state === "awaiting_input") {
+      printQuestions(plan);
+      if (!interactive) {
+        console.log(`\nAnswer with: aso plan-reply ${plan.planId} "..."    (or in the console)    Reject with: aso plan-reject ${plan.planId}`);
+        return;
+      }
+      const answer = await ask("\nYour answers (empty line rejects the plan): ");
+      if (!answer) return rejectPlanCommand(plan.planId, opts);
+      plan = await reply(base, plan.planId, answer);
+      continue;
+    }
+    if (plan.state !== "proposed") throw new Error(`plan ${plan.state}${plan.error ? `: ${plan.error}` : ""}`);
+    printPlan(plan);
+    if (opts.yes) return approvePlanCommand(plan.planId, opts);
+    if (!interactive) {
+      console.log(`\nApprove with: aso plan-approve ${plan.planId}    Ask for changes: aso plan-reply ${plan.planId} "..."    Reject with: aso plan-reject ${plan.planId}`);
+      return;
+    }
+    const answer = await ask(`\nApprove and start these ${plan.tasks!.length} task(s)? [y/N, or type what to change] `);
+    const decision = approvalAnswer(answer);
+    if (decision === "approve") return approvePlanCommand(plan.planId, opts);
+    if (decision === "reject") return rejectPlanCommand(plan.planId, opts);
+    plan = await reply(base, plan.planId, answer.trim());
+  }
+}
+
+/** What the person typed at the approval prompt: y/yes approves, n/no/empty rejects, anything else asks for changes. */
+export function approvalAnswer(answer: string): "approve" | "reject" | "changes" {
+  const a = answer.trim();
+  if (/^y(es)?$/i.test(a)) return "approve";
+  if (!a || /^no?$/i.test(a)) return "reject";
+  return "changes";
+}
+
+async function ask(prompt: string): Promise<string> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return (await rl.question(prompt)).trim();
+  } finally {
+    rl.close();
+  }
+}
+
+async function reply(base: string, planId: string, message: string): Promise<PlanView> {
+  const plan = await api<PlanView>(base, `/api/plans/${planId}/reply`, { method: "POST", body: JSON.stringify({ message }) });
+  console.log(`${planId}: sent; the Architect is planning again...`);
+  return plan;
+}
+
+/** Poll until the Architect has answered (proposed, questions, failed...), printing its turns. */
+async function waitForArchitect(base: string, plan: PlanView, shown: { turns: number }): Promise<PlanView> {
   const deadline = Date.now() + 30 * 60_000;
   while (plan.state === "pending" || plan.state === "planning") {
     if (Date.now() > deadline) throw new Error(`still ${plan.state} after 30 minutes; check the Architect (tmux attach -t aso-architect)`);
     await new Promise((r) => setTimeout(r, 2000));
     plan = await api<PlanView>(base, `/api/plans/${plan.planId}`);
-    for (const t of plan.agentLog.slice(shown)) console.log(`  turn ${t.turn}: ${t.actions.join(", ")}`);
-    shown = plan.agentLog.length;
+    for (const t of plan.agentLog.slice(shown.turns)) console.log(`  turn ${t.turn}: ${t.actions.join(", ")}`);
+    shown.turns = plan.agentLog.length;
   }
+  return plan;
+}
 
-  if (plan.state !== "proposed") {
-    throw new Error(`plan ${plan.state}${plan.error ? `: ${plan.error}` : ""}`);
-  }
-  printPlan(plan);
-
-  let approve = opts.yes;
-  if (!approve) {
-    if (!process.stdin.isTTY) {
-      console.log(`\nApprove with: aso plan-approve ${plan.planId}    Reject with: aso plan-reject ${plan.planId}`);
-      return;
-    }
-    const rl = createInterface({ input: process.stdin, output: process.stdout });
-    const answer = await rl.question(`\nApprove and start these ${plan.tasks!.length} task(s)? [y/N] `);
-    rl.close();
-    approve = /^y(es)?$/i.test(answer.trim());
-  }
-  if (approve) await approvePlanCommand(plan.planId, opts);
-  else await rejectPlanCommand(plan.planId, opts);
+export async function replyPlanCommand(planId: string, words: string[], opts: { hub: string }): Promise<void> {
+  const message = words.join(" ").trim();
+  if (!message) throw new Error('give your answer or the changes you want as text: aso plan-reply <planId> "..."');
+  await reply(apiBase(opts.hub), planId, message);
+  console.log(`follow it in the console, or: aso plan-approve ${planId} once it is proposed again`);
 }
 
 export async function approvePlanCommand(planId: string, opts: { hub: string }): Promise<void> {
@@ -82,6 +128,13 @@ export async function approvePlanCommand(planId: string, opts: { hub: string }):
 export async function rejectPlanCommand(planId: string, opts: { hub: string }): Promise<void> {
   await api<PlanView>(apiBase(opts.hub), `/api/plans/${planId}/reject`, { method: "POST" });
   console.log(`rejected ${planId}; no tasks were created`);
+}
+
+function printQuestions(plan: PlanView): void {
+  const last = plan.dialogue?.at(-1);
+  const context = last?.kind === "questions" ? last.context : undefined;
+  console.log(`\nThe Architect has questions${context ? ` (${context})` : ""}:`);
+  for (const [i, q] of (plan.questions ?? []).entries()) console.log(`  ${i + 1}. ${q}`);
 }
 
 function printPlan(plan: PlanView): void {

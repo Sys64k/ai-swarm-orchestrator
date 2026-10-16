@@ -193,12 +193,21 @@ aso plan --file requirements.md        # longer requirements
    through the Hub.
 2. **Proposal.** It proposes tasks with roles, acceptance criteria and dependencies, and
    `aso plan` streams its progress and shows the plan.
-3. **Approval.** Answer `y` to create the tasks. Use `aso plan-approve <planId>` /
-   `aso plan-reject <planId>` from scripts, or `--yes` to skip the question.
-4. **Ordering.** A task waits until every task it depends on is merged into `main`.
+3. **Questions.** When the requirement leaves open something that changes the plan (what
+   the feature should do, which data it keeps, which approach), the Architect asks up to five
+   questions instead of guessing. Answer them in the console or at the `aso plan` prompt.
+   It then plans again with your answers.
+4. **Approval or changes.** Answer `y` to create the tasks, or type what should change ("use
+   SQLite, and split the UI into its own task"). The Architect revises its plan and proposes
+   again. Use `aso plan-approve` / `aso plan-reply` / `aso plan-reject <planId>` from scripts,
+   or `--yes` to approve without asking.
+5. **Ordering.** A task waits until every task it depends on is merged into `main`.
    Independent tasks run in parallel on different workers.
 
-Planning a typical requirement costs cents (capped at $1 per plan); the plan shows its cost.
+Each reply starts a new planning round. The Architect re-reads the project, with the whole
+conversation (its questions, your answers, earlier proposals and your requested changes) in
+its prompt. A plan takes at most 10 replies. Planning a typical requirement costs cents
+(capped at $1 per round); the plan shows its total cost.
 The tasks themselves are capped by `--task-budget` each.
 
 ### Submitting a task directly
@@ -284,7 +293,7 @@ the same account. The console works from anywhere at `https://<machine>.<tailnet
 ## Notifications on your phone
 
 The Hub can notify your phone when:
-- a plan is ready for your approval,
+- a plan is ready for your approval, or the Architect has questions,
 - a task fails, or planning fails,
 - all of a plan's tasks are merged (or a task submitted on its own is merged).
 
@@ -497,9 +506,17 @@ Architect's turns, prints the proposed tasks and asks for approval.
 |---|---|
 | `-f, --file <path>` | Read the requirement from a file |
 | `--hub <address>` | Hub address (default `127.0.0.1`, or `ASO_HUB`) |
-| `-y, --yes` | Approve without asking |
+| `-y, --yes` | Approve without asking (it still stops at questions) |
 
-`aso plan-approve <planId>` and `aso plan-reject <planId>` decide on a proposed plan later.
+At the approval prompt, `y` approves, `n` or Enter rejects, and anything else is sent as
+changes for the Architect to plan again. When the Architect asks questions, `aso plan`
+prints them and reads your answers (an empty answer rejects the plan).
+
+- `aso plan-approve <planId>` approves a proposed plan.
+- `aso plan-reply <planId> <message...>` answers questions or asks for changes.
+- `aso plan-reject <planId>` rejects a plan.
+
+Without a terminal (scripts), `aso plan` prints these commands and exits.
 
 The Architect runs in the `aso-architect` tmux session that `start-hub` starts. Plans wait
 while no Architect is connected.
@@ -572,7 +589,8 @@ Options:
 | `POST` | `/api/sign-in-codes`, `/api/sign-in-codes/redeem` | Create a one-time console sign-in code (10 minutes, single use) / use one up. The console redeems codes server-side |
 | `POST` | `/api/plans` | Start a plan: `{ "requirement": "..." }` → `201` with `planId` |
 | `GET` | `/api/plans`, `/api/plans/:id` | Plans with state, summary, proposed tasks, cost |
-| `POST` | `/api/plans/:id/approve` / `reject` | Decide on a proposed plan; approve returns the created task ids |
+| `POST` | `/api/plans/:id/approve` / `reject` | Decide on a proposed plan; approve returns the created task ids. Plans with questions can be rejected too |
+| `POST` | `/api/plans/:id/reply` | `{ "message" }`: answer the Architect's questions (`awaiting_input`) or ask for changes to a `proposed` plan; it is planned again. `409` in other states or after 10 replies |
 | `POST` | `/api/tasks` | Submit a task: `role`, `title`, `description`, optional `kind`, `taskId`, `acceptanceCriteria`, `files`, `dependsOn` (existing task ids). Returns `201`, `400` (validation) or `409` (duplicate id) |
 | `GET` (WS) | `/ws` | Agent WebSocket endpoint (see [protocol](ARCHITECTURE.md#4-communication-protocol)) |
 | Git | `/git/<project>.git` | Clone and fetch a project. Pushes are limited to creating or updating `task/<id>` branches |

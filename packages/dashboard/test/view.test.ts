@@ -9,6 +9,9 @@ import {
   previewBody,
   projectNameProblem,
   projectSummary,
+  planBadge,
+  planThread,
+  replyMode,
   taskActions,
   taskBadge,
   terminalLines,
@@ -16,7 +19,7 @@ import {
   workerViews,
   buildOf,
 } from "../lib/view.ts";
-import type { HubNode, Plan, Project, Task, TranscriptEntry } from "../lib/types.ts";
+import type { HubNode, Plan, PlannedTask, Project, Task, TranscriptEntry } from "../lib/types.ts";
 
 const task = (id: string, state: Task["state"], extra: Partial<Task> = {}): Task => ({
   project: "shop",
@@ -230,5 +233,39 @@ describe("projects", () => {
       text: "1 to approve · 1 failed · 1 running · 2 queued",
       needsYou: true,
     });
+  });
+});
+
+describe("plan conversation", () => {
+  const proposal: PlannedTask = { key: "api", role: "backend", kind: "feature", title: "API", description: "d", acceptanceCriteria: [], dependsOn: [] };
+  const dialogue: NonNullable<Plan["dialogue"]> = [
+    { kind: "questions", at: "2026-10-14T10:01:00.000Z", questions: ["Which DB?"], context: "Empty repo" },
+    { kind: "reply", at: "2026-10-14T10:02:00.000Z", text: "SQLite" },
+    { kind: "proposal", at: "2026-10-14T10:03:00.000Z", summary: "One task", tasks: [proposal] },
+    { kind: "reply", at: "2026-10-14T10:04:00.000Z", text: "Split it" },
+  ];
+
+  it("shows the requirement, then the conversation in order", () => {
+    const items = planThread(plan("p", "planning", { dialogue }));
+    assert.deepEqual(items.map((i) => `${i.who}:${i.kind}`), ["you:requirement", "architect:questions", "you:reply", "architect:earlier-proposal", "you:reply"]);
+    assert.deepEqual(items[1], { who: "architect", kind: "questions", questions: ["Which DB?"], context: "Empty repo", at: "2026-10-14T10:01:00.000Z" });
+    assert.equal(planThread(plan("p", "pending")).length, 1, "a new plan is just its requirement");
+  });
+
+  it("offers answering questions or asking for changes, until the reply limit", () => {
+    assert.equal(replyMode(plan("p", "awaiting_input")), "answer");
+    assert.equal(replyMode(plan("p", "proposed")), "changes");
+    for (const s of ["pending", "planning", "approved", "rejected", "failed"] as const) assert.equal(replyMode(plan("p", s)), undefined, s);
+    const ten = Array.from({ length: 10 }, (_, i) => ({ kind: "reply" as const, at: "", text: `r${i}` }));
+    assert.equal(replyMode(plan("p", "proposed", { dialogue: ten })), undefined, "the Hub refuses an 11th reply");
+  });
+
+  it("puts questions under Needs you and on the project", () => {
+    assert.deepEqual(planBadge({ state: "awaiting_input" }), { label: "Has questions", tone: "waiting" });
+    const view = homeView([], [plan("q", "awaiting_input")]);
+    assert.deepEqual(view.attention.map((a) => [a.reason, a.badge.label]), [["The Architect has questions", "Answer?"]]);
+    const project: Project = { id: "blog", dir: "/x", tasks: { total: 0, running: 0, queued: 0, failed: 0, merged: 0 }, plansAwaitingApproval: 0, plansWithQuestions: 1 };
+    assert.deepEqual(projectSummary(project), { text: "1 with questions", needsYou: true });
+    assert.deepEqual(projectSummary({ ...project, plansWithQuestions: undefined }), { text: "No tasks yet", needsYou: false }, "older Hubs");
   });
 });

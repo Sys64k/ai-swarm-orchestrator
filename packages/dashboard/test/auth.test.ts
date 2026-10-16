@@ -53,6 +53,8 @@ describe("console sign-in", () => {
 describe("Hub proxy allowlist", () => {
   it("allows the console's reads and actions", () => {
     assert.equal(hubPath("GET", ["tasks"]), "/api/tasks");
+    assert.equal(hubPath("POST", ["plans", "plan-1a2b", "reply"]), "/api/plans/plan-1a2b/reply");
+    assert.equal(hubPath("GET", ["plans", "plan-1a2b", "reply"]), undefined);
     assert.equal(hubPath("GET", ["tasks", "api-1", "transcript"]), "/api/tasks/api-1/transcript");
     assert.equal(hubPath("POST", ["tasks", "api-1", "retry"]), "/api/tasks/api-1/retry");
     assert.equal(hubPath("POST", ["tasks", "api-1", "cancel"]), "/api/tasks/api-1/cancel");
