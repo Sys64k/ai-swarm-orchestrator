@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { hubGet } from "./hub-client.ts";
-import { previewBody, terminalLines, type TerminalLine } from "../lib/view.ts";
+import { linkParts, previewBody, terminalLines, type TerminalLine } from "../lib/view.ts";
 import type { TranscriptEntry, TranscriptPage } from "../lib/types.ts";
 
 /** Lines of output shown before "show more". */
@@ -85,7 +85,17 @@ function Line({ line }: { line: TerminalLine }) {
   const body = previewBody(line.body, open, BODY_PREVIEW_LINES);
   return (
     <div className={`tline tline-${line.style}`}>
-      <div className="tline-text">{line.text}</div>
+      <div className="tline-text">
+        {linkParts(line.text).map((part, i) =>
+          part.url ? (
+            <a key={i} href={part.url} target="_blank" rel="noreferrer">
+              {part.text}
+            </a>
+          ) : (
+            part.text
+          ),
+        )}
+      </div>
       {body.text && (
         <>
           {(body.truncated || open) && body.lines > BODY_PREVIEW_LINES && (
