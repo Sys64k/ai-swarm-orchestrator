@@ -272,6 +272,8 @@ const StatusUpdatePayload = z
     detail: z.string().max(2000).optional(),
     /** Set with `completed`: the pushed head of `task/<id>`. */
     commit: CommitShaSchema.optional(),
+    /** The job slot (desk) running the job, from 1; sent with `in_progress`. */
+    slot: z.number().int().min(1).max(MAX_WORKER_SLOTS).optional(),
   })
   .refine((p) => p.state === "idle" || p.taskId !== undefined, {
     message: "taskId is required unless state is idle",

@@ -6,7 +6,7 @@ import { hubAction, usePoll } from "./use-poll.ts";
 import { Terminal } from "./terminal.tsx";
 import { ActionButton, Badge, Banner, LoadingPage, Section, TopBar } from "./ui.tsx";
 import type { Task } from "../lib/types.ts";
-import { formatUsd, isLive, reviewLink, reviewView, taskActions, taskBadge, timeAgo } from "../lib/view.ts";
+import { crewLine, formatUsd, isLive, reviewLink, reviewView, taskActions, taskBadge, timeAgo } from "../lib/view.ts";
 
 export function TaskPage({ id }: { id: string }) {
   const { data: task, error, refresh } = usePoll<Task>(`tasks/${id}`);
@@ -18,6 +18,7 @@ export function TaskPage({ id }: { id: string }) {
   const can = taskActions(task);
   const review = reviewView(task);
   const pr = reviewLink(task);
+  const crew = crewLine(task);
   const act = (action: "cancel" | "retry") => async () => {
     const err = await hubAction(`tasks/${id}/${action}`);
     refresh();
@@ -41,6 +42,7 @@ export function TaskPage({ id }: { id: string }) {
             {task.retries ? <span className="chip">retry {task.retries}</span> : null}
           </div>
           {task.state === "failed" && task.detail && <Banner tone="bad">{task.detail}</Banner>}
+          {crew && <p className="small">{crew}</p>}
           {task.state === "pending" && task.waitingReason && <p className="muted small">{task.waitingReason}</p>}
           {review && (
             <p className="muted small">

@@ -51,6 +51,8 @@ export interface Task {
   filesTouched: string[];
   commit?: string;
   mainCommit?: string;
+  /** The agents (machine and desk) that implemented and tested it, oldest first. */
+  crew?: Array<{ job: "implement" | "test"; host: string; slot: number; nodeId: string; at: string }>;
   /** The task's pull request on GitHub (Hubs with pull requests on). */
   review?: { pr?: { number: number; url: string }; error?: string; rounds: number };
   waitingReason?: string;
@@ -96,6 +98,8 @@ export interface HubNode {
   currentTaskId: string | null;
   /** Every job it runs (Hubs from before job slots send only `currentTaskId`). */
   currentTaskIds?: string[];
+  /** Those jobs with their desk, once the worker reported it (Hubs before agent names omit it). */
+  jobs?: Array<{ taskId: string; job: "implement" | "test"; slot?: number }>;
   /** Jobs it runs at once. */
   slots?: number;
   lastSeenAt: string;

@@ -523,6 +523,15 @@ through it. `TaskManager` and `PlanManager` record events and verdicts.
   returns `{entries, last}`. Entries have increasing `seq` numbers, so the console polls for
   only what's new.
 
+### Agent names
+
+Workers send the job slot with `in_progress` status updates (`slot`, from 1). The task manager
+appends `{job, host, slot, nodeId, at}` to the task's `crew` when an agent starts a job and
+isn't already the latest one doing it, so repeated updates add nothing and a rework on another
+desk adds an entry. `agentName()` in `@aso/shared` gives `<host> #<slot>`. `/api/nodes` adds
+`jobs: [{taskId, job, slot}]` to each node, with the desk taken from the crew, so a UI seats a
+running job at the right desk.
+
 ### The API contract
 
 The HTTP API is described once, as Zod schemas in `@aso/shared` (`api.ts`): request bodies

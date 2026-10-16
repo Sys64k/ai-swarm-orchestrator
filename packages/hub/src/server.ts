@@ -400,7 +400,17 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     });
   });
 
-  const withOutdated = (n: ReturnType<NodeRegistry["view"]>) => ({ ...n, outdated: isOutdated(n.version, hubVersion()) });
+  /** A node for the API: whether it is outdated, and the job and desk of each task it runs. */
+  const withOutdated = (n: ReturnType<NodeRegistry["view"]>) => ({
+    ...n,
+    outdated: isOutdated(n.version, hubVersion()),
+    jobs: n.currentTaskIds.map((taskId) => {
+      const task = tasks.get(taskId);
+      const job = task?.state === "testing" && task.qaNodeId === n.nodeId ? ("test" as const) : ("implement" as const);
+      const seat = [...(task?.crew ?? [])].reverse().find((m) => m.job === job && m.nodeId === n.nodeId);
+      return { taskId, job, ...(seat ? { slot: seat.slot } : {}) };
+    }),
+  });
   app.get("/api/nodes", (c) => c.json(registry.list().map(withOutdated)));
 
   // A person drains a worker (no new jobs; the current one finishes), resumes it, or restarts it once idle.

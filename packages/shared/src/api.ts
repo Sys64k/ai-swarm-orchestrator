@@ -41,6 +41,24 @@ const AgentTurnSchema = z.object({ at: Timestamp, turn: z.number().int(), action
 /** The longest requirement a plan takes. */
 export const MAX_REQUIREMENT_LENGTH = 50_000;
 
+/**
+ * An agent is one job slot (desk) of a worker machine, named after both: `avalon #2`. The name
+ * stays when the worker restarts, unlike its node id.
+ */
+export function agentName(agent: { host: string; slot: number }): string {
+  return `${agent.host} #${agent.slot}`;
+}
+
+export const CrewMemberSchema = z
+  .object({
+    job: z.enum(["implement", "test"]),
+    host: z.string().describe("The worker machine's hostname"),
+    slot: z.number().int().describe("The job slot (desk) on it, from 1"),
+    nodeId: z.string().describe("The worker's node id at the time (changes when it restarts)"),
+    at: Timestamp.describe("When this agent started on it"),
+  })
+  .describe("An agent that worked on a task: one per implementation round or QA run on a new desk");
+
 export const ApiErrorSchema = z.object({ error: z.string() }).describe("Why the request failed");
 
 // ---------------------------------------------------------------------------
@@ -139,6 +157,9 @@ export const NodeSchema = z.object({
   lastSeenAt: Timestamp,
   currentTaskId: z.string().nullable(),
   currentTaskIds: z.array(z.string()),
+  jobs: z
+    .array(z.object({ taskId: z.string(), job: z.enum(["implement", "test"]), slot: z.number().int().optional().describe("Its desk, once the worker reported it") }))
+    .describe("What it runs, and at which desk (the agent named `<host> #<slot>`)"),
   slots: z.number().int(),
   heartbeat: z.object({ memoryAvailableBytes: z.number(), cpuLoadPercent: z.number(), dockerAvailable: z.boolean() }).nullable(),
   draining: z.boolean(),
@@ -191,6 +212,7 @@ export const TaskSchema = z.object({
   commit: z.string().optional(),
   mainCommit: z.string().optional(),
   qaSummary: z.string().optional(),
+  crew: z.array(CrewMemberSchema).optional().describe("The agents that implemented and tested it, oldest first"),
   review: ReviewSchema.optional(),
   llm: UsageSchema,
   filesTouched: z.array(z.string()),

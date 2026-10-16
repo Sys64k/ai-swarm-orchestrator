@@ -243,7 +243,11 @@ export class JobRunner {
     const repoDir = this.repoDir(task.project, slot);
     const job: RunningJob = { taskId: task.taskId, job: "implement" };
     const status = (state: "in_progress" | "failed", detail?: string) =>
-      send("STATUS_UPDATE", { state, taskId: task.taskId, detail: detail?.slice(0, 2000) }, state === "failed" ? job : undefined);
+      send(
+        "STATUS_UPDATE",
+        { state, taskId: task.taskId, detail: detail?.slice(0, 2000), ...(state === "in_progress" ? { slot: slot + 1 } : {}) },
+        state === "failed" ? job : undefined,
+      );
     try {
       const git = await this.openRepo(repoDir, task.project, task.role);
       const { resumed } = await git.startTask(task.taskId);
@@ -333,7 +337,7 @@ export class JobRunner {
     } catch (err) {
       return send("STATUS_UPDATE", { state: "failed", taskId: job.taskId, detail: (err as Error).message.slice(0, 2000) });
     }
-    send("STATUS_UPDATE", { state: "in_progress", taskId: job.taskId });
+    send("STATUS_UPDATE", { state: "in_progress", taskId: job.taskId, slot: slot + 1 });
 
     const deadline = Date.now() + job.timeoutSec * 1000;
     // CI=1 keeps runners like Vitest and Jest out of watch/interactive mode.

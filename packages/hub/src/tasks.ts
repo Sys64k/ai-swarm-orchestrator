@@ -9,7 +9,10 @@ import {
   type LlmUsage,
   type TaskSpec,
   type TaskState,
+  agentName,
+  type CrewMemberSchema,
 } from "@aso/shared";
+import type { z } from "zod";
 import type { PullRef } from "./git/github.js";
 import type { HubRepository } from "./git/hub-repo.js";
 import type { NodeRegistry } from "./registry.js";
@@ -56,6 +59,8 @@ export interface TaskRecord {
   mainCommit?: string;
   /** What the last passing QA run reported (shown in the pull request). */
   qaSummary?: string;
+  /** The agents (machine and desk) that implemented and tested it, oldest first. */
+  crew?: CrewMember[];
   /** The pull request a person reviews, with pull requests on. */
   review?: ReviewInfo;
   qaSetup?: string[][];
@@ -78,6 +83,8 @@ export interface TaskRecord {
   detail?: string;
   history: Array<{ at: string; event: string }>;
 }
+
+export type CrewMember = z.infer<typeof CrewMemberSchema>;
 
 export interface ReviewInfo {
   /** The task's pull request, once it is open. */
@@ -510,11 +517,13 @@ export class TaskManager {
         return undefined;
       case "in_progress":
       case "waiting_dependency":
-      case "waiting_llm":
-        if (task.state !== "in_progress") this.note(task, `started on ${nodeId}`);
+      case "waiting_llm": {
+        const agent = update.slot ? this.joinCrew(task, "implement", nodeId, update.slot) : undefined;
+        if (task.state !== "in_progress") this.note(task, `started on ${nodeId}${agent ? ` (${agent})` : ""}`);
         task.state = "in_progress";
         this.touch(task);
         return undefined;
+      }
       case "completed":
         this.registry.release(nodeId, task.spec.taskId);
         task.state = "verifying";
@@ -544,6 +553,7 @@ export class TaskManager {
         return undefined;
       case "in_progress":
         task.qaStarted = true;
+        if (update.slot) this.joinCrew(task, "test", nodeId, update.slot);
         this.touch(task);
         return undefined;
       case "failed":
@@ -653,6 +663,20 @@ export class TaskManager {
       task.state = "pending";
     }
     this.note(task, `requeued: ${reason}`);
+  }
+
+  /**
+   * Record the agent (machine and desk) doing a job on the task, unless it is the one already on
+   * it. Returns its name.
+   */
+  private joinCrew(task: TaskRecord, job: CrewMember["job"], nodeId: string, slot: number): string | undefined {
+    const reg = this.registry.get(nodeId)?.registration;
+    if (reg?.nodeKind !== "worker") return undefined;
+    const member: CrewMember = { job, host: reg.hardware.hostname, slot, nodeId, at: new Date().toISOString() };
+    const crew = (task.crew ??= []);
+    const last = [...crew].reverse().find((m) => m.job === job);
+    if (!last || last.nodeId !== nodeId || last.slot !== slot) crew.push(member);
+    return agentName(member);
   }
 
   private async verify(task: TaskRecord, commit: string): Promise<void> {
