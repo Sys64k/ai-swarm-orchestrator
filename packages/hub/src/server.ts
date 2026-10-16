@@ -213,7 +213,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       const p = msg.payload;
       log.info(
         p.nodeKind === "worker"
-          ? `worker ${msg.from} registered from ${p.hardware.hostname} (aso ${p.version}, roles: ${p.roles.join(", ")}, ` +
+          ? `worker ${msg.from} registered from ${p.hardware.hostname} (aso ${p.version}, ` +
               `${(p.hardware.memory.totalBytes / 1024 ** 3).toFixed(1)} GiB, ${p.hardware.storage.writeMBps} MB/s, ` +
               `docker ${p.hardware.docker.available ? "yes" : "no"})`
           : `architect ${msg.from} registered`,

@@ -96,7 +96,6 @@ export class NodeRegistry {
       if (n.registration.nodeKind !== "worker") continue;
       out.push({
         nodeId: n.nodeId,
-        roles: n.registration.roles,
         hardware: n.registration.hardware,
         load: n.heartbeat,
         busy: n.currentTaskId !== undefined,

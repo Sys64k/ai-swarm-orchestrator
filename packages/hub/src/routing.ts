@@ -31,7 +31,6 @@ export interface RoutingRequest {
 /** What the router needs to know about a worker. */
 export interface NodeSnapshot {
   nodeId: string;
-  roles: readonly WorkerRole[];
   hardware: HardwareProfile;
   /** Latest heartbeat; falls back to registration-time values when absent. */
   load?: { memoryAvailableBytes: number; cpuLoadPercent: number; dockerAvailable: boolean };
@@ -122,7 +121,6 @@ function metricsOf(node: NodeSnapshot): RankedNode["metrics"] {
 }
 
 function rejectionReason(node: NodeSnapshot, req: RoutingRequest, policy: RoutingPolicy): string | undefined {
-  if (!node.roles.includes(req.role)) return `does not accept role ${req.role}`;
   if (node.busy) return "busy";
   const docker = node.load?.dockerAvailable ?? node.hardware.docker.available;
   if (policy.requiresDocker && !docker) return "no Docker daemon";

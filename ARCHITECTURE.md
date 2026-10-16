@@ -183,7 +183,7 @@ keys are rejected.
 
 | Type | Direction | Phase | Purpose |
 |---|---|---|---|
-| `NODE_REGISTRATION` | node → hub | 1 | First message. Workers send roles, hardware profile and an optional `resume` claim (the job they are still running after a reconnect) |
+| `NODE_REGISTRATION` | node → hub | 1 | First message. Workers send their hardware profile and an optional `resume` claim (the job they are still running after a reconnect) |
 | `REGISTRATION_ACK` | hub → node | 1 | Registration accepted |
 | `NODE_HEARTBEAT` | node → hub | 2 | Every 15 s: free RAM, CPU load, Docker availability |
 | `TASK_ASSIGNMENT` | hub → node | 2 | A `TaskSpec` with its `project` (the worker checks out `/git/<project>.git`), plus `rework` (round, reason, failures, test output) when the task comes back |
@@ -247,7 +247,7 @@ sequenceDiagram
 
   Note over W: aso start-worker<br/>profile CPU, RAM, Docker,<br/>benchmark disk in work dir
   W->>H: WebSocket connect /ws
-  W->>H: NODE_REGISTRATION {roles, hardware, resume?}
+  W->>H: NODE_REGISTRATION {hardware, resume?}
   H->>H: validate, check id unique
   H-->>W: REGISTRATION_ACK
   W->>H: flush outbox (messages queued while offline)
@@ -352,15 +352,14 @@ distributions `/tmp` is tmpfs and would report RAM speed.
 
 `selectNode(request, nodes, policies)` in `packages/hub/src/routing.ts` is a pure function.
 QA runs use the same router with `role: "qa"` and the configured QA kind (default
-`unit_test`).
+`unit_test`). The role never filters nodes: the Architect assigns roles to tasks, and any worker
+runs any role. (Workers built before this sent the roles they accepted; the Hub ignores them.)
 
 ```mermaid
 flowchart TD
   T["Task: role + kind"] --> P["Look up policy for kind"]
   P --> L["For each connected worker"]
-  L --> R1{"accepts role?"}
-  R1 -- no --> X["rejected: does not accept role"]
-  R1 -- yes --> R2{"idle?"}
+  L --> R2{"idle?"}
   R2 -- no --> X2["rejected: busy"]
   R2 -- yes --> R3{"policy needs Docker<br/>and daemon down?"}
   R3 -- yes --> X3["rejected: no Docker daemon"]
@@ -371,7 +370,7 @@ flowchart TD
   N --> S["score = w_mem·mem + w_io·io + w_cpu·cpu"]
   S --> SORT["Sort by score;<br/>ties within 0.01 → longest idle first"]
   SORT --> PICK["Assign to top node,<br/>record score and reasons"]
-  X & X2 & X3 & X4 --> W{"any eligible?"}
+  X2 & X3 & X4 --> W{"any eligible?"}
   W -- "none" --> PEND["Task stays pending,<br/>waitingReason lists every rejection"]
 ```
 

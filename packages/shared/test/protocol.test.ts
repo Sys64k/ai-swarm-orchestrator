@@ -46,7 +46,6 @@ describe("AgentMessageSchema", () => {
     const msg = createMessage("NODE_REGISTRATION", "node1", {
       nodeKind: "worker",
       version: "0.1.0",
-      roles: ["backend", "qa"],
       hardware,
     });
     const parsed = parseAgentMessage(JSON.stringify(msg));
@@ -55,11 +54,12 @@ describe("AgentMessageSchema", () => {
   });
 
   it("requires hardware for workers but not for the architect", () => {
-    assert.ok(issuesOf(frame("NODE_REGISTRATION", { nodeKind: "worker", version: "1", roles: ["qa"] })).length);
+    assert.ok(issuesOf(frame("NODE_REGISTRATION", { nodeKind: "worker", version: "1" })).length);
     assert.ok(parseAgentMessage(frame("NODE_REGISTRATION", { nodeKind: "architect", version: "1" })).ok);
   });
 
-  it("rejects the architect role on worker nodes", () => {
+  it("still accepts the roles older workers send, but only worker roles", () => {
+    assert.ok(parseAgentMessage(frame("NODE_REGISTRATION", { nodeKind: "worker", version: "0.1.0", roles: ["backend", "qa"], hardware })).ok);
     issuesOf(frame("NODE_REGISTRATION", { nodeKind: "worker", version: "1", roles: ["architect"], hardware }));
   });
 

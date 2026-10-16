@@ -131,7 +131,7 @@ describe("projects", () => {
 
   it("shares workers across projects and tells them which project to check out", () =>
     withRoot(async (hub) => {
-      const w = await worker(hub.port, "dev", { roles: ["backend"] });
+      const w = await worker(hub.port, "dev");
       await call(hub.port, "/api/tasks", task("shop-1", "shop"));
       const first = await w.next();
       assert.ok(first.type === "TASK_ASSIGNMENT" && first.payload.project === "shop");

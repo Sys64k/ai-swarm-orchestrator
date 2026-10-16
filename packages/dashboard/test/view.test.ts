@@ -188,14 +188,13 @@ describe("formatting", () => {
       {
         nodeId: "avalon-1",
         nodeKind: "worker",
-        roles: ["backend", "qa"],
-        hardware: { hostname: "avalon", cpu: { logicalCores: 12 }, memory: { totalBytes: 1 } },
+        hardware: { hostname: "avalon", cpu: { logicalCores: 12 }, memory: { totalBytes: 32 * 1024 ** 3 } },
         heartbeat: { memoryAvailableBytes: 1, cpuLoadPercent: 37.4 },
         currentTaskId: "api",
         lastSeenAt: "",
       },
     ];
-    assert.deepEqual(workerViews(nodes), [{ nodeId: "avalon-1", name: "avalon", busy: true, taskId: "api", detail: "backend, qa · CPU 37%", outdated: false }]);
+    assert.deepEqual(workerViews(nodes), [{ nodeId: "avalon-1", name: "avalon", busy: true, taskId: "api", detail: "12 cores, 32 GiB · CPU 37%", outdated: false }]);
   });
 
   it("shows each worker's build and whether it needs updating", () => {

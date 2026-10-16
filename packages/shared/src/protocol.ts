@@ -126,7 +126,8 @@ const NodeRegistrationPayload = z.discriminatedUnion("nodeKind", [
   z.strictObject({
     nodeKind: z.literal("worker"),
     version: z.string(),
-    roles: z.array(WorkerRoleSchema).min(1),
+    /** Sent by workers before roles became the Architect's call; ignored. */
+    roles: z.array(WorkerRoleSchema).optional(),
     hardware: HardwareProfileSchema,
     /** Job the worker is still running after a reconnect; lets the Hub hand it back. */
     resume: z

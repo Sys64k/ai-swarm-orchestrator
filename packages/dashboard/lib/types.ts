@@ -86,7 +86,6 @@ export interface Plan {
 export interface HubNode {
   nodeId: string;
   nodeKind: "worker" | "architect";
-  roles?: string[];
   hardware?: { hostname: string; cpu: { logicalCores: number }; memory: { totalBytes: number } };
   heartbeat: { memoryAvailableBytes: number; cpuLoadPercent: number } | null;
   currentTaskId: string | null;

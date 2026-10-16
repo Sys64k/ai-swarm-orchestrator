@@ -37,8 +37,8 @@ async function implement(ctx: HubContext, w: TestClient, nodeId: string, files: 
 describe("QA pipeline (fake nodes)", () => {
   it("verifies, tests and merges a task into main", () =>
     withHub(async (ctx) => {
-      const dev = await worker(ctx.port, "dev", { roles: ["backend"] });
-      const qa = await worker(ctx.port, "qa", { roles: ["qa"] });
+      const dev = await worker(ctx.port, "dev");
+      const qa = await worker(ctx.port, "qa");
       await postTask(ctx.port, task("greet"));
       const { commit } = await implement(ctx, dev, "dev", { "greeting.txt": "hello\n" });
 
@@ -60,8 +60,8 @@ describe("QA pipeline (fake nodes)", () => {
 
   it("sends failed QA back to the implementer with the failures", () =>
     withHub(async (ctx) => {
-      const dev = await worker(ctx.port, "dev", { roles: ["backend"] });
-      const qa = await worker(ctx.port, "qa", { roles: ["qa"] });
+      const dev = await worker(ctx.port, "dev");
+      const qa = await worker(ctx.port, "qa");
       await postTask(ctx.port, task("greet"));
       const { commit } = await implement(ctx, dev, "dev", { "greeting.txt": "helo\n" });
       expectType(await qa.next(), "TEST_EXECUTION");
@@ -88,7 +88,7 @@ describe("QA pipeline (fake nodes)", () => {
 
   it("refuses work that changed package.json, even if the worker skipped its own check", () =>
     withHub(async (ctx) => {
-      const dev = await worker(ctx.port, "dev", { roles: ["backend"] });
+      const dev = await worker(ctx.port, "dev");
       await postTask(ctx.port, task("sneaky"));
       await implement(ctx, dev, "dev", { "package.json": "{}\n", "src/a.ts": "x\n" });
 
@@ -99,7 +99,7 @@ describe("QA pipeline (fake nodes)", () => {
 
   it("refuses a completion whose commit was never pushed", () =>
     withHub(async (ctx) => {
-      const dev = await worker(ctx.port, "dev", { roles: ["backend"] });
+      const dev = await worker(ctx.port, "dev");
       await postTask(ctx.port, task("liar"));
       expectType(await dev.next(), "TASK_ASSIGNMENT");
       dev.send(createMessage("STATUS_UPDATE", "dev", { state: "in_progress", taskId: "liar" }));
@@ -111,8 +111,8 @@ describe("QA pipeline (fake nodes)", () => {
 
   it("turns a merge conflict with main into a rework round", () =>
     withHub(async (ctx) => {
-      const dev = await worker(ctx.port, "dev", { roles: ["backend"] });
-      const qa = await worker(ctx.port, "qa", { roles: ["qa"] });
+      const dev = await worker(ctx.port, "dev");
+      const qa = await worker(ctx.port, "qa");
       await postTask(ctx.port, task("clash"));
       const { commit } = await implement(ctx, dev, "dev", { "README.md": "task version\n" });
       expectType(await qa.next(), "TEST_EXECUTION");
@@ -134,7 +134,7 @@ describe("QA pipeline (fake nodes)", () => {
   it("fails instead of merging into a dirty Hub checkout", () =>
     withHub(
       async (ctx) => {
-        const dev = await worker(ctx.port, "dev", { roles: ["backend"] });
+        const dev = await worker(ctx.port, "dev");
         await postTask(ctx.port, task("blocked"));
         writeFiles(ctx.repoDir, { "README.md": "someone is editing the Hub checkout\n" });
         await implement(ctx, dev, "dev", { "b.txt": "b\n" });
@@ -147,25 +147,25 @@ describe("QA pipeline (fake nodes)", () => {
 
   it("retries QA on another node when the QA node cannot run tests", () =>
     withHub(async (ctx) => {
-      const dev = await worker(ctx.port, "dev", { roles: ["backend"] });
-      const qa1 = await worker(ctx.port, "qa1", { roles: ["qa"], ramGiB: 64 });
+      const dev = await worker(ctx.port, "dev");
       await postTask(ctx.port, task("flaky-infra"));
       const { commit } = await implement(ctx, dev, "dev", { "c.txt": "c\n" });
-      expectType(await qa1.next(), "TEST_EXECUTION");
-      qa1.send(createMessage("STATUS_UPDATE", "qa1", { state: "failed", taskId: "flaky-infra", detail: "npm: not found" }));
-      const qa2 = await worker(ctx.port, "qa2", { roles: ["qa"], ramGiB: 8 });
-      // qa1 is free again and scores higher, so it may be picked again; either way QA is re-dispatched.
-      const next = await Promise.race([qa1.next(), qa2.next()]);
+      // The only node also runs QA: any node takes any job.
+      expectType(await dev.next(), "TEST_EXECUTION");
+      dev.send(createMessage("STATUS_UPDATE", "dev", { state: "failed", taskId: "flaky-infra", detail: "npm: not found" }));
+      const qa = await worker(ctx.port, "qa", { ramGiB: 8 });
+      // dev is free again and may be picked again; either way QA is re-dispatched.
+      const next = await Promise.race([dev.next(), qa.next()]);
       assert.equal(expectType(next, "TEST_EXECUTION").payload.commit, commit);
       assert.equal(ctx.hub.tasks.get("flaky-infra")?.qaAttempts, 2);
-      for (const c of [dev, qa1, qa2]) c.ws.close();
+      for (const c of [dev, qa]) c.ws.close();
     }));
 
   it("adds npm ci as a QA setup step when the commit has a package-lock.json", () =>
     withHub(
       async (ctx) => {
-        const dev = await worker(ctx.port, "dev", { roles: ["backend"] });
-        const qa = await worker(ctx.port, "qa", { roles: ["qa"] });
+        const dev = await worker(ctx.port, "dev");
+        const qa = await worker(ctx.port, "qa");
         await postTask(ctx.port, task("deps"));
         await implement(ctx, dev, "dev", { "d.txt": "d\n" });
         assert.deepEqual(expectType(await qa.next(), "TEST_EXECUTION").payload.setup, [["npm", "ci"]]);
@@ -201,7 +201,6 @@ console.log("greeting ok");
           hub: `127.0.0.1:${ctx.port}`,
           token: TOKEN,
           nodeId: "dev",
-          roles: ["backend"],
           workDir: dirs[0],
           hardware: hardware(), sandbox: "none",
           executor,
@@ -210,7 +209,6 @@ console.log("greeting ok");
           hub: `127.0.0.1:${ctx.port}`,
           token: TOKEN,
           nodeId: "qa",
-          roles: ["qa"],
           workDir: dirs[1],
           hardware: hardware(), sandbox: "none",
         });
@@ -246,7 +244,7 @@ console.log("greeting ok");
   it("fails the task with a clear reason when the Hub has no LLM configured", () =>
     withHub(async (ctx) => {
       const dir = tempDir("aso-w-");
-      const dev = await startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "dev", roles: ["backend"], workDir: dir, hardware: hardware(), sandbox: "none" });
+      const dev = await startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "dev", workDir: dir, hardware: hardware(), sandbox: "none" });
       try {
         await waitFor(() => ctx.hub.registry.has("dev"));
         await postTask(ctx.port, task("nobody-home"));

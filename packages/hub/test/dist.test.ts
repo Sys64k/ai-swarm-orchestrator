@@ -40,7 +40,7 @@ describe("package distribution", () => {
     return withHub(
       async (ctx) => {
         const hub = `127.0.0.1:${ctx.port}`;
-        const common = { hub, token: TOKEN, roles: ["backend" as const], hardware: hardware(), sandbox: "none" as const };
+        const common = { hub, token: TOKEN, hardware: hardware(), sandbox: "none" as const };
         const current = await startWorker({ ...common, nodeId: "current", workDir: path.join(dir, "w1"), version: "1.2.3+abc" });
         const old = await startWorker({ ...common, nodeId: "old", workDir: path.join(dir, "w2"), version: "1.2.3+0ld" });
         const arch = startArchitect({ hub, token: TOKEN, nodeId: "arch", workDir: path.join(dir, "a"), version: "1.2.3+abc" });

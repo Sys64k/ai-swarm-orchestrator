@@ -32,7 +32,7 @@ function result(m: AgentMessage) {
 }
 
 async function implementer(ctx: HubContext, nodeId: string, taskId: string): Promise<TestClient> {
-  const w = await worker(ctx.port, nodeId, { roles: ["backend"] });
+  const w = await worker(ctx.port, nodeId);
   await postTask(ctx.port, { taskId, role: "backend", title: "Add greeting", description: "Create greeting.txt", acceptanceCriteria: ["says hello"] });
   assert.equal((await w.next()).type, "TASK_ASSIGNMENT");
   w.send(createMessage("STATUS_UPDATE", nodeId, { state: "in_progress", taskId }));
@@ -135,7 +135,7 @@ describe("LLM gateway (Hub)", () => {
     return withHub(
       async (ctx) => {
         const dev = await implementer(ctx, "dev", "greet");
-        const other = await worker(ctx.port, "other", { roles: ["qa"] });
+        const other = await worker(ctx.port, "other");
         other.send(prompt("other", crypto.randomUUID(), 0));
         assert.match((result(await other.next()) as { error: string }).error, /not being implemented by other/);
         assert.equal(model.requests.length, 0);
@@ -307,8 +307,8 @@ console.log("greeting ok");\n`;
     return withHub(
       async (ctx) => {
         const dirs = [tempDir("aso-dev-"), tempDir("aso-qa-")];
-        const dev = await startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "dev", roles: ["backend"], workDir: dirs[0], hardware: hardware(), sandbox: "none" });
-        const qa = await startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "qa", roles: ["qa"], workDir: dirs[1], hardware: hardware(), sandbox: "none" });
+        const dev = await startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "dev", workDir: dirs[0], hardware: hardware(), sandbox: "none" });
+        const qa = await startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "qa", workDir: dirs[1], hardware: hardware(), sandbox: "none" });
         try {
           await waitFor(() => ctx.hub.registry.has("dev") && ctx.hub.registry.has("qa"));
           await postTask(ctx.port, { taskId: "greet", role: "backend", title: "Add greeting", description: "greeting.txt must contain hello" });
@@ -346,7 +346,7 @@ console.log("greeting ok");\n`;
   /** Runs one "greet" task on a single backend worker (QA off) until it merges or fails. */
   async function runGreet(ctx: HubContext) {
     const dir = tempDir("aso-dev-");
-    const dev = await startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "dev", roles: ["backend"], workDir: dir, hardware: hardware(), sandbox: "none" });
+    const dev = await startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "dev", workDir: dir, hardware: hardware(), sandbox: "none" });
     try {
       await waitFor(() => ctx.hub.registry.has("dev"));
       await postTask(ctx.port, { taskId: "greet", role: "backend", title: "Add greeting", description: "greeting.txt must contain hello" });
@@ -408,7 +408,7 @@ console.log("greeting ok");\n`;
     return withHub(
       async (ctx) => {
         const dir = tempDir("aso-dev-");
-        const dev = await startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "dev", roles: ["backend"], workDir: dir, hardware: hardware(), sandbox: "none" });
+        const dev = await startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "dev", workDir: dir, hardware: hardware(), sandbox: "none" });
         try {
           await waitFor(() => ctx.hub.registry.has("dev"));
           await postTask(ctx.port, { taskId: "greet", role: "backend", title: "Add greeting", description: "d" });
