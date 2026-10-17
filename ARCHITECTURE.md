@@ -446,8 +446,8 @@ stateDiagram-v2
   testing --> merging: FEEDBACK_LOOP pass
   testing --> awaiting_review: FEEDBACK_LOOP pass (pull requests on)
   testing --> pending: rework (FEEDBACK_LOOP fail)
-  awaiting_review --> merged: PR merged on GitHub, Hub main caught up
-  awaiting_review --> pending: changes requested (review round) / PR conflicts (rework)
+  awaiting_review --> merged: PR merged on GitHub or approved in ASO, Hub main caught up
+  awaiting_review --> pending: changes requested on GitHub or in ASO (review round) / PR conflicts (rework)
   awaiting_review --> cancelled: PR closed, or cancelled here (PR closed too)
   merging --> merged: merge commit on main
   merging --> pending: rework (merge conflict)
@@ -1217,7 +1217,7 @@ The Docker image builds the package during `docker build`. The CLI passes the ho
 ### Pull requests
 
 With a GitHub `origin` and a token (`ASO_GIT_TOKEN`), QA-approved work is not merged on the
-Hub: a person merges it on GitHub. `PullRequests` (`git/pull-requests.ts`) is the task
+Hub: a person merges it, on GitHub or from the console. `PullRequests` (`git/pull-requests.ts`) is the task
 manager's `ReviewGate`, over `GitHubApi` (`git/github.ts`, a few REST calls on `fetch`).
 
 - **Open.** After QA passes, the task goes to `awaiting_review`. The Hub force-pushes
@@ -1237,6 +1237,23 @@ manager's `ReviewGate`, over `GitHubApi` (`git/github.ts`, a few REST calls on `
     code comments become the rework reason and output. Review rounds are counted separately
     (`review.rounds`) and never fail the task; the agent sees one running round number.
   - *conflicting* (`mergeable: false`): catch up `main`, then a normal, counted rework.
+- **Review in ASO.** The console's task page shows what a person decides on, through four
+  endpoints:
+  - `GET /api/tasks/{id}/diff`: the task commit against its merge base with `main`, from the
+    Hub's own repository (`HubRepository.diff`, split per file by `parseDiff` in `git/diff.ts`).
+    Patches over 100 kB, and any beyond 1 MB in total, are left out (`truncated`).
+  - `GET /api/tasks/{id}/checks`: check runs and commit statuses on the PR's head, summed up by
+    `summarizeChecks`: failing if any fails, else `unknown` if either list can't be read, else
+    pending, passing or none. Fine-grained tokens can't have the *Checks* permission (GitHub
+    Apps only), so when check runs are refused the Hub reads the commit's GitHub Actions jobs
+    instead (`GitHubApi.actionJobs`, needs *Actions: read*).
+  - `POST /api/tasks/{id}/approve`: refuses (409) when the PR's head isn't the commit QA passed,
+    when it conflicts, or (without `force`) when the checks aren't passing or none. Otherwise
+    it merges on GitHub (`PUT /pulls/{n}/merge` with that `sha`, so a commit pushed meanwhile
+    can't slip in), catches up `main`, and applies the same `merged` outcome as the check. While
+    it runs, the task can't be cancelled or approved twice (`TaskManager.approving`).
+  - `POST /api/tasks/{id}/request-changes`: a review round with the person's words as the
+    rework output, plus a comment on the PR. No review id is involved, so nothing is "handled".
 - **Cancel** in the console closes the PR with a comment. A retry forgets the PR, so the next
   pass opens a new one.
 - **Off** without a GitHub remote, without a token, with `--no-push`, or with

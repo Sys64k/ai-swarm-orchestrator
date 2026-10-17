@@ -540,14 +540,25 @@ Rules:
 When a project's `origin` is on GitHub and the Hub has a token (`ASO_GIT_TOKEN`, below), no
 task reaches `main` without you. After QA passes, the Hub pushes the task's branch and opens a
 pull request describing the task, its acceptance criteria, files, QA result and cost. Your
-phone gets a notification, and the task shows **Review** under *Needs you* in the console,
-linking to the pull request. Then, on GitHub:
+phone gets a notification, and the task shows **Review** under *Needs you* in the console.
+
+**Review in the console.** The task's page opens on its **Changes**: every file it changes,
+with the patch. Above them, *Your review* lists the pull request's checks (GitHub Actions and
+other CI) and offers:
+
+| You… | The task |
+|---|---|
+| **Approve and merge** | The Hub merges the pull request on GitHub, its `main` catches up, and tasks that depend on it start. With checks failing, still running or unreadable, the button says **Merge anyway** (or **Merge without waiting**) and asks first |
+| **Ask for changes**, with what should change | goes back to an agent with your words, and the pull request gets a comment saying so. Its new commits go through QA and update the same pull request, which waits for you again. These rounds have no limit |
+| **Cancel task** | is cancelled, and its pull request closed |
+
+**Or review on GitHub,** where the same decisions work:
 
 | You… | The task |
 |---|---|
 | **Merge** the pull request | is merged. The Hub's `main` catches up with GitHub's, and tasks that depend on it start |
-| Submit a review with **Request changes**, or with **Comment** on a pull request opened as you | goes back to an agent with your review and its comments on the code. Its new commits go through QA and update the same pull request, which waits for you again. These rounds have no limit |
-| **Close** the pull request | is cancelled (and cancelling it in the console closes the pull request) |
+| Submit a review with **Request changes**, or with **Comment** on a pull request opened as you | goes back to an agent with your review and its comments on the code, as above |
+| **Close** the pull request | is cancelled |
 
 The Hub opens pull requests as the token's owner, usually you, and GitHub lets no one request
 changes on their own pull request: there the review form offers only **Comment**, so a
@@ -555,7 +566,11 @@ submitted Comment review from you sends the work back too. Comments in the conve
 in a review) don't. A pull request that conflicts with `main` goes back to an agent to rebase,
 like a merge conflict. The Hub checks pull requests every 30 seconds; `aso sync` checks now.
 
-The token needs **Pull requests: read and write** as well as *Contents: read and write*. Set
+The token needs **Pull requests: read and write** as well as *Contents: read and write*. For
+the console to show checks, also give it **Actions: read** and **Commit statuses: read** (a
+fine-grained token can't have *Checks*, so the Hub reads GitHub Actions results through
+*Actions*). Without them the checks show as unreadable, and approving asks you to merge
+anyway. Set
 `ASO_PULL_REQUESTS=0` to merge on the Hub instead. A project's page in the console says which
 of the two it does, and why.
 

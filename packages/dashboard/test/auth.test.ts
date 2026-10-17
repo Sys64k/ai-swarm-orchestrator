@@ -58,6 +58,8 @@ describe("Hub proxy allowlist", () => {
     assert.equal(hubPath("GET", ["tasks", "api-1", "transcript"]), "/api/tasks/api-1/transcript");
     assert.equal(hubPath("POST", ["tasks", "api-1", "retry"]), "/api/tasks/api-1/retry");
     assert.equal(hubPath("POST", ["tasks", "api-1", "cancel"]), "/api/tasks/api-1/cancel");
+    for (const view of ["diff", "checks"]) assert.equal(hubPath("GET", ["tasks", "api-1", view]), `/api/tasks/api-1/${view}`);
+    for (const decision of ["approve", "request-changes"]) assert.equal(hubPath("POST", ["tasks", "api-1", decision]), `/api/tasks/api-1/${decision}`);
     assert.equal(hubPath("POST", ["plans"]), "/api/plans");
     assert.equal(hubPath("POST", ["plans", "plan-1", "approve"]), "/api/plans/plan-1/approve");
     assert.equal(hubPath("GET", ["nodes"]), "/api/nodes");
@@ -86,6 +88,8 @@ describe("Hub proxy allowlist", () => {
     assert.equal(hubPath("GET", ["tasks", "a", "transcript", "x"]), undefined);
     assert.equal(hubPath("DELETE", ["tasks", "a"]), undefined);
     assert.equal(hubPath("GET", ["tasks", "a/b"]), undefined);
+    assert.equal(hubPath("GET", ["tasks", "a", "approve"]), undefined, "deciding is a POST");
+    assert.equal(hubPath("POST", ["tasks", "a", "diff"]), undefined);
   });
 });
 

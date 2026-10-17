@@ -40,6 +40,8 @@ const AgentTurnSchema = z.object({ at: Timestamp, turn: z.number().int(), action
 
 /** The longest requirement a plan takes. */
 export const MAX_REQUIREMENT_LENGTH = 50_000;
+/** The longest change request a person sends back with a task under review. */
+export const MAX_CHANGE_REQUEST_LENGTH = 10_000;
 
 /**
  * An agent is one job slot (desk) of a worker machine, named after both: `avalon #2`. The name
@@ -75,6 +77,12 @@ export const PlanReplyBodySchema = z.object({ message: z.string().min(1).max(MAX
 export const CreateTaskBodySchema = TaskSpecInputSchema.extend({ project: ProjectIdSchema.optional() });
 export const SyncBodySchema = z.object({ project: ProjectIdSchema.optional() });
 export const RedeemSignInCodeBodySchema = z.object({ code: z.string().min(1).max(200) });
+export const ApproveTaskBodySchema = z.object({
+  force: z.boolean().optional().describe("Merge even when the pull request's checks are failing, still running or can't be read"),
+});
+export const RequestChangesBodySchema = z.object({
+  message: z.string().trim().min(1).max(MAX_CHANGE_REQUEST_LENGTH).describe("What should change; the agent gets it as written"),
+});
 
 // ---------------------------------------------------------------------------
 // Answers
@@ -251,6 +259,42 @@ export const PlanSchema = z.object({
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });
+
+export const CheckStateSchema = z.enum(["passing", "failing", "pending", "skipped"]);
+export type CheckState = z.infer<typeof CheckStateSchema>;
+export const ChecksOverallSchema = z.enum(["passing", "failing", "pending", "none", "unknown"]);
+export type ChecksOverall = z.infer<typeof ChecksOverallSchema>;
+
+export const ReviewChecksSchema = z
+  .object({
+    pr: z.object({ number: z.number().int(), url: z.string() }),
+    headSha: z.string(),
+    mergeable: z.boolean().nullable().describe("False when it conflicts with main; null while GitHub is still working it out"),
+    overall: ChecksOverallSchema.describe("failing if any check fails, else pending if any runs, else passing; none without checks; unknown when they can't be read"),
+    checks: z.array(z.object({ name: z.string(), state: CheckStateSchema, url: z.string().optional() })),
+    error: z.string().optional().describe("Why the checks could not be read"),
+  })
+  .describe("The CI checks on a task's pull request");
+export type ReviewChecks = z.infer<typeof ReviewChecksSchema>;
+
+export const DiffFileSchema = z.object({
+  path: z.string(),
+  status: z.enum(["added", "modified", "deleted"]),
+  additions: z.number().int(),
+  deletions: z.number().int(),
+  binary: z.boolean(),
+  patch: z.string().optional().describe("The unified diff; left out for binary files and when the answer would get too big"),
+});
+export type DiffFile = z.infer<typeof DiffFileSchema>;
+export const TaskDiffSchema = z
+  .object({
+    base: z.string().describe("Where the task's branch left main"),
+    head: z.string().describe("The task's commit"),
+    files: z.array(DiffFileSchema),
+    truncated: z.boolean().describe("Some patches were left out to keep the answer small"),
+  })
+  .describe("What a task changes, against the main it branched from");
+export type TaskDiff = z.infer<typeof TaskDiffSchema>;
 
 const EntryBase = { seq: z.number().int(), at: Timestamp };
 export const TranscriptSchema = z.object({

@@ -1,6 +1,17 @@
-import { createLogger, taskBranchName } from "@aso/shared";
+import { createLogger, taskBranchName, type ChecksOverall, type CheckState, type ReviewChecks } from "@aso/shared";
 import type { ReviewGate, ReviewOutcome, TaskManager, TaskRecord } from "../tasks.js";
-import { GitHubApi, parseGitHubRemote, type PullRef, type PullState, type RepoSlug, type Review, type ReviewComment } from "./github.js";
+import {
+  GitHubApi,
+  GitHubError,
+  parseGitHubRemote,
+  type CheckRun,
+  type CommitStatus,
+  type PullRef,
+  type PullState,
+  type RepoSlug,
+  type Review,
+  type ReviewComment,
+} from "./github.js";
 import type { GitSync } from "./sync.js";
 
 const log = createLogger("pull-requests");
@@ -85,6 +96,39 @@ export class PullRequests implements ReviewGate {
     return pr;
   }
 
+  async checks(task: TaskRecord): Promise<ReviewChecks> {
+    const pr = pullOf(task);
+    const pull = await this.api.getPull(pr.number);
+    const [runs, statuses] = await Promise.allSettled([this.checkRuns(pull.headSha), this.api.statuses(pull.headSha)]);
+    const read = <T>(r: PromiseSettledResult<T[]>) => (r.status === "fulfilled" ? r.value : (r.reason as Error));
+    return { pr, headSha: pull.headSha, mergeable: pull.mergeable, ...summarizeChecks(read(runs), read(statuses)) };
+  }
+
+  /** Check runs, or with a fine-grained token (no Checks permission there) the Actions jobs. */
+  private async checkRuns(sha: string): Promise<CheckRun[]> {
+    try {
+      return await this.api.checkRuns(sha);
+    } catch (err) {
+      if (!(err instanceof GitHubError) || (err.status !== 403 && err.status !== 404)) throw err;
+      return this.api.actionJobs(sha);
+    }
+  }
+
+  /** Merge the pull request at the commit QA passed, and bring the Hub's main up to GitHub's. */
+  async merge(task: TaskRecord): Promise<string> {
+    const pr = pullOf(task);
+    const mainCommit = await this.api.mergePull(pr.number, task.commit!);
+    log.info(`merged pull request #${pr.number} for ${task.spec.taskId} from ASO`);
+    await this.catchUp(`pull request #${pr.number} was merged`);
+    return mainCommit;
+  }
+
+  async noteChangesRequested(task: TaskRecord, message: string): Promise<void> {
+    const pr = pullOf(task);
+    const quoted = message.split("\n").map((l) => `> ${l}`).join("\n");
+    await this.api.comment(pr.number, `**Changes requested in ASO:**\n\n${quoted}\n\nThe task went back to an agent; its next commit comes to this pull request.`);
+  }
+
   async close(task: TaskRecord, comment: string): Promise<void> {
     const pr = task.review?.pr;
     if (!pr) return;
@@ -148,6 +192,60 @@ export class PullRequests implements ReviewGate {
   }
 }
 
+function pullOf(task: TaskRecord): PullRef {
+  const pr = task.review?.pr;
+  if (!pr) throw new Error(`task ${task.spec.taskId} has no pull request yet`);
+  return pr;
+}
+
+/** A check run's or commit status's outcome, in the four states the console shows. */
+export function checkState(check: { status?: string; conclusion?: string | null; state?: string }): CheckState {
+  if (check.state !== undefined) return check.state === "success" ? "passing" : check.state === "pending" ? "pending" : "failing";
+  if (check.status !== "completed") return "pending";
+  if (check.conclusion === "success") return "passing";
+  if (check.conclusion === "neutral" || check.conclusion === "skipped") return "skipped";
+  return "failing"; // failure, cancelled, timed_out, action_required, stale...
+}
+
+/**
+ * A pull request's checks: check runs (GitHub Actions) and commit statuses, each a list or
+ * the error reading it. Anything failing makes it failing; otherwise anything unreadable
+ * makes it unknown, so a merge never goes ahead on checks nobody could see.
+ */
+export function summarizeChecks(runs: CheckRun[] | Error, statuses: CommitStatus[] | Error): { overall: ChecksOverall; checks: ReviewChecks["checks"]; error?: string } {
+  const checks = [
+    ...(Array.isArray(runs) ? runs.map((r) => ({ name: r.name, state: checkState(r), url: r.url })) : []),
+    ...(Array.isArray(statuses) ? statuses.map((s) => ({ name: s.context, state: checkState({ state: s.state }), url: s.url })) : []),
+  ];
+  const errors = [runs, statuses].filter((r): r is Error => r instanceof Error);
+  const error = errors.length ? checksError(errors[0]) : undefined;
+  const has = (state: CheckState) => checks.some((c) => c.state === state);
+  const overall: ChecksOverall = has("failing") ? "failing" : error ? "unknown" : has("pending") ? "pending" : has("passing") ? "passing" : "none";
+  return { overall, checks, ...(error ? { error } : {}) };
+}
+
+/**
+ * Why a pull request may not be merged with these checks, or undefined if it may. Its head must
+ * be the commit QA passed and it must not conflict; unless `force`, its checks must pass (or
+ * there are none). The console's approveAction mirrors this.
+ */
+export function mergeBlock(checks: ReviewChecks, testedCommit: string | undefined, force = false): string | undefined {
+  const n = checks.pr.number;
+  if (checks.headSha !== testedCommit) return `pull request #${n} has a commit QA did not test; wait for the Hub to update it`;
+  if (checks.mergeable === false) return `pull request #${n} conflicts with main; the Hub sends it back to an agent at its next check`;
+  if (force || checks.overall === "passing" || checks.overall === "none") return undefined;
+  if (checks.overall === "unknown") return `checks can't be read (${checks.error}); approve with force to merge anyway`;
+  const names = checks.checks.filter((c) => c.state === checks.overall).map((c) => c.name);
+  return `checks ${checks.overall}${names.length ? `: ${names.join(", ")}` : ""}; approve with force to merge anyway`;
+}
+
+function checksError(err: Error): string {
+  if (err instanceof GitHubError && (err.status === 403 || err.status === 404)) {
+    return "the GitHub token can't read this repository's checks: give it read access to Actions and Commit statuses";
+  }
+  return err.message;
+}
+
 /**
  * The review to act on: the newest decisive one (approve or request changes) on the pull
  * request's current commit, if it asks for changes and was not handled yet. A review of an
@@ -188,7 +286,7 @@ export function pullRequestBody(task: TaskRecord): string {
     `**Task:** \`${s.taskId}\` (${s.role}, ${s.kind})${rounds ? `, after ${rounds}` : ""}; model cost about $${task.llm.costUsd.toFixed(2)}`,
     "",
     "---",
-    "Opened by the ASO Hub. **Merge** to accept it. To send it back to an agent, submit a review that **requests changes** (on a pull request you opened yourself, GitHub only offers **Comment**: that works too). **Close** to cancel the task.",
+    "Opened by the ASO Hub. **Merge** (here or in the ASO console) to accept it. To send it back to an agent, submit a review that **requests changes** (on a pull request you opened yourself, GitHub only offers **Comment**: that works too). **Close** to cancel the task.",
   ].join("\n");
 }
 

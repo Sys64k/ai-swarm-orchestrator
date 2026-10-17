@@ -23,11 +23,13 @@ import {
   PushEndpointSchema,
   PushSubscriptionSchema,
   PushTestSchema,
+  ApproveTaskBodySchema,
   CreatePlanBodySchema,
   CreateProjectBodySchema,
   CreateTaskBodySchema,
   PlanReplyBodySchema,
   RedeemSignInCodeBodySchema,
+  RequestChangesBodySchema,
   SyncBodySchema,
   type AgentMessage,
 } from "@aso/shared";
@@ -462,7 +464,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       return c.json({ error: err.message }, err.code === "not_found" ? 404 : err.code === "conflict" ? 409 : 400);
     }
     if (err instanceof TaskError) {
-      const status = err.code === "not_found" ? 404 : err.code === "duplicate" || err.code === "conflict" ? 409 : 400;
+      const status = err.code === "not_found" ? 404 : err.code === "duplicate" || err.code === "conflict" ? 409 : err.code === "upstream" ? 502 : 400;
       return c.json({ error: err.message }, status);
     }
     throw err;
@@ -615,6 +617,39 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   };
   app.post("/api/tasks/:id/cancel", (c) => taskAction(c, (p, id) => p.tasks.cancel(id)));
   app.post("/api/tasks/:id/retry", (c) => taskAction(c, (p, id) => p.tasks.retry(id)));
+
+  /** Like taskAction, for actions that wait on GitHub or Git and answer with something else than the task. */
+  const taskQuery = async <T>(c: Context, action: (p: Project, id: string) => Promise<T>) => {
+    const id = c.req.param("id")!;
+    const owner = projects.taskOwner(id);
+    if (!owner) return c.json({ error: `task ${id} not found` }, 404);
+    try {
+      return c.json(await action(owner, id));
+    } catch (err) {
+      return fail(c, err);
+    }
+  };
+  // Reviewing in ASO: what the task changes, its pull request's checks, and the decision.
+  app.get("/api/tasks/:id/diff", (c) =>
+    taskQuery(c, async (p, id) => {
+      const task = p.tasks.get(id)!;
+      if (!task.commit || task.state === "merged") throw new TaskError(`task ${id} has no unmerged commit to show`, "conflict");
+      const diff = await p.repo.diff(task.commit);
+      if (!diff) throw new TaskError(`the Hub does not have task ${id}'s commit ${task.commit.slice(0, 8)}`, "conflict");
+      return diff;
+    }),
+  );
+  app.get("/api/tasks/:id/checks", (c) => taskQuery(c, (p, id) => p.tasks.reviewChecks(id)));
+  app.post("/api/tasks/:id/approve", async (c) => {
+    const req = await parsed(c, ApproveTaskBodySchema, { optional: true });
+    if (!req.ok) return c.json({ error: req.error }, 400);
+    return taskQuery(c, (p, id) => p.tasks.approve(id, req.data));
+  });
+  app.post("/api/tasks/:id/request-changes", async (c) => {
+    const req = await parsed(c, RequestChangesBodySchema);
+    if (!req.ok) return c.json({ error: req.error }, 400);
+    return taskAction(c, (p, id) => p.tasks.requestChanges(id, req.data.message));
+  });
 
   app.get("/api/tasks/:id", (c) => {
     const task = tasks.get(c.req.param("id"));

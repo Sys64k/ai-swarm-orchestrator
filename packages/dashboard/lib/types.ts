@@ -160,3 +160,36 @@ export interface TranscriptPage {
   entries: TranscriptEntry[];
   last: number;
 }
+
+export type CheckState = "passing" | "failing" | "pending" | "skipped";
+export type ChecksOverall = "passing" | "failing" | "pending" | "none" | "unknown";
+
+/** The CI checks on a task's pull request (`GET tasks/<id>/checks`). */
+export interface ReviewChecks {
+  pr: { number: number; url: string };
+  headSha: string;
+  /** False when it conflicts with main; null while GitHub works it out. */
+  mergeable: boolean | null;
+  overall: ChecksOverall;
+  checks: Array<{ name: string; state: CheckState; url?: string }>;
+  /** Why the checks could not be read. */
+  error?: string;
+}
+
+export interface DiffFile {
+  path: string;
+  status: "added" | "modified" | "deleted";
+  additions: number;
+  deletions: number;
+  binary: boolean;
+  /** Left out for binary files and when the diff is too big. */
+  patch?: string;
+}
+
+/** What a task changes (`GET tasks/<id>/diff`). */
+export interface TaskDiff {
+  base: string;
+  head: string;
+  files: DiffFile[];
+  truncated: boolean;
+}

@@ -3,7 +3,7 @@ import { rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, describe, it } from "node:test";
-import { changesRequested, parseGitHubRemote, pullRequestBody, reviewFeedback, startHub, type TaskRecord } from "@aso/hub";
+import { changesRequested, checkState, GitHubError, mergeBlock, parseDiff, parseGitHubRemote, pullRequestBody, reviewFeedback, startHub, summarizeChecks, type TaskRecord } from "@aso/hub";
 import { createMessage } from "@aso/shared";
 import { git, gitAsync, makeTargetRepo, postTask, pushTaskBranch, tempDir, TOKEN, waitFor, withHub, worker, writeFiles, type HubContext, type TestClient } from "./helpers.ts";
 
@@ -34,6 +34,13 @@ class FakeGitHub {
   unauthorized = 0;
   /** The next N `POST /pulls` fail with HTTP 502. */
   failCreates = 0;
+  /** Check runs and commit statuses per commit. */
+  checkRuns = new Map<string, Array<{ name: string; status: string; conclusion: string | null; html_url: string }>>();
+  statuses = new Map<string, Array<{ context: string; state: string; target_url: string }>>();
+  /** The token may read no checks at all (no Actions or Commit statuses access). */
+  checksForbidden = false;
+  /** Check runs are refused but Actions are not: a fine-grained token, which can't have Checks. */
+  checkRunsForbidden = false;
   originDir = "";
   private server?: Server;
   url = "";
@@ -64,6 +71,10 @@ class FakeGitHub {
     this.pulls.clear();
     this.unauthorized = 0;
     this.failCreates = 0;
+    this.checkRuns.clear();
+    this.statuses.clear();
+    this.checksForbidden = false;
+    this.checkRunsForbidden = false;
     this.originDir = originDir;
   }
 
@@ -123,6 +134,26 @@ class FakeGitHub {
       this.pulls.set(number, pull);
       return [201, this.json(pull)];
     }
+    const commit = /^\/commits\/([0-9a-f]+)\/(check-runs|status)$/.exec(route);
+    const forbidden: [number, unknown] = [403, { message: "Resource not accessible by personal access token" }];
+    // Actions: one workflow run per commit with check runs, numbered by its place in the map.
+    if (route === "/actions/runs" && req.method === "GET") {
+      if (this.checksForbidden) return forbidden;
+      const shas = [...this.checkRuns.keys()];
+      const id = shas.indexOf(url.searchParams.get("head_sha") ?? "");
+      return [200, { workflow_runs: id === -1 ? [] : [{ id: id + 1 }] }];
+    }
+    const jobs = /^\/actions\/runs\/(\d+)\/jobs$/.exec(route);
+    if (jobs && req.method === "GET") {
+      if (this.checksForbidden) return forbidden;
+      return [200, { jobs: [...this.checkRuns.values()][Number(jobs[1]) - 1] ?? [] }];
+    }
+    if (commit && req.method === "GET") {
+      if (this.checksForbidden || (this.checkRunsForbidden && commit[2] === "check-runs")) return forbidden;
+      return commit[2] === "check-runs"
+        ? [200, { total_count: 0, check_runs: this.checkRuns.get(commit[1]) ?? [] }]
+        : [200, { state: "pending", statuses: this.statuses.get(commit[1]) ?? [] }];
+    }
     const m = /^\/(pulls|issues)\/(\d+)(\/.*)?$/.exec(route);
     const pull = m && this.pulls.get(Number(m[2]));
     if (!m || !pull) return [404, { message: "Not Found" }];
@@ -136,6 +167,11 @@ class FakeGitHub {
       if (typeof body.body === "string") pull.body = body.body;
       if (body.state === "closed") pull.state = "closed";
       return [200, this.json(pull)];
+    }
+    if (rest === "/merge" && req.method === "PUT") {
+      if (pull.state !== "open") return [405, { message: "Pull Request is not mergeable" }];
+      if (body.sha !== this.headSha(pull.head)) return [409, { message: "Head branch was modified. Review and try the merge again." }];
+      return [200, { sha: this.merge(pull.number), merged: true }];
     }
     if (rest === "/reviews" && req.method === "GET") return [200, pull.reviews];
     if (rest === "/comments" && req.method === "GET") {
@@ -224,6 +260,23 @@ async function continueTaskBranch(ctx: HubContext, taskId: string, files: Record
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+/** A CI check on the pull request's current commit. */
+function addCheck(taskId: string, name: string, conclusion: string | null) {
+  const sha = git(github.originDir, "rev-parse", `refs/heads/task/${taskId}`);
+  const runs = github.checkRuns.get(sha) ?? [];
+  runs.push({ name, status: conclusion ? "completed" : "in_progress", conclusion, html_url: `https://github.com/me/shop/runs/${runs.length + 1}` });
+  github.checkRuns.set(sha, runs);
+}
+
+async function api(port: number, method: "GET" | "POST", path: string, body?: unknown): Promise<{ status: number; data: any }> {
+  const res = await fetch(`http://127.0.0.1:${port}/api/${path}`, {
+    method,
+    headers: { authorization: `Bearer ${TOKEN}`, ...(body === undefined ? {} : { "content-type": "application/json" }) },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  return { status: res.status, data: await res.json() };
 }
 
 const reviewed = (ctx: HubContext, taskId: string) =>
@@ -462,7 +515,249 @@ describe("pull requests on GitHub", () => {
   });
 });
 
+describe("reviewing in ASO", () => {
+  it("shows what the task changes and its checks, then merges the pull request once approved", () =>
+    withGitHub(async (ctx) => {
+      const dev = await worker(ctx.port, "dev", { slots: 2 });
+      const qa = await worker(ctx.port, "qa");
+      await postTask(ctx.port, task("greet"));
+      await postTask(ctx.port, task("follow", { dependsOn: ["greet"] }));
+      const commit = await implementAndPass(ctx, dev, qa, "greet", { "greeting.txt": "hello\n", "README.md": "# Target\nNow it greets.\n" });
+      const number = (await reviewed(ctx, "greet")).review!.pr!.number;
+
+      const diff = await api(ctx.port, "GET", "tasks/greet/diff");
+      assert.equal(diff.status, 200);
+      assert.equal(diff.data.head, commit);
+      assert.deepEqual(
+        diff.data.files.map((f: any) => [f.path, f.status, f.additions]),
+        [["README.md", "modified", 2], ["greeting.txt", "added", 1]],
+      );
+      assert.match(diff.data.files[1].patch, /^diff --git a\/greeting\.txt b\/greeting\.txt\nnew file mode[\s\S]*\n\+hello$/);
+      assert.equal(diff.data.truncated, false);
+
+      addCheck("greet", "unit", "success");
+      addCheck("greet", "lint", "skipped");
+      const checks = await api(ctx.port, "GET", "tasks/greet/checks");
+      assert.equal(checks.status, 200);
+      assert.equal(checks.data.overall, "passing");
+      assert.equal(checks.data.headSha, commit);
+      assert.deepEqual(checks.data.checks.map((c: any) => [c.name, c.state]), [["unit", "passing"], ["lint", "skipped"]]);
+
+      const approved = await api(ctx.port, "POST", "tasks/greet/approve");
+      assert.equal(approved.status, 200, approved.data.error);
+      assert.equal(approved.data.state, "merged");
+      const pull = github.pulls.get(number)!;
+      assert.ok(pull.merged, "merged on GitHub");
+      assert.equal(approved.data.mainCommit, pull.mergeCommit);
+      assert.equal(git(ctx.repoDir, "rev-parse", "main"), pull.mergeCommit, "the Hub's main caught up");
+      assert.match(approved.data.history.at(-1).event, new RegExp(`pull request #${number} merged from ASO @`));
+      const next = await dev.next();
+      assert.ok(next.type === "TASK_ASSIGNMENT" && next.payload.taskId === "follow", "the dependant starts");
+
+      assert.equal((await api(ctx.port, "GET", "tasks/greet/diff")).status, 409, "a merged task has no diff of its own");
+      assert.equal((await api(ctx.port, "POST", "tasks/greet/approve")).status, 409, "approved once");
+      await ctx.hub.sync.requestPush(); // let the push after the merge finish before the repository goes
+      dev.ws.close();
+      qa.ws.close();
+    }));
+
+  it("refuses to merge while checks fail, run or can't be read, unless forced", () =>
+    withGitHub(async (ctx) => {
+      const dev = await worker(ctx.port, "dev");
+      const qa = await worker(ctx.port, "qa");
+      await postTask(ctx.port, task("red"));
+      await implementAndPass(ctx, dev, qa, "red", { "r.txt": "r\n" });
+      const number = (await reviewed(ctx, "red")).review!.pr!.number;
+
+      github.checksForbidden = true;
+      const unreadable = await api(ctx.port, "GET", "tasks/red/checks");
+      assert.equal(unreadable.data.overall, "unknown");
+      assert.match(unreadable.data.error, /read access to Actions and Commit statuses/);
+      const refusedUnknown = await api(ctx.port, "POST", "tasks/red/approve", {});
+      assert.equal(refusedUnknown.status, 409);
+      assert.match(refusedUnknown.data.error, /checks can't be read .*; approve with force to merge anyway/);
+
+      github.checksForbidden = false;
+      github.checkRunsForbidden = true; // a fine-grained token: the same results, read through Actions
+      addCheck("red", "unit", "success");
+      addCheck("red", "Playwright e2e", null);
+      assert.match((await api(ctx.port, "POST", "tasks/red/approve")).data.error, /^checks pending: Playwright e2e; approve with force/);
+
+      addCheck("red", "Docker build", "failure");
+      const refused = await api(ctx.port, "POST", "tasks/red/approve", { force: false });
+      assert.equal(refused.status, 409);
+      assert.match(refused.data.error, /^checks failing: Docker build; approve with force/);
+      assert.equal(github.pulls.get(number)!.merged, false);
+      assert.equal(ctx.hub.tasks.get("red")!.state, "awaiting_review");
+
+      assert.equal((await api(ctx.port, "POST", "tasks/red/approve", { force: "yes" })).status, 400);
+      const forced = await api(ctx.port, "POST", "tasks/red/approve", { force: true });
+      assert.equal(forced.status, 200, forced.data.error);
+      assert.equal(forced.data.state, "merged");
+      assert.ok(github.pulls.get(number)!.merged);
+      await ctx.hub.sync.requestPush();
+      dev.ws.close();
+      qa.ws.close();
+    }));
+
+  it("won't merge a pull request that conflicts or carries a commit QA did not test", () =>
+    withGitHub(async (ctx) => {
+      const dev = await worker(ctx.port, "dev");
+      const qa = await worker(ctx.port, "qa");
+      await postTask(ctx.port, task("odd"));
+      await implementAndPass(ctx, dev, qa, "odd", { "o.txt": "o\n" });
+      const number = (await reviewed(ctx, "odd")).review!.pr!.number;
+
+      github.pulls.get(number)!.mergeable = false;
+      assert.match((await api(ctx.port, "POST", "tasks/odd/approve", { force: true })).data.error, /conflicts with main/);
+      github.pulls.get(number)!.mergeable = true;
+
+      const elsewhere = tempDir("aso-elsewhere-");
+      try {
+        git(elsewhere, "clone", "--quiet", "--branch", "task/odd", ctx.originDir!, ".");
+        writeFiles(elsewhere, { "o.txt": "changed on GitHub\n" });
+        git(elsewhere, "commit", "--quiet", "-am", "a commit made on GitHub");
+        git(elsewhere, "push", "--quiet", "origin", "task/odd");
+      } finally {
+        rmSync(elsewhere, { recursive: true, force: true });
+      }
+      const res = await api(ctx.port, "POST", "tasks/odd/approve", { force: true });
+      assert.equal(res.status, 409);
+      assert.match(res.data.error, /a commit QA did not test/);
+      assert.equal(github.pulls.get(number)!.merged, false);
+      dev.ws.close();
+      qa.ws.close();
+    }));
+
+  it("sends requested changes back to an agent as a review round, and says so on the pull request", () =>
+    withGitHub(async (ctx) => {
+      const dev = await worker(ctx.port, "dev");
+      const qa = await worker(ctx.port, "qa");
+      await postTask(ctx.port, task("greet"));
+      await implementAndPass(ctx, dev, qa, "greet", { "greeting.txt": "hello\n" });
+      const number = (await reviewed(ctx, "greet")).review!.pr!.number;
+
+      assert.equal((await api(ctx.port, "POST", "tasks/greet/request-changes", { message: "   " })).status, 400);
+      assert.equal((await api(ctx.port, "POST", "tasks/greet/request-changes", {})).status, 400);
+      const res = await api(ctx.port, "POST", "tasks/greet/request-changes", { message: "Say hello politely.\nAnd end with a full stop." });
+      assert.equal(res.status, 200, res.data.error);
+      assert.ok(["pending", "assigned"].includes(res.data.state), res.data.state);
+
+      const back = await dev.next();
+      assert.ok(back.type === "TASK_ASSIGNMENT" && back.payload.rework);
+      assert.equal(back.payload.rework.reason, "Review round 1: a person asked for changes: Say hello politely.");
+      assert.equal(back.payload.rework.output, "What the reviewer asked for:\nSay hello politely.\nAnd end with a full stop.");
+      const t = ctx.hub.tasks.get("greet")!;
+      assert.deepEqual([t.reworkRound, t.review!.rounds], [0, 1], "a review round, not a rework round");
+      await waitFor(() => github.pulls.get(number)!.comments.length > 0, 5000, "comment on the PR");
+      assert.equal(
+        github.pulls.get(number)!.comments.at(-1),
+        "**Changes requested in ASO:**\n\n> Say hello politely.\n> And end with a full stop.\n\nThe task went back to an agent; its next commit comes to this pull request.",
+      );
+      assert.equal((await api(ctx.port, "POST", "tasks/greet/request-changes", { message: "again" })).status, 409, "no longer under review");
+      assert.equal((await api(ctx.port, "GET", "tasks/greet/checks")).status, 409);
+      dev.ws.close();
+      qa.ws.close();
+    }));
+
+  it("answers 404 for unknown tasks and 409 for tasks without a pull request", () =>
+    withGitHub(
+      async (ctx) => {
+        for (const [method, path] of [["GET", "diff"], ["GET", "checks"], ["POST", "approve"], ["POST", "request-changes"]] as const) {
+          const res = await api(ctx.port, method, `tasks/nope/${path}`, method === "POST" ? { message: "x" } : undefined);
+          assert.equal(res.status, 404, path);
+        }
+        const dev = await worker(ctx.port, "dev");
+        const qa = await worker(ctx.port, "qa");
+        await postTask(ctx.port, task("plain"));
+        assert.equal((await api(ctx.port, "GET", "tasks/plain/diff")).status, 409, "no commit yet");
+        await implementAndPass(ctx, dev, qa, "plain", { "p.txt": "p\n" });
+        await waitFor(() => ctx.hub.tasks.get("plain")?.state === "merged", 10_000, "merged on the Hub");
+        const res = await api(ctx.port, "POST", "tasks/plain/approve");
+        assert.equal(res.status, 409);
+        assert.match(res.data.error, /is merged, not waiting for review/);
+        dev.ws.close();
+        qa.ws.close();
+      },
+      { pullRequests: { enabled: false } },
+    ));
+});
+
 describe("pull request helpers", () => {
+  it("sums up checks: failing beats unreadable beats pending beats passing", () => {
+    const run = (name: string, conclusion: string | null) => ({ name, status: conclusion ? "completed" : "queued", conclusion });
+    assert.deepEqual(
+      ["success", "neutral", "skipped", "failure", "cancelled", "timed_out", "action_required", null].map((c) => checkState(run("x", c))),
+      ["passing", "skipped", "skipped", "failing", "failing", "failing", "failing", "pending"],
+    );
+    assert.deepEqual(["success", "pending", "failure", "error"].map((state) => checkState({ state })), ["passing", "pending", "failing", "failing"]);
+
+    const status = (context: string, state: string) => ({ context, state });
+    assert.equal(summarizeChecks([], []).overall, "none");
+    assert.equal(summarizeChecks([run("a", "success"), run("b", "skipped")], []).overall, "passing");
+    assert.equal(summarizeChecks([run("a", "success")], [status("ci", "pending")]).overall, "pending");
+    assert.equal(summarizeChecks([run("a", null)], [status("ci", "failure")]).overall, "failing");
+    const forbidden = new GitHubError("HTTP 403", 403);
+    const unknown = summarizeChecks([run("a", "success")], forbidden);
+    assert.equal(unknown.overall, "unknown", "a passing run says nothing about the statuses nobody could read");
+    assert.match(unknown.error!, /read access to Actions and Commit statuses/);
+    assert.equal(summarizeChecks([run("a", "failure")], forbidden).overall, "failing");
+    assert.equal(summarizeChecks(new Error("GitHub unreachable"), []).error, "GitHub unreachable");
+    assert.deepEqual(summarizeChecks([], [{ context: "ci", state: "success", url: "u" }]).checks, [{ name: "ci", state: "passing", url: "u" }]);
+  });
+
+  it("merges only the tested commit, without conflicts, and with passing checks unless forced", () => {
+    const checks = (overall: any, extra: Record<string, unknown> = {}) => ({
+      pr: { number: 3, url: "u" }, headSha: "abc", mergeable: true, overall, checks: [{ name: "e2e", state: "failing" as const }], ...extra,
+    });
+    assert.equal(mergeBlock(checks("passing"), "abc"), undefined);
+    assert.equal(mergeBlock(checks("none"), "abc"), undefined);
+    assert.equal(mergeBlock(checks("failing"), "abc"), "checks failing: e2e; approve with force to merge anyway");
+    assert.equal(mergeBlock(checks("failing"), "abc", true), undefined);
+    assert.match(mergeBlock(checks("unknown", { error: "no access" }), "abc")!, /^checks can't be read \(no access\)/);
+    assert.match(mergeBlock(checks("passing"), "older", true)!, /commit QA did not test/, "force never skips the tested commit");
+    assert.match(mergeBlock(checks("passing", { mergeable: false }), "abc", true)!, /conflicts with main/);
+    assert.equal(mergeBlock(checks("passing", { mergeable: null }), "abc"), undefined, "GitHub still working it out: its merge decides");
+  });
+
+  it("splits a diff into files, and leaves out patches that would make it too big", () => {
+    const patch = [
+      "diff --git a/a.txt b/a.txt",
+      "new file mode 100644",
+      "--- /dev/null",
+      "+++ b/a.txt",
+      "@@ -0,0 +1 @@",
+      "+a",
+      "diff --git a/img.png b/img.png",
+      "Binary files a/img.png and b/img.png differ",
+      "diff --git a/old.txt b/old.txt",
+      "deleted file mode 100644",
+      "@@ -1,2 +0,0 @@",
+      "-x",
+      "-y",
+      "diff --git a/my file.txt b/my file.txt",
+      "@@ -1 +1 @@",
+      "-1",
+      "+2",
+      "",
+    ].join("\n");
+    const numstat = "1\t0\ta.txt\0-\t-\timg.png\0" + "0\t2\told.txt\0" + "1\t1\tmy file.txt\0";
+    const { files, truncated } = parseDiff(numstat, patch);
+    assert.equal(truncated, false);
+    assert.deepEqual(
+      files.map((f) => [f.path, f.status, f.additions, f.deletions, f.binary, f.patch?.split("\n").length]),
+      [["a.txt", "added", 1, 0, false, 6], ["img.png", "modified", 0, 0, true, undefined], ["old.txt", "deleted", 0, 2, false, 5], ["my file.txt", "modified", 1, 1, false, 4]],
+    );
+    assert.ok(files[3].patch!.endsWith("+2"), "no trailing newline");
+
+    const small = parseDiff(numstat, patch, { file: 80, total: 1000 });
+    assert.equal(small.truncated, true);
+    assert.deepEqual(small.files.map((f) => !!f.patch), [false, false, true, true], "only the big file loses its patch");
+    const budget = parseDiff(numstat, patch, { file: 1000, total: 100 });
+    assert.deepEqual(budget.files.map((f) => !!f.patch), [true, false, false, false], "the budget runs out after the first");
+    assert.deepEqual(parseDiff("", ""), { files: [], truncated: false });
+  });
+
   it("recognises GitHub remotes only", () => {
     for (const url of ["https://github.com/me/shop.git", "https://github.com/me/shop", "https://x-access-token:t@github.com/me/shop.git", "git@github.com:me/shop.git", "ssh://git@github.com/me/shop.git"]) {
       assert.deepEqual(parseGitHubRemote(url), SLUG, url);

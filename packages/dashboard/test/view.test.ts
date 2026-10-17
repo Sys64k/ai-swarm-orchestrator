@@ -25,8 +25,16 @@ import {
   linkParts,
   reviewLink,
   reviewView,
+  approveAction,
+  canReview,
+  checksSummary,
+  diffSummary,
+  hasChanges,
+  patchLines,
+  currentTab,
+  fileStatusLabel,
 } from "../lib/view.ts";
-import type { HubNode, Plan, PlannedTask, Project, Task, TranscriptEntry } from "../lib/types.ts";
+import type { HubNode, Plan, PlannedTask, Project, ReviewChecks, Task, TranscriptEntry } from "../lib/types.ts";
 
 const task = (id: string, state: Task["state"], extra: Partial<Task> = {}): Task => ({
   project: "shop",
@@ -60,7 +68,7 @@ describe("pull request reviews", () => {
     const v = homeView([task("r", "awaiting_review", { review: { pr, rounds: 0 } }), task("w", "in_progress")], []);
     assert.deepEqual(
       v.attention.map((a) => [a.id, a.reason, a.badge.label, a.href]),
-      [["r", "Pull request #7 is ready for your review on GitHub", "Review?", "/tasks/r"]],
+      [["r", "Pull request #7 is ready for your review", "Review?", "/tasks/r"]],
     );
     assert.deepEqual(v.running.map((t) => t.spec.taskId), ["w"], "not listed as running too");
     assert.deepEqual(taskBadge(task("r", "awaiting_review")), { label: "Review", tone: "waiting" });
@@ -71,18 +79,71 @@ describe("pull request reviews", () => {
     const view = (state: Task["state"], review?: Task["review"]) => reviewView(task("t", state, { review }));
     assert.equal(view("in_progress"), undefined, "no pull requests on this Hub");
     assert.deepEqual(view("awaiting_review", { rounds: 0, error: "HTTP 502" }), { text: "Opening a pull request on GitHub", error: "HTTP 502" });
-    assert.deepEqual(view("awaiting_review", { pr, rounds: 2 }), { text: "Pull request #7 is ready for your review on GitHub (after 2 rounds of changes)", url: pr.url, error: undefined });
+    assert.deepEqual(view("awaiting_review", { pr, rounds: 2 }), { text: "Pull request #7 is ready for your review (after 2 rounds of changes)", url: pr.url, error: undefined });
     assert.deepEqual(view("in_progress", { pr, rounds: 1 }), { text: "Changes requested on pull request #7; an agent is on it (after 1 round of changes)", url: pr.url });
-    assert.deepEqual(view("merged", { pr, rounds: 0 }), { text: "Merged on GitHub as pull request #7", url: pr.url });
+    assert.deepEqual(view("merged", { pr, rounds: 0 }), { text: "Merged as pull request #7", url: pr.url });
     assert.deepEqual(view("cancelled", { pr, rounds: 0 }), { text: "Pull request #7 was closed", url: pr.url });
     assert.equal(view("in_progress", { rounds: 0 }), undefined, "no pull request yet, nothing to say");
   });
 
   it("puts the pull request one tap away on the task page", () => {
-    assert.deepEqual(reviewLink(task("t", "awaiting_review", { review: { pr, rounds: 0 } })), { label: "Review pull request #7 on GitHub", url: pr.url, primary: true });
-    assert.deepEqual(reviewLink(task("t", "merged", { review: { pr, rounds: 0 } })), { label: "Pull request #7 on GitHub", url: pr.url, primary: false });
+    assert.deepEqual(reviewLink(task("t", "awaiting_review", { review: { pr, rounds: 0 } })), { label: "Pull request #7 on GitHub", url: pr.url });
     assert.equal(reviewLink(task("t", "awaiting_review", { review: { rounds: 0 } })), undefined, "not opened yet");
     assert.equal(reviewLink(task("t", "in_progress")), undefined);
+  });
+
+  it("offers the review only while a pull request waits, and changes while there is a commit of its own", () => {
+    assert.equal(canReview(task("t", "awaiting_review", { review: { pr, rounds: 0 } })), true);
+    assert.equal(canReview(task("t", "awaiting_review", { review: { rounds: 0 } })), false, "no pull request yet");
+    assert.equal(canReview(task("t", "merged", { review: { pr, rounds: 0 } })), false);
+    assert.equal(hasChanges(task("t", "testing", { commit: "abc" })), true);
+    assert.equal(hasChanges(task("t", "merged", { commit: "abc" })), false, "it is part of main now");
+    assert.equal(hasChanges(task("t", "cancelled", { commit: "abc" })), false);
+    assert.equal(hasChanges(task("t", "in_progress")), false);
+  });
+
+  it("opens a task waiting for review on its changes, and keeps the person's choice while it can", () => {
+    const waiting = task("t", "awaiting_review", { review: { pr, rounds: 0 }, commit: "abc" });
+    assert.equal(currentTab(undefined, waiting), "changes");
+    assert.equal(currentTab("details", waiting), "details");
+    assert.equal(currentTab(undefined, task("t", "in_progress")), "live");
+    assert.equal(currentTab("changes", task("t", "pending")), "live", "sent back: no commit to show any more");
+    assert.deepEqual(["added", "deleted", "modified"].map((s) => fileStatusLabel(s as "added")), ["new · ", "deleted · ", ""]);
+  });
+
+  it("words the checks and picks the approve button for them", () => {
+    const checks = (overall: ReviewChecks["overall"], list: ReviewChecks["checks"] = [], extra: Partial<ReviewChecks> = {}): ReviewChecks => ({
+      pr, headSha: "abc", mergeable: true, overall, checks: list, ...extra,
+    });
+    const passing = checks("passing", [{ name: "unit", state: "passing" }, { name: "lint", state: "skipped" }]);
+    assert.deepEqual(checksSummary(passing), { text: "1 check passed", tone: "good" });
+    assert.deepEqual(approveAction(passing), { label: "Approve and merge", confirm: "Merge pull request #7 into main?", force: false, variant: "primary" });
+    assert.deepEqual(approveAction(checks("none"))?.force, false, "no CI is no reason to refuse");
+    assert.equal(checksSummary(checks("none")).text, "No checks run on this pull request");
+
+    const failing = checks("failing", [{ name: "unit", state: "passing" }, { name: "Playwright e2e", state: "failing" }, { name: "Docker", state: "failing" }]);
+    assert.deepEqual(checksSummary(failing), { text: "2 checks failed: Playwright e2e, Docker", tone: "bad" });
+    assert.deepEqual(approveAction(failing), {
+      label: "Merge anyway", confirm: "2 checks failed: Playwright e2e, Docker. Merge pull request #7 anyway?", force: true, variant: "danger",
+    });
+    assert.deepEqual(checksSummary(checks("pending", [{ name: "e2e", state: "pending" }])), { text: "1 check still running", tone: "waiting" });
+    assert.equal(approveAction(checks("pending"))?.label, "Merge without waiting");
+    const unknown = checks("unknown", [], { error: "no access" });
+    assert.equal(checksSummary(unknown).text, "Checks can't be read: no access");
+    assert.equal(approveAction(unknown)?.force, true);
+    const conflict = checks("passing", [], { mergeable: false });
+    assert.equal(approveAction(conflict), undefined, "nothing to merge until an agent rebases it");
+    assert.equal(checksSummary(conflict).tone, "bad");
+  });
+
+  it("sums up a diff and colours a patch without git's file header", () => {
+    const file = (additions: number, deletions: number, patch?: string) => ({ path: "a", status: "modified" as const, additions, deletions, binary: false, patch });
+    assert.equal(diffSummary({ files: [file(3, 1), file(1, 0)] }), "2 files · +4 −1");
+    assert.equal(diffSummary({ files: [file(0, 0)] }), "1 file · +0 −0");
+    const patch = ["diff --git a/a b/a", "index 1..2 100644", "--- a/a", "+++ b/a", "@@ -1,2 +1,2 @@", " same", "-old", "+new", "\\ No newline at end of file"].join("\n");
+    assert.deepEqual(patchLines(file(1, 1, patch)).map((l) => l.kind), ["hunk", "context", "del", "add", "meta"]);
+    assert.deepEqual(patchLines(file(0, 0)), []);
+    assert.deepEqual(patchLines(file(0, 0, "diff --git a/m b/m\nold mode 100644\nnew mode 100755")).map((l) => l.text), ["old mode 100644", "new mode 100755"], "a mode change has no hunk");
   });
 
   it("makes links in the terminal clickable, without the full stop after them", () => {

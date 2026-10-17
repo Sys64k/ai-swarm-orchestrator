@@ -833,3 +833,110 @@ select.input {
   align-items: flex-start;
   gap: 8px;
 }
+
+/* Reviewing a task: its checks and what it changes */
+.tone-good {
+  color: var(--good);
+}
+
+.tone-bad {
+  color: var(--bad);
+}
+
+.tone-waiting {
+  color: var(--waiting);
+}
+
+.tone-muted,
+.tone-active {
+  color: var(--muted);
+}
+
+.checks {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.checks li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.diff-files {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.diff-file {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.diff-file summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
+.diff-path {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.diff-stat {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+
+.diff-note {
+  margin: 0;
+  padding: 0 12px 10px;
+}
+
+/* Long lines scroll inside the file, never the page. */
+.diff {
+  margin: 0;
+  padding: 6px 0;
+  overflow-x: auto;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.diff-line {
+  display: block;
+  min-width: max-content;
+  padding: 0 12px;
+  white-space: pre;
+}
+
+.diff-add {
+  background: var(--good-bg);
+}
+
+.diff-del {
+  background: var(--bad-bg);
+}
+
+.diff-hunk {
+  color: var(--active);
+}
+
+.diff-meta {
+  color: var(--muted);
+}

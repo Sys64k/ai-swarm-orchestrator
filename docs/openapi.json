@@ -1233,6 +1233,160 @@
         ],
         "additionalProperties": false
       },
+      "TaskDiff": {
+        "type": "object",
+        "properties": {
+          "base": {
+            "type": "string",
+            "description": "Where the task's branch left main"
+          },
+          "head": {
+            "type": "string",
+            "description": "The task's commit"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "added",
+                    "modified",
+                    "deleted"
+                  ]
+                },
+                "additions": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "deletions": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "binary": {
+                  "type": "boolean"
+                },
+                "patch": {
+                  "description": "The unified diff; left out for binary files and when the answer would get too big",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "status",
+                "additions",
+                "deletions",
+                "binary"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "Some patches were left out to keep the answer small"
+          }
+        },
+        "required": [
+          "base",
+          "head",
+          "files",
+          "truncated"
+        ],
+        "additionalProperties": false,
+        "description": "What a task changes, against the main it branched from"
+      },
+      "ReviewChecks": {
+        "type": "object",
+        "properties": {
+          "pr": {
+            "type": "object",
+            "properties": {
+              "number": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "number",
+              "url"
+            ],
+            "additionalProperties": false
+          },
+          "headSha": {
+            "type": "string"
+          },
+          "mergeable": {
+            "description": "False when it conflicts with main; null while GitHub is still working it out",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "overall": {
+            "type": "string",
+            "enum": [
+              "passing",
+              "failing",
+              "pending",
+              "none",
+              "unknown"
+            ],
+            "description": "failing if any check fails, else pending if any runs, else passing; none without checks; unknown when they can't be read"
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "passing",
+                    "failing",
+                    "pending",
+                    "skipped"
+                  ]
+                },
+                "url": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "state"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "error": {
+            "description": "Why the checks could not be read",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pr",
+          "headSha",
+          "mergeable",
+          "overall",
+          "checks"
+        ],
+        "additionalProperties": false,
+        "description": "The CI checks on a task's pull request"
+      },
       "Plan": {
         "type": "object",
         "properties": {
@@ -2169,6 +2323,29 @@
           "description"
         ],
         "additionalProperties": false
+      },
+      "ApproveTask": {
+        "type": "object",
+        "properties": {
+          "force": {
+            "description": "Merge even when the pull request's checks are failing, still running or can't be read",
+            "type": "boolean"
+          }
+        }
+      },
+      "RequestChanges": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000,
+            "description": "What should change; the agent gets it as written"
+          }
+        },
+        "required": [
+          "message"
+        ]
       },
       "Sync": {
         "type": "object",
@@ -3246,6 +3423,282 @@
           },
           "409": {
             "description": "Not failed or cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}/diff": {
+      "get": {
+        "operationId": "getTaskDiff",
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "What the task changes, file by file, against the main it branched from",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskDiff"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "No such task",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "No unmerged commit to show",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}/checks": {
+      "get": {
+        "operationId": "getTaskChecks",
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "The CI checks on the task's pull request",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewChecks"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "No such task",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not waiting for review, or no pull request yet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "GitHub failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}/approve": {
+      "post": {
+        "operationId": "postTaskApprove",
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Accept the work: merge its pull request (checks must pass unless forced)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveTask"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Task"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "No such task",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not waiting for review, checks not passing (without force), or it conflicts with main",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "GitHub failed or refused the merge",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}/request-changes": {
+      "post": {
+        "operationId": "postTaskRequestChanges",
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Send the work back to an agent with what should change (a review round)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestChanges"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Task"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No message",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "No such task",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not waiting for review, or no pull request yet",
             "content": {
               "application/json": {
                 "schema": {

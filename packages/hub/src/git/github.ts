@@ -1,6 +1,6 @@
 /**
  * The few GitHub REST calls the Hub's pull-request flow needs. Plain fetch, no SDK: open and
- * update a task's PR, read its state and reviews, comment, close.
+ * update a task's PR, read its state, reviews and checks, comment, merge, close.
  */
 
 export const GITHUB_API = "https://api.github.com";
@@ -58,6 +58,24 @@ export interface ReviewComment {
   path: string;
   line?: number;
   body: string;
+}
+
+/** A check run (GitHub Actions and other apps) on a commit. */
+export interface CheckRun {
+  name: string;
+  /** queued, in_progress, completed... */
+  status: string;
+  /** success, failure, neutral, skipped, cancelled, timed_out... once completed. */
+  conclusion: string | null;
+  url?: string;
+}
+
+/** A commit status (the older API some CI services use). */
+export interface CommitStatus {
+  context: string;
+  /** success, pending, failure or error. */
+  state: string;
+  url?: string;
 }
 
 interface PullJson {
@@ -130,6 +148,39 @@ export class GitHubApi {
     return list
       .filter((c) => c.pull_request_review_id === reviewId)
       .map((c) => ({ path: c.path, line: c.line ?? c.original_line ?? undefined, body: c.body }));
+  }
+
+  /** Merge the pull request if its head is still `sha`; returns the merge commit on the base branch. */
+  async mergePull(number: number, sha: string): Promise<string> {
+    const merged = await this.call<{ sha: string; merged: boolean }>("PUT", `/pulls/${number}/merge`, { sha, merge_method: "merge" });
+    return merged.sha;
+  }
+
+  async checkRuns(sha: string): Promise<CheckRun[]> {
+    const page = await this.call<{ check_runs: Array<{ name: string; status: string; conclusion: string | null; html_url?: string | null }> }>(
+      "GET",
+      `/commits/${sha}/check-runs?per_page=100`,
+    );
+    return page.check_runs.map((r) => ({ name: r.name, status: r.status, conclusion: r.conclusion, url: r.html_url ?? undefined }));
+  }
+
+  /**
+   * The jobs of the GitHub Actions runs on a commit, as check runs. Fine-grained tokens can't
+   * have the Checks permission (GitHub Apps only), but they can read Actions.
+   */
+  async actionJobs(sha: string): Promise<CheckRun[]> {
+    const runs = await this.call<{ workflow_runs: Array<{ id: number }> }>("GET", `/actions/runs?head_sha=${sha}&per_page=100`);
+    const jobs = await Promise.all(
+      runs.workflow_runs.map((run) =>
+        this.call<{ jobs: Array<{ name: string; status: string; conclusion: string | null; html_url?: string | null }> }>("GET", `/actions/runs/${run.id}/jobs?per_page=100`),
+      ),
+    );
+    return jobs.flatMap((page) => page.jobs.map((j) => ({ name: j.name, status: j.status, conclusion: j.conclusion, url: j.html_url ?? undefined })));
+  }
+
+  async statuses(sha: string): Promise<CommitStatus[]> {
+    const combined = await this.call<{ statuses: Array<{ context: string; state: string; target_url?: string | null }> }>("GET", `/commits/${sha}/status`);
+    return combined.statuses.map((s) => ({ context: s.context, state: s.state, url: s.target_url ?? undefined }));
   }
 
   async comment(number: number, body: string): Promise<void> {
