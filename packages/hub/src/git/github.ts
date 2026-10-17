@@ -19,6 +19,14 @@ export function parseGitHubRemote(url: string): RepoSlug | undefined {
   return m ? { owner: m[1], repo: m[2] } : undefined;
 }
 
+/** `owner/repo`, or a github.com URL of it, as a slug; undefined for anything else. */
+export function parseGitHubRepo(input: string): RepoSlug | undefined {
+  const text = input.trim();
+  const short = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?$/.exec(text);
+  if (short && !text.includes(":")) return { owner: short[1], repo: short[2] };
+  return parseGitHubRemote(text);
+}
+
 export class GitHubError extends Error {
   constructor(
     message: string,
@@ -99,6 +107,12 @@ export class GitHubApi {
     apiUrl = GITHUB_API,
   ) {
     this.base = `${apiUrl.replace(/\/+$/, "")}/repos/${slug.owner}/${slug.repo}`;
+  }
+
+  /** What the token may do with the repository, and its default branch. */
+  async repoAccess(): Promise<{ push: boolean; defaultBranch: string }> {
+    const repo = await this.call<{ default_branch: string; permissions?: { push?: boolean } }>("GET", "");
+    return { push: repo.permissions?.push === true, defaultBranch: repo.default_branch };
   }
 
   /** The open PR from `branch`, if there is one. */

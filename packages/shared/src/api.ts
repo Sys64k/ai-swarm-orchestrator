@@ -67,7 +67,16 @@ export const ApiErrorSchema = z.object({ error: z.string() }).describe("Why the 
 // Request bodies
 // ---------------------------------------------------------------------------
 
-export const CreateProjectBodySchema = z.object({ name: ProjectIdSchema });
+export const CreateProjectBodySchema = z.object({
+  name: ProjectIdSchema,
+  github: z
+    .string()
+    .trim()
+    .min(3)
+    .max(200)
+    .optional()
+    .describe("A GitHub repository (`owner/repo` or its URL) to connect: its code if it has any, and pull requests. The Hub's token must reach it"),
+});
 export const CreatePlanBodySchema = z.object({
   /** Needed when the Hub has more than one project. */
   project: ProjectIdSchema.optional(),

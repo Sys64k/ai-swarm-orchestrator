@@ -1,10 +1,11 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, readdir } from "node:fs/promises";
+import { mkdir, readdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { createLogger, ProjectIdSchema, type LlmUsage } from "@aso/shared";
 import { DependencyManager, type DependencyManagerOptions } from "./dependencies.js";
+import { GitHubApi, GitHubError, parseGitHubRepo, type RepoSlug } from "./git/github.js";
 import { HubRepository } from "./git/hub-repo.js";
 import { PullRequests, type PullRequestOptions, type PullRequestStatus } from "./git/pull-requests.js";
 import { GitSync } from "./git/sync.js";
@@ -16,6 +17,18 @@ import { Transcripts, type TranscriptInput, type TranscriptSubject } from "./tra
 
 const log = createLogger("projects");
 const exec = promisify(execFile);
+
+async function initRepo(dir: string, branch: string): Promise<void> {
+  await exec("git", ["init", "--quiet", `--initial-branch=${branch}`], { cwd: dir });
+  await exec("git", ["-c", "user.name=ASO Hub", "-c", "user.email=aso-hub@localhost", "commit", "--quiet", "--allow-empty", "-m", "Initial commit"], { cwd: dir });
+}
+
+/** The token as a header scoped to an HTTPS remote's host (as GitSync does); never stored in .git/config. */
+function authArgs(url: string, token: string): string[] {
+  if (!/^https?:\/\//.test(url)) return [];
+  const basic = Buffer.from(`x-access-token:${token}`).toString("base64");
+  return ["-c", `http.${new URL(url).origin}/.extraHeader=Authorization: Basic ${basic}`];
+}
 
 /** Everything the Hub keeps for one project; each project's state lives in its own `.git/aso/`. */
 export interface Project {
@@ -35,7 +48,8 @@ export interface Project {
 export class ProjectError extends Error {
   constructor(
     message: string,
-    readonly code: "not_found" | "conflict" | "invalid",
+    /** upstream: GitHub failed. */
+    readonly code: "not_found" | "conflict" | "invalid" | "upstream",
   ) {
     super(message);
   }
@@ -53,7 +67,11 @@ export interface ProjectSetOptions {
   deps: Pick<DependencyManagerOptions, "installer" | "allow">;
   sync: { enabled?: boolean; remote?: string; token?: string; retryMs?: number };
   /** GitHub pull requests for QA-approved work (the token defaults to `sync.token`). */
-  pullRequests?: Omit<PullRequestOptions, "token"> & { token?: string };
+  pullRequests?: Omit<PullRequestOptions, "token"> & {
+    token?: string;
+    /** The Git URL of a GitHub repository (tests point it at a local one). Default: its https://github.com URL. */
+    gitUrl?: (slug: RepoSlug) => string;
+  };
   /** Called after any task or plan of a project changed (notifications). */
   onChange?: (project: Project) => void;
 }
@@ -124,8 +142,12 @@ export class ProjectSet {
     throw new ProjectError(this.projects.size ? "say which project (`project`)" : "create a project first", "invalid");
   }
 
-  /** Create `<root>/<name>` as a new git repository with an empty first commit, and open it. */
-  async create(name: unknown): Promise<Project> {
+  /**
+   * Create `<root>/<name>` and open it: a new git repository with an empty first commit, or,
+   * with `github`, connected to that GitHub repository. An empty repository gets the first
+   * commit pushed; one with code is cloned. Either way pull requests work from the start.
+   */
+  async create(name: unknown, opts: { github?: string } = {}): Promise<Project> {
     if (!this.opts.root) throw new ProjectError("this Hub has no projects root, so it cannot create projects", "invalid");
     const parsed = ProjectIdSchema.safeParse(name);
     if (!parsed.success) throw new ProjectError(parsed.error.issues[0].message, "invalid");
@@ -133,11 +155,62 @@ export class ProjectSet {
     const dir = path.join(this.opts.root, id);
     if (this.projects.has(id) || existsSync(dir)) throw new ProjectError(`${id} already exists in ${this.opts.root}`, "conflict");
     const branch = this.opts.mainBranch ?? "main";
+    const github = opts.github === undefined ? undefined : await this.githubRepo(opts.github, branch);
+
     await mkdir(dir);
-    await exec("git", ["init", "--quiet", `--initial-branch=${branch}`], { cwd: dir });
-    await exec("git", ["-c", "user.name=ASO Hub", "-c", "user.email=aso-hub@localhost", "commit", "--quiet", "--allow-empty", "-m", "Initial commit"], { cwd: dir });
-    log.info(`created project ${id} in ${dir}`);
+    try {
+      if (github) await this.connectGitHub(dir, github, branch);
+      else await initRepo(dir, branch);
+    } catch (err) {
+      await rm(dir, { recursive: true, force: true }); // created above: nothing of anyone else's
+      throw err;
+    }
+    log.info(`created project ${id} in ${dir}${github ? ` from GitHub ${github.slug.owner}/${github.slug.repo}` : ""}`);
     return this.add(id, dir);
+  }
+
+  /** The GitHub repository to connect, once the Hub's token is known to write to it. */
+  private async githubRepo(input: string, branch: string): Promise<{ slug: RepoSlug; url: string; token: string }> {
+    const slug = parseGitHubRepo(input);
+    if (!slug) throw new ProjectError(`${input} is not a GitHub repository: use owner/repo or its github.com URL`, "invalid");
+    const name = `${slug.owner}/${slug.repo}`;
+    const token = this.opts.pullRequests?.token ?? this.opts.sync.token;
+    if (!token) throw new ProjectError("connecting a GitHub repository needs the Hub's GitHub token (ASO_GIT_TOKEN)", "invalid");
+    let access: { push: boolean; defaultBranch: string };
+    try {
+      access = await new GitHubApi(slug, token, this.opts.pullRequests?.apiUrl).repoAccess();
+    } catch (err) {
+      if (err instanceof GitHubError && (err.status === 404 || err.status === 403)) {
+        throw new ProjectError(`the Hub's GitHub token can't reach ${name}: create the repository on GitHub, then add it to the token's repository access`, "invalid");
+      }
+      throw new ProjectError(`could not check ${name} on GitHub: ${(err as Error).message}`, "upstream");
+    }
+    if (!access.push) throw new ProjectError(`the Hub's GitHub token can read ${name} but not write to it: give it Contents and Pull requests write access`, "invalid");
+    if (access.defaultBranch !== branch) {
+      throw new ProjectError(`${name}'s default branch is ${access.defaultBranch}; the Hub works on ${branch}, so make ${branch} the default branch first`, "invalid");
+    }
+    return { slug, url: this.opts.pullRequests?.gitUrl?.(slug) ?? `https://github.com/${slug.owner}/${slug.repo}.git`, token };
+  }
+
+  /** Clone the repository into `dir`, or start it there and push the first commit when it is empty. */
+  private async connectGitHub(dir: string, github: { slug: RepoSlug; url: string; token: string }, branch: string): Promise<void> {
+    const auth = authArgs(github.url, github.token);
+    const git = async (args: string[], cwd = dir) => {
+      try {
+        return (await exec("git", [...auth, ...args], { cwd })).stdout;
+      } catch (err) {
+        const message = ((err as { stderr?: string }).stderr || (err as Error).message).split(github.token).join("***");
+        throw new ProjectError(`git ${args[0]} with ${github.slug.owner}/${github.slug.repo} failed: ${message.trim().split("\n")[0]}`, "upstream");
+      }
+    };
+    const heads = await git(["ls-remote", "--heads", github.url]);
+    if (heads.trim()) {
+      await git(["clone", "--quiet", "--branch", branch, "--origin", "origin", github.url, dir], path.dirname(dir));
+      return;
+    }
+    await initRepo(dir, branch);
+    await exec("git", ["remote", "add", "origin", github.url], { cwd: dir });
+    await git(["push", "--quiet", "origin", `refs/heads/${branch}:refs/heads/${branch}`]);
   }
 
   /** Give idle workers and Architects work from every project. */

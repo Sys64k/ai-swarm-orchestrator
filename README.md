@@ -131,8 +131,9 @@ aso start-hub             # without Docker
 
 The Hub works on **projects** in `~/aso-projects` (change it with `--root`). Each git
 repository directly inside that folder is a project, named after its folder. Create new
-projects from the console or with `POST /api/projects`. To bring in an existing repository,
-move or clone it into the folder; it needs at least one commit on `main`. See
+projects from the console or with `POST /api/projects`, optionally connected to a GitHub
+repository. To bring in a repository from elsewhere, move or clone it into the folder; it
+needs at least one commit on `main`. See
 [Projects](#projects).
 
 The first start generates the **ASO token** (`~/.config/aso/token`, readable only by you).
@@ -486,6 +487,13 @@ One Hub runs several projects at the same time. They share the workers and the A
 - **New projects.** `POST /api/projects {"name": "my-app"}`, or the console, creates
   `~/aso-projects/my-app` as a git repository with an empty first commit on `main`. An
   existing folder is never taken over.
+- **Connected to GitHub.** Add `"github": "owner/repo"` (or the repository's URL), or fill in
+  *GitHub repository* in the console. First create the repository on GitHub and add it to the
+  Hub's fine-grained token (*Repository access*). The Hub checks that the token can write to it
+  and that its default branch is `main`. An empty repository gets the first commit pushed; one
+  with code is cloned. Its `origin` is set, so `main` is pushed after merges and work goes to
+  pull requests from the first task. Nothing is created if a check fails, and the token is
+  never written to `.git/config`.
 - **Separate state.** Each project has its own plans, tasks, transcripts and push-to-origin
   settings (its own `origin` remote), kept in its `.git/aso/`.
 - **Ids are global.** Task and plan ids are unique across projects, so `/api/tasks/<id>` and

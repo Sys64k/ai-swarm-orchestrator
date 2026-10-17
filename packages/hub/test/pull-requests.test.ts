@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, describe, it } from "node:test";
-import { changesRequested, checkState, GitHubError, mergeBlock, parseDiff, parseGitHubRemote, pullRequestBody, reviewFeedback, startHub, summarizeChecks, type TaskRecord } from "@aso/hub";
+import { changesRequested, checkState, GitHubError, mergeBlock, parseDiff, parseGitHubRemote, parseGitHubRepo, pullRequestBody, reviewFeedback, startHub, summarizeChecks, type TaskRecord } from "@aso/hub";
 import { createMessage } from "@aso/shared";
 import { git, gitAsync, makeTargetRepo, postTask, pushTaskBranch, tempDir, TOKEN, waitFor, withHub, worker, writeFiles, type HubContext, type TestClient } from "./helpers.ts";
 
@@ -37,6 +37,8 @@ class FakeGitHub {
   /** Check runs and commit statuses per commit. */
   checkRuns = new Map<string, Array<{ name: string; status: string; conclusion: string | null; html_url: string }>>();
   statuses = new Map<string, Array<{ context: string; state: string; target_url: string }>>();
+  /** What `GET /repos/me/shop` says about the repository and the token's access to it. */
+  repoInfo = { default_branch: "main", permissions: { push: true } };
   /** The token may read no checks at all (no Actions or Commit statuses access). */
   checksForbidden = false;
   /** Check runs are refused but Actions are not: a fine-grained token, which can't have Checks. */
@@ -75,6 +77,7 @@ class FakeGitHub {
     this.statuses.clear();
     this.checksForbidden = false;
     this.checkRunsForbidden = false;
+    this.repoInfo = { default_branch: "main", permissions: { push: true } };
     this.originDir = originDir;
   }
 
@@ -108,6 +111,7 @@ class FakeGitHub {
     for await (const c of req) chunks.push(c as Buffer);
     const body = chunks.length ? (JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>) : {};
 
+    if (req.method === "GET" && route === "") return [200, this.repoInfo];
     if (req.method === "GET" && route === "/pulls") {
       const head = url.searchParams.get("head")?.split(":")[1];
       return [200, [...this.pulls.values()].filter((p) => p.state === "open" && p.head === head).map((p) => this.json(p))];
@@ -801,5 +805,93 @@ describe("pull request helpers", () => {
     assert.match(body, /^Do it\.\n\n\*\*Files\*\* \(1\)\n- `a\.ts`/);
     assert.match(body, /\*\*Task:\*\* `t1` \(frontend, implementation\), after 2 rework rounds and 1 review round; model cost about \$1\.23/);
     assert.doesNotMatch(body, /Acceptance criteria/);
+  });
+});
+
+describe("projects connected to GitHub", () => {
+  /** A Hub with a projects root whose GitHub repository me/shop is the bare repository `origin`. */
+  async function withGitHubRoot(fn: (port: number, root: string, origin: string) => Promise<void>, opts: { token?: string | null } = {}) {
+    const root = tempDir("aso-projects-");
+    const origin = tempDir("aso-github-shop-");
+    git(origin, "init", "--quiet", "--bare", "--initial-branch=main");
+    github.reset(origin);
+    const token = opts.token === null ? undefined : (opts.token ?? GH_TOKEN);
+    const hub = await startHub({
+      projectsRoot: root,
+      port: 0,
+      host: "127.0.0.1",
+      token: TOKEN,
+      sync: { token },
+      pullRequests: { apiUrl: github.url, repo: SLUG, pollMs: 60_000, gitUrl: () => origin },
+    });
+    try {
+      await fn(hub.port, root, origin);
+    } finally {
+      await hub.close();
+      rmSync(root, { recursive: true, force: true });
+      rmSync(origin, { recursive: true, force: true });
+    }
+  }
+
+  it("connects an empty repository: pushes the first commit, and pull requests are on", () =>
+    withGitHubRoot(async (port, root, origin) => {
+      const res = await api(port, "POST", "projects", { name: "shop", github: "https://github.com/me/shop" });
+      assert.equal(res.status, 201, res.data.error);
+      assert.deepEqual(res.data.pullRequests, { enabled: true, repo: "me/shop" });
+      assert.equal(git(origin, "log", "--format=%s", "main"), "Initial commit", "the first commit is on GitHub");
+      assert.equal(git(`${root}/shop`, "remote", "get-url", "origin"), origin);
+      assert.doesNotMatch(readFileSync(`${root}/shop/.git/config`, "utf8"), /extraHeader|Authorization/i, "the token is never stored");
+    }));
+
+  it("clones a repository that already has code", () =>
+    withGitHubRoot(async (port, root, origin) => {
+      const seed = tempDir("aso-seed-");
+      try {
+        git(seed, "clone", "--quiet", origin, ".");
+        writeFiles(seed, { "README.md": "# Shop\n" });
+        git(seed, "add", "-A");
+        git(seed, "-c", "user.name=Me", "-c", "user.email=me@example.com", "commit", "--quiet", "-m", "existing code");
+        git(seed, "push", "--quiet", "origin", "HEAD:main");
+      } finally {
+        rmSync(seed, { recursive: true, force: true });
+      }
+      const res = await api(port, "POST", "projects", { name: "shop", github: "me/shop" });
+      assert.equal(res.status, 201, res.data.error);
+      assert.equal(git(`${root}/shop`, "show", "main:README.md"), "# Shop");
+      assert.equal(git(`${root}/shop`, "rev-parse", "main"), git(origin, "rev-parse", "main"));
+    }));
+
+  it("says what to fix when the repository can't be used, and leaves nothing behind", () =>
+    withGitHubRoot(async (port, root) => {
+      const fails = async (github: string, error: RegExp) => {
+        const res = await api(port, "POST", "projects", { name: "shop", github });
+        assert.equal(res.status, 400, github);
+        assert.match(res.data.error, error);
+        assert.equal(existsSync(`${root}/shop`), false, "no folder left behind");
+      };
+      await fails("not a repo", /not a GitHub repository: use owner\/repo/);
+      await fails("me/other", /token can't reach me\/other: create the repository on GitHub, then add it to the token's repository access/);
+      github.repoInfo = { default_branch: "main", permissions: { push: false } };
+      await fails("me/shop", /can read me\/shop but not write to it/);
+      github.repoInfo = { default_branch: "master", permissions: { push: true } };
+      await fails("me/shop", /default branch is master; the Hub works on main/);
+      assert.equal((await api(port, "POST", "projects", { name: "plain" })).status, 201, "a project without GitHub still works");
+    }));
+
+  it("needs the Hub's GitHub token to connect one", () =>
+    withGitHubRoot(
+      async (port) => {
+        const res = await api(port, "POST", "projects", { name: "shop", github: "me/shop" });
+        assert.equal(res.status, 400);
+        assert.match(res.data.error, /needs the Hub's GitHub token \(ASO_GIT_TOKEN\)/);
+      },
+      { token: null },
+    ));
+
+  it("reads owner/repo and github.com URLs", () => {
+    for (const input of ["me/shop", " me/shop.git ", "https://github.com/me/shop", "git@github.com:me/shop.git"]) {
+      assert.deepEqual(parseGitHubRepo(input), SLUG, input);
+    }
+    for (const input of ["shop", "me/shop/extra", "https://gitlab.com/me/shop", "../me/shop"]) assert.equal(parseGitHubRepo(input), undefined, input);
   });
 });
