@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { describe, it } from "node:test";
 import Anthropic from "@anthropic-ai/sdk";
-import { AnthropicApiAdapter, LlmError, priceUsage, taskPrompt, type LlmRequest } from "@aso/hub";
+import { AnthropicApiAdapter, DEFAULT_PLAN_BUDGET_USD, LlmError, priceUsage, taskPrompt, type LlmRequest } from "@aso/hub";
 import { createMessage, type AgentMessage } from "@aso/shared";
 import { startWorker } from "@aso/worker";
 import {
@@ -197,6 +197,20 @@ describe("LLM gateway (Hub)", () => {
       },
       { llm: { adapter: model, taskBudgetUsd: 1 } },
     );
+  });
+
+  it("caps each planning round at $3 unless the Hub is told otherwise", async () => {
+    const budget = async (llm: Record<string, unknown>) => {
+      let usd = 0;
+      await withHub(async (ctx) => {
+        const res = await fetch(`http://127.0.0.1:${ctx.port}/api/llm`, { headers: { authorization: `Bearer ${TOKEN}` } });
+        usd = ((await res.json()) as { planBudgetUsd: number }).planBudgetUsd;
+      }, { llm });
+      return usd;
+    };
+    assert.equal(DEFAULT_PLAN_BUDGET_USD, 3);
+    assert.equal(await budget({ adapter: new ScriptedModel(() => reply([], "end_turn")) }), 3);
+    assert.equal(await budget({ adapter: new ScriptedModel(() => reply([], "end_turn")), planBudgetUsd: 7.5 }), 7.5);
   });
 
   it("puts rework feedback into the task prompt", () => {

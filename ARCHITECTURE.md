@@ -1122,7 +1122,7 @@ sequenceDiagram
 ```
 
 - **Approval is required.** A plan never starts work on its own; each task spends credits.
-  Planning itself is capped at $1 per plan (`planBudgetUsd`).
+  Planning itself is capped at $3 per planning round (`planBudgetUsd`, `--plan-budget`), counted from the latest reply.
 - **One plan per Architect at a time.** Plans queue while no Architect is idle. If the
   Architect disconnects mid-plan, the plan returns to the queue. An Architect that reconnects
   and receives a plan it already answered re-sends its stored answer instead of planning
