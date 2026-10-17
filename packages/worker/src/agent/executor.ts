@@ -8,6 +8,8 @@ const log = createLogger("agent");
 
 /** Backoff for retryable model errors (rate limits, API outages). */
 const RETRY_DELAYS_MS = [2_000, 5_000, 15_000, 30_000, 60_000];
+/** How often to ask again while the Hub holds model calls (e.g. out of credit). */
+export const PAUSE_RETRY_MS = 60_000;
 /** Keep each turn's tool results well under the Hub's 2 MB frame limit. */
 const TURN_RESULTS_BUDGET = 1_200_000;
 
@@ -88,16 +90,29 @@ export class LlmTaskExecutor implements TaskExecutor {
   }
 }
 
-/** Calls the model, retrying retryable failures with backoff; throws ModelError otherwise. */
+/**
+ * Calls the model, retrying retryable failures with backoff; throws ModelError otherwise. While
+ * the Hub holds model calls (`paused`, e.g. out of credit) it waits as long as that lasts,
+ * asking again every `pauseMs`, without using up its retries.
+ */
 export async function callModelWithRetry(
   call: (turn: ModelTurn) => Promise<ModelReply>,
   turn: ModelTurn,
   report: (msg: string) => void,
   delays: number[] = RETRY_DELAYS_MS,
+  pauseMs = PAUSE_RETRY_MS,
 ): Promise<Extract<ModelReply, { outcome: "ok" }>> {
+  let waiting = false;
   for (let attempt = 0; ; attempt++) {
     const reply = await call(turn);
     if (reply.outcome === "ok") return reply;
+    if (reply.paused) {
+      if (!waiting) report(`waiting: ${reply.error}`);
+      waiting = true;
+      attempt--;
+      await new Promise((r) => setTimeout(r, pauseMs));
+      continue;
+    }
     if (!reply.retryable || attempt >= delays.length) throw new ModelError(reply.error);
     log.warn(`model call failed (${reply.error}); retrying in ${delays[attempt] / 1000}s`);
     report(`model unavailable, retrying: ${reply.error}`);

@@ -25,9 +25,25 @@ export class LlmError extends Error {
   constructor(
     message: string,
     readonly retryable: boolean,
+    /** credit: the account ran out of credit; everything waits until it has some again. */
+    readonly pause?: "credit",
   ) {
     super(message);
   }
+}
+
+export const CREDIT_MESSAGE =
+  "Anthropic credit balance is too low: add credits at console.anthropic.com (Settings → Billing). Work waits and resumes by itself";
+
+/** The API's own words: a streamed error arrives as its raw JSON body. */
+export function apiErrorText(message: string): string {
+  try {
+    const body = JSON.parse(message) as { error?: { message?: unknown } };
+    if (typeof body.error?.message === "string") return body.error.message;
+  } catch {
+    // Not JSON: already plain text.
+  }
+  return message;
 }
 
 /** A model provider. The Hub is the only component that talks to one. */
@@ -97,7 +113,8 @@ export class AnthropicApiAdapter implements LlmAdapter {
   }
 }
 
-function classify(err: unknown): LlmError {
+export function classify(err: unknown): LlmError {
+  if (err instanceof Anthropic.APIError && /credit balance is too low/i.test(err.message)) return new LlmError(CREDIT_MESSAGE, true, "credit");
   if (err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError) {
     return new LlmError(`Anthropic API rejected the credentials: ${err.message}`, false);
   }
@@ -106,7 +123,9 @@ function classify(err: unknown): LlmError {
   if (err instanceof Anthropic.InternalServerError || err instanceof Anthropic.APIConnectionError) {
     return new LlmError(`Anthropic API unavailable: ${err.message}`, true);
   }
-  if (err instanceof Anthropic.APIError) return new LlmError(`API error ${err.status}: ${err.message}`, (err.status ?? 0) >= 500);
+  if (err instanceof Anthropic.APIError) {
+    return new LlmError(`API error${err.status ? ` ${err.status}` : ""}: ${apiErrorText(err.message)}`, (err.status ?? 0) >= 500);
+  }
   // Not an API error: e.g. an eagerly streamed tool input that could not be parsed. Re-issuing the turn helps.
   return new LlmError(`model response could not be processed: ${(err as Error).message}`, true);
 }

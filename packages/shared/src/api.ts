@@ -330,6 +330,10 @@ export const LlmStatusSchema = z.object({
   queue: z.object({ limit: z.number().int(), running: z.number().int(), waiting: z.number().int() }).describe("Model requests at once, now and waiting"),
   conversations: z.number().int(),
   totals: z.object({ calls: z.number().int(), costUsd: z.number() }),
+  paused: z
+    .object({ reason: z.string(), since: Timestamp })
+    .optional()
+    .describe("Model calls are on hold (the account ran out of credit); they resume once a call succeeds again"),
 });
 
 export const PushStatusSchema = z.object({ publicKey: z.string(), devices: z.number().int() });

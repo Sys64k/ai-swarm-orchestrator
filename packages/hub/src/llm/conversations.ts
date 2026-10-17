@@ -39,6 +39,9 @@ export interface ConversationOptions {
   maxTurns?: number;
   /** Concurrent API requests across all workers. */
   concurrency?: number;
+  /** Called when model calls go on hold (out of credit), and when they work again. */
+  onPause?: (reason: string) => void;
+  onResume?: () => void;
   /** Drop idle conversations after this long. */
   idleTimeoutMs?: number;
   /** Saves conversations after every turn so agents can carry on after a Hub restart. */
@@ -76,6 +79,8 @@ interface Conversation {
   results: Map<number, OkResult>;
   inflight?: string;
   lastActivity: number;
+  /** Its subject's history already says it waits for model credit. */
+  waitingNoted?: boolean;
 }
 
 /** A conversation as saved on disk: the subject and tools are rebuilt from the kind, id and role. */
@@ -100,6 +105,10 @@ export class ConversationManager {
   private readonly requests = new Map<string, { conversationId: string; turn: number }>();
   private readonly toolsByRole = new Map<AgentRole, Anthropic.Beta.BetaTool[]>();
   private readonly taskBudgetUsd: number;
+  /** Set while model calls are on hold (out of credit). */
+  private paused?: { reason: string; since: string };
+  private readonly onPause?: (reason: string) => void;
+  private readonly onResume?: () => void;
   private readonly planBudgetUsd: number;
   private readonly maxTurns: number;
   private readonly idleTimeoutMs: number;
@@ -116,6 +125,8 @@ export class ConversationManager {
     opts: ConversationOptions = {},
   ) {
     this.taskBudgetUsd = opts.taskBudgetUsd ?? 5;
+    this.onPause = opts.onPause;
+    this.onResume = opts.onResume;
     this.planBudgetUsd = opts.planBudgetUsd ?? DEFAULT_PLAN_BUDGET_USD;
     this.maxTurns = opts.maxTurns ?? 80;
     this.idleTimeoutMs = opts.idleTimeoutMs ?? 30 * 60_000;
@@ -214,6 +225,7 @@ export class ConversationManager {
       queue: this.slots.status(),
       conversations: this.conversations.size,
       totals: { calls: this.totals.calls, costUsd: round(this.totals.costUsd) },
+      ...(this.paused ? { paused: { ...this.paused } } : {}),
     };
   }
 
@@ -308,10 +320,10 @@ export class ConversationManager {
   }
 
   private async run(conv: Conversation, req: Request, userMessage: Anthropic.Beta.BetaMessageParam): Promise<void> {
-    const fail = (error: string, retryable: boolean) => {
+    const fail = (error: string, retryable: boolean, paused?: boolean) => {
       // Not committed: the worker may retry this turn with a new requestId.
       this.requests.delete(req.requestId);
-      this.respond(conv.nodeId, { requestId: req.requestId, outcome: "error", error, retryable });
+      this.respond(conv.nodeId, { requestId: req.requestId, outcome: "error", error, retryable, ...(paused ? { paused } : {}) });
     };
     try {
       const messages = [...conv.messages, userMessage];
@@ -319,6 +331,11 @@ export class ConversationManager {
         this.adapter!.complete({ system: conv.system, tools: conv.tools, messages }),
       );
 
+      if (this.paused) {
+        log.info(`model calls work again after waiting since ${this.paused.since}`);
+        this.paused = undefined;
+        this.onResume?.();
+      }
       const usage = priceUsage(response.model, response.tokens);
       this.totals.calls++;
       this.totals.costUsd += usage.costUsd;
@@ -362,6 +379,18 @@ export class ConversationManager {
       this.respond(conv.nodeId, result);
     } catch (err) {
       const e = err instanceof LlmError ? err : new LlmError((err as Error).message, false);
+      if (e.pause) {
+        // Nothing wrong with the work: hold everything until there is credit again.
+        if (!this.paused) {
+          this.paused = { reason: e.message, since: new Date().toISOString() };
+          log.warn(`model calls on hold: ${e.message}`);
+          this.onPause?.(e.message);
+        }
+        if (!conv.waitingNoted) conv.subject.recordEvent(`waiting: ${e.message}`);
+        conv.waitingNoted = true;
+        return fail(e.message, true, true);
+      }
+      conv.waitingNoted = false;
       log.warn(`${conv.subject.id} turn ${req.turn} failed: ${e.message}`);
       if (!e.retryable) conv.subject.recordEvent(`LLM error: ${e.message}`);
       fail(e.message, e.retryable);

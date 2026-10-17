@@ -106,6 +106,12 @@ prohibited outright.
 | Model turns per task attempt or planning round | 80 | `--max-turns` |
 | Concurrent model requests | 2 | `--llm-concurrency` |
 
+**Running out of credit doesn't fail work.** When the Anthropic account's credit runs out,
+the Hub puts model calls on hold: agents and the Architect wait (their task says *waiting:
+Anthropic credit balance is too low…*), `GET /api/llm` shows `paused`, and your phone gets a
+notification. Once credits are added, the next call works and everything carries on, with a
+second notification.
+
 The dashboard and `GET /api/llm` show calls and estimated spend; each task shows its own
 turns and cost. Estimates use the Hub's price table. Your Console billing is authoritative.
 

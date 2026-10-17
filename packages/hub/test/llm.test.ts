@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { describe, it } from "node:test";
 import Anthropic from "@anthropic-ai/sdk";
-import { AnthropicApiAdapter, DEFAULT_PLAN_BUDGET_USD, LlmError, priceUsage, taskPrompt, TURN_WARNING, withTurnWarning, type LlmRequest } from "@aso/hub";
+import { AnthropicApiAdapter, classify, CREDIT_MESSAGE, DEFAULT_PLAN_BUDGET_USD, LlmError, priceUsage, taskPrompt, TURN_WARNING, withTurnWarning, type LlmRequest } from "@aso/hub";
 import { createMessage, type AgentMessage } from "@aso/shared";
-import { startWorker } from "@aso/worker";
+import { callModelWithRetry, startWorker, type ModelReply } from "@aso/worker";
 import {
   git,
   hardware,
@@ -183,6 +183,55 @@ describe("LLM gateway (Hub)", () => {
     );
   });
 
+  it("puts model calls on hold when the credit runs out, in plain words, and carries on once it's back", async () => {
+    // How the API reports it mid-stream: no status, the raw JSON body as the message.
+    const raw = JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "Your credit balance is too low to access the Anthropic API." } });
+    const credit = classify(new Anthropic.APIError(undefined, undefined, raw, undefined));
+    assert.deepEqual([credit.message, credit.retryable, credit.pause], [CREDIT_MESSAGE, true, "credit"]);
+    const other = classify(new Anthropic.APIError(undefined, undefined, JSON.stringify({ error: { message: "Overloaded" } }), undefined));
+    assert.equal(other.message, "API error: Overloaded", "the API's own words, not its JSON");
+
+    let broke = true;
+    const model = new ScriptedModel(() => {
+      if (broke) throw new LlmError(CREDIT_MESSAGE, true, "credit");
+      return reply([text("Thanks.")], "end_turn");
+    });
+    return withHub(
+      async (ctx) => {
+        const w = await implementer(ctx, "dev", "greet");
+        const conv = crypto.randomUUID();
+        const llm = async () => (await fetch(`http://127.0.0.1:${ctx.port}/api/llm`, { headers: { authorization: `Bearer ${TOKEN}` } })).json() as Promise<{ paused?: { reason: string } }>;
+        for (let i = 0; i < 2; i++) {
+          w.send(prompt("dev", conv, 0));
+          const r = result(await w.next());
+          assert.ok(r.outcome === "error" && r.paused && r.retryable, JSON.stringify(r));
+        }
+        assert.equal((await llm()).paused?.reason, CREDIT_MESSAGE);
+        const events = ctx.hub.tasks.get("greet")!.history.map((h) => h.event);
+        assert.equal(events.filter((e) => e === `waiting: ${CREDIT_MESSAGE}`).length, 1, "noted once, not per retry");
+        assert.equal(ctx.hub.tasks.get("greet")!.state, "in_progress", "the task waits; it doesn't fail");
+
+        broke = false;
+        w.send(prompt("dev", conv, 0));
+        assert.equal(result(await w.next()).outcome, "ok");
+        assert.equal((await llm()).paused, undefined, "on again after a call works");
+        w.ws.close();
+      },
+      { llm: { adapter: model } },
+    );
+  });
+
+  it("makes an agent wait out a hold without using up its retries", async () => {
+    const replies: ModelReply[] = [
+      ...Array.from({ length: 8 }, (): ModelReply => ({ requestId: crypto.randomUUID(), outcome: "error", error: "out of credit", retryable: true, paused: true })),
+      { requestId: crypto.randomUUID(), outcome: "ok", conversationId: crypto.randomUUID(), turn: 0, text: "", toolCalls: [], stopReason: "end_turn", usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0 } },
+    ];
+    const reports: string[] = [];
+    const ok = await callModelWithRetry(async () => replies.shift()!, { conversationId: crypto.randomUUID(), turn: 0, toolResults: [] }, (m) => reports.push(m), [], 1);
+    assert.equal(ok.outcome, "ok", "8 holds, with no retries allowed at all");
+    assert.deepEqual(reports, ["waiting: out of credit"], "reported once");
+  });
+
   it("stops a task at its budget", () => {
     // 1M input tokens of claude-opus-5-5 = $4 > $1 budget
     const model = new ScriptedModel(() => reply([toolUse("tu_1", "list_files", {})], "tool_use", 1_000_000));
@@ -285,7 +334,7 @@ describe("Anthropic API adapter", () => {
       [new Anthropic.RateLimitError(429, undefined, "slow down", new Headers()), true],
       [new Anthropic.InternalServerError(500, undefined, "boom", new Headers()), true],
       [new Anthropic.AuthenticationError(401, undefined, "bad key", new Headers()), false],
-      [new Anthropic.BadRequestError(400, undefined, "Your credit balance is too low", new Headers()), false],
+      [new Anthropic.BadRequestError(400, undefined, "Your credit balance is too low", new Headers()), true],
       [new SyntaxError("Unexpected end of JSON input"), true],
     ];
     for (const [error, retryable] of cases) {
