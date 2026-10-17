@@ -45,10 +45,17 @@ QA, reworked if needed, and merged. Agents need an Anthropic API key on the Hub;
 | Machine | Runs | Needs |
 |---|---|---|
 | Hub | Hub API, WebSocket, Git endpoint and dashboard (in Docker, or directly), plus the Architect in tmux | Docker with Compose v2 (or Node.js ≥ 20 + git), tmux |
-| Each worker | `aso start-worker` natively, **not** in a container | Node.js ≥ 20, git, plus whatever the target project needs to build and test (npm, Docker for DevOps nodes, Playwright browsers for QA nodes) |
+| Each worker | `aso start-worker` on the machine itself; each job's commands in throwaway Docker containers | Node.js ≥ 20, git and Docker (the worker's user in the `docker` group) |
 
-Workers stay out of containers because they need the real machine: accurate hardware
-profiling, the host's Docker daemon for container builds, and local toolchains.
+There are two layers on a worker:
+
+- **The worker program runs on the machine itself**, not in a container. It needs the real
+  machine: to measure the hardware (which decides its desks), to use the machine's Docker,
+  and to update and restart itself.
+- **Everything a job runs goes into a throwaway container**: the agent's commands, `npm ci`
+  with its install scripts, builds and QA tests. That container sees only the task's
+  checkout, so an agent can't reach the rest of the machine. See
+  [Security notes](#security-notes); `--sandbox none` turns this off.
 
 Workers need no LLM credentials and no manual copy of the project. They clone it from the Hub
 automatically into `~/.aso/work/project`. Every model call goes through the Hub, which holds
