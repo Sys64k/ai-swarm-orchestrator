@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
-import { appendFile, mkdir, readFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { simpleGit, type SimpleGit } from "simple-git";
 import {
@@ -207,6 +208,62 @@ export class AgentGitClient {
   }
 
   /**
+   * Bring a resumed task branch up to main for a new round of work. A clean rebase keeps its
+   * commits. If the rebase conflicts, the branch starts over from main with the task's changes
+   * re-applied by a three-way merge: what merges cleanly is applied, and conflicting files are
+   * left with `<<<<<<<` / `>>>>>>>` markers for the agent to resolve. Everything is left
+   * uncommitted; `completeTask` commits it.
+   */
+  async syncForRework(): Promise<{ head: string; conflicts: string[] }> {
+    try {
+      return { ...(await this.syncWithMain()), conflicts: [] };
+    } catch (err) {
+      if (!(err instanceof RebaseConflictError) || err.stage !== "rebase") throw err;
+    }
+    return this.replayOnMain();
+  }
+
+  private async replayOnMain(): Promise<{ head: string; conflicts: string[] }> {
+    const taskId = await this.requireTaskBranch();
+    const target = `${this.remote}/${this.mainBranch}`;
+    const old = await this.head();
+    const base = (await this.git.raw(["merge-base", old, target])).trim();
+    const patch = await this.git.raw(["diff", "--binary", "--full-index", base, old]);
+
+    await this.git.raw(["checkout", "--quiet", "-B", taskBranchName(taskId), target]);
+    if (patch.trim()) {
+      const dir = await mkdtemp(path.join(os.tmpdir(), "aso-replay-"));
+      try {
+        const file = path.join(dir, "task.patch");
+        await writeFile(file, patch.endsWith("\n") ? patch : `${patch}\n`);
+        // Exits non-zero when hunks conflict; those files keep markers, the rest applies.
+        await this.git.raw(["apply", "--3way", "--whitespace=nowarn", file]).catch(() => undefined);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    }
+    const conflicts = (await this.git.status()).conflicted.sort();
+    // Unstage, keeping the re-applied changes and the markers in the working tree.
+    await this.git.raw(["reset", "--quiet"]);
+    const head = await this.head();
+    log.info(`replayed ${taskBranchName(taskId)} onto ${target} (${head.slice(0, 8)})${conflicts.length ? `; conflicts in ${conflicts.join(", ")}` : ""}`);
+    return { head, conflicts };
+  }
+
+  /** Files changed on the task branch that still hold merge conflict markers. */
+  async unresolvedConflicts(): Promise<string[]> {
+    await this.requireTaskBranch();
+    const status = await this.git.status();
+    const changed = new Set([...status.files.map((f) => f.path), ...(await this.changedSinceMain())]);
+    const left: string[] = [];
+    for (const file of [...changed].sort()) {
+      const text = await readFile(path.join(this.repoDir, file), "utf8").catch(() => "");
+      if (hasConflictMarkers(text)) left.push(file);
+    }
+    return left;
+  }
+
+  /**
    * Throw away local state left by a previous job (crash, failed task, aborted rebase).
    * Safe because pushed branches on the Hub are the source of truth. Ignored files such as
    * node_modules are kept.
@@ -289,4 +346,10 @@ export async function excludeLocally(repoDir: string, patterns: readonly string[
   if (!missing.length) return;
   await mkdir(path.dirname(file), { recursive: true });
   await appendFile(file, `${lines.size > 1 ? "\n" : ""}# added by the ASO worker\n${missing.join("\n")}\n`);
+}
+
+/** Whether text still holds a merge conflict: a `<<<<<<< ` line followed later by a `>>>>>>> ` line. */
+export function hasConflictMarkers(text: string): boolean {
+  const start = text.search(/^<{7}(?: |$)/m);
+  return start !== -1 && /^>{7}(?: |$)/m.test(text.slice(start));
 }

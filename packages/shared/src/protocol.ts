@@ -274,6 +274,11 @@ const StatusUpdatePayload = z
     commit: CommitShaSchema.optional(),
     /** The job slot (desk) running the job, from 1; sent with `in_progress`. */
     slot: z.number().int().min(1).max(MAX_WORKER_SLOTS).optional(),
+    /**
+     * Sent with `in_progress` when bringing the branch up to main conflicted: the files left
+     * with conflict markers for the agent to resolve.
+     */
+    conflicts: z.array(z.string().min(1).max(1000)).max(500).optional(),
   })
   .refine((p) => p.state === "idle" || p.taskId !== undefined, {
     message: "taskId is required unless state is idle",

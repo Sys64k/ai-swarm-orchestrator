@@ -128,5 +128,15 @@ export function taskPrompt(task: TaskRecord): string {
     }
     if (rework.output) parts.push("", "Output (tail):", "```", rework.output.slice(-20_000), "```");
   }
+  if (task.conflicts?.length) {
+    parts.push(
+      "",
+      "## Merge conflicts to resolve",
+      "Main changed the same lines as your previous work, so your branch now starts from the latest main with your changes re-applied. " +
+        "These files hold both versions between `<<<<<<<`, `=======` and `>>>>>>>` lines. Read each one, combine what both sides need (keep main's changes as well as yours), " +
+        "and remove the markers. finish is refused while any marker is left.",
+      ...task.conflicts.map((f) => `- ${f}`),
+    );
+  }
   return parts.join("\n");
 }

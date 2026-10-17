@@ -719,7 +719,9 @@ itself. `cloneOrOpen` adds `node_modules/` to the checkout's `.git/info/exclude`
 | `discardLocalChanges()` | Abort any rebase or merge, `reset --hard`, `clean -fd` (keeps ignored files such as `node_modules`). Runs before every job |
 | `startTask(id)` | Requires a clean tree; checks out `task/<id>` from `origin/task/<id>` (`resumed: true`) or `origin/main` |
 | `completeTask(msg)` | Rejects protected files (uncommitted edits and commits since `origin/main`), stages, commits as the agent identity, pushes with `--force-with-lease` |
-| `syncWithMain()` | Stashes edits, rebases onto `origin/main`, restores edits; conflicts abort cleanly (see below) |
+| `syncWithMain()` | Stashes edits, rebases onto `origin/main`, restores edits; conflicts abort cleanly (see below). Used mid-job, after a dependency change |
+| `syncForRework()` | At the start of a resumed job: `syncWithMain()`, or, if the rebase conflicts, `replayOnMain()`: `task/<id>` restarts from `origin/main` and the task's diff (merge base → old head) is re-applied with `git apply --3way`. Clean hunks land, conflicting files keep `<<<<<<<`/`>>>>>>>` markers, the index is reset so everything is uncommitted. Returns the conflicted files |
+| `unresolvedConflicts()` | Changed files that still contain conflict markers (`hasConflictMarkers`); the executor refuses `finish` while any are left |
 | `checkoutCommit(id, sha)` | QA: fetch, ensure `sha` is on `origin/task/<id>`, detached checkout |
 
 ```mermaid
@@ -739,6 +741,14 @@ flowchart TD
   C2 -- yes --> E2["RebaseConflictError(stage=restore)<br/>markers in tree, edits kept in stash"]
   C2 -- no --> OK
 ```
+
+**Conflicts are the agent's to resolve.** Agents have no git, so the worker does the git part.
+A resumed job whose branch conflicts with `main` (typically a pull request that conflicts after
+another one merged) gets the branch replayed onto `main` with markers in the conflicting files,
+instead of failing. The worker sends those files as `conflicts` on its `in_progress`
+STATUS_UPDATE; the Hub keeps them on the task (`task.conflicts`, cleared when the work is handed
+in or sent back) and the task prompt gets a *Merge conflicts to resolve* section listing them.
+`finish` is refused, with the files named, until no marker is left.
 
 simple-git does not reject when git exits non-zero with an empty stderr. That happens, for
 example, with `rev-parse --verify --quiet` and with a conflicting `stash pop`. The client and
