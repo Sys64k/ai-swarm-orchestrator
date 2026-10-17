@@ -23,6 +23,9 @@ import { architectSystemPrompt, CONTINUE_PROMPT, planPrompt, systemPrompt, taskP
 
 const log = createLogger("llm");
 
+/** A planning round's spend cap: enough for the Architect to read a large codebase before it plans. */
+export const DEFAULT_PLAN_BUDGET_USD = 3;
+
 type Request = MessageOf<"PROMPT_EXECUTION">["payload"];
 type Result = PayloadInput<"PROMPT_RESULT">;
 type OkResult = Extract<Result, { outcome: "ok" }>;
@@ -30,7 +33,7 @@ type OkResult = Extract<Result, { outcome: "ok" }>;
 export interface ConversationOptions {
   /** Per-task spend cap (USD, estimated). */
   taskBudgetUsd?: number;
-  /** Per-plan spend cap for the Architect (USD, estimated). */
+  /** Spend cap for each of the Architect's planning rounds (USD, estimated). */
   planBudgetUsd?: number;
   /** Model turns per conversation. */
   maxTurns?: number;
@@ -113,7 +116,7 @@ export class ConversationManager {
     opts: ConversationOptions = {},
   ) {
     this.taskBudgetUsd = opts.taskBudgetUsd ?? 5;
-    this.planBudgetUsd = opts.planBudgetUsd ?? 1;
+    this.planBudgetUsd = opts.planBudgetUsd ?? DEFAULT_PLAN_BUDGET_USD;
     this.maxTurns = opts.maxTurns ?? 80;
     this.idleTimeoutMs = opts.idleTimeoutMs ?? 30 * 60_000;
     this.slots = new Semaphore(opts.concurrency ?? 4);

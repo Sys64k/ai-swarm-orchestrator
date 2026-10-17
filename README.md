@@ -95,6 +95,7 @@ prohibited outright.
 | Model | `claude-opus-5-5` ($4 / $20 per million input/output tokens; cached input $0.20) | `--model` |
 | Effort | `high` | `--effort low…max` |
 | Spend cap per task (estimated) | $5 | `--task-budget` |
+| Spend cap per planning round (estimated) | $3 | `--plan-budget` |
 | Concurrent model requests | 2 | `--llm-concurrency` |
 
 The dashboard and `GET /api/llm` show calls and estimated spend; each task shows its own
@@ -292,8 +293,9 @@ aso plan --file requirements.md        # longer requirements
 
 Each reply starts a new planning round. The Architect re-reads the project, with the whole
 conversation (its questions, your answers, earlier proposals and your requested changes) in
-its prompt. A plan takes at most 10 replies. Planning a typical requirement costs cents
-(capped at $1 per round); the plan shows its total cost.
+its prompt. A plan takes at most 10 replies. Planning a typical requirement costs well under
+a dollar, capped at $3 per round (`--plan-budget`), which leaves room to read a large codebase
+first; the plan shows its total cost.
 The tasks themselves are capped by `--task-budget` each.
 
 ### Submitting a task directly
@@ -620,6 +622,7 @@ failure), and so do the dashboard and `aso sync`.
 | `--model <id>` | `claude-opus-5-5` | Claude model for agents |
 | `--effort <level>` | `high` | `low`, `medium`, `high`, `xhigh`, `max` |
 | `--task-budget <usd>` | `5` | Estimated LLM spend cap per task |
+| `--plan-budget <usd>` | `3` | Estimated LLM spend cap per planning round |
 | `--llm-concurrency <n>` | `4` | Concurrent model requests across all workers and the Architect; jobs beyond it wait their turn |
 | `--no-dashboard` | | Skip the dashboard (not supported with `--docker`) |
 | `--no-architect` | | Do not start the Architect |
@@ -840,7 +843,7 @@ For the scoring formula, see [ARCHITECTURE.md](ARCHITECTURE.md#6-hardware-aware-
 | `ASO_ALLOW_DEPS` | *(any)* | Default for `--allow-deps` (also passed into the container) |
 | `ANTHROPIC_API_KEY` | *(none)* | Hub only. Without it, agents fail tasks with "no LLM configured" |
 | *(file)* `.env` | — | Loaded on start: the shell's variables win, then `ASO_ENV_FILE`, then `~/.config/aso/.env`, then a source checkout's `.env`. See `.env.example` |
-| `ASO_MODEL`, `ASO_EFFORT`, `ASO_TASK_BUDGET`, `ASO_LLM_CONCURRENCY` | see flags | Defaults for the LLM flags (also passed into the container) |
+| `ASO_MODEL`, `ASO_EFFORT`, `ASO_TASK_BUDGET`, `ASO_PLAN_BUDGET`, `ASO_LLM_CONCURRENCY` | see flags | Defaults for the LLM flags (also passed into the container) |
 | `ASO_PUSH_CONTACT` | project URL | Contact (`mailto:` or `https:`) sent to push services with notifications (VAPID `sub`) |
 | `ASO_UPDATE_SPEC` | `@aso/cli@latest` | Default source for `aso update` |
 
