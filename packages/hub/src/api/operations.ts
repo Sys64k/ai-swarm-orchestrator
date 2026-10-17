@@ -1,5 +1,6 @@
 import {
   ApiErrorSchema,
+  ApproveTaskBodySchema,
   CreatePlanBodySchema,
   CreateProjectBodySchema,
   CreateTaskBodySchema,
@@ -18,10 +19,13 @@ import {
   PushTestResultSchema,
   PushTestSchema,
   RedeemSignInCodeBodySchema,
+  RequestChangesBodySchema,
+  ReviewChecksSchema,
   SignedInSchema,
   SignInCodeSchema,
   SyncBodySchema,
   SyncStatusSchema,
+  TaskDiffSchema,
   TaskSchema,
   TranscriptSchema,
   VersionSchema,
@@ -33,6 +37,8 @@ export const REQUEST_SCHEMAS = {
   CreatePlan: CreatePlanBodySchema,
   PlanReply: PlanReplyBodySchema,
   CreateTask: CreateTaskBodySchema,
+  ApproveTask: ApproveTaskBodySchema,
+  RequestChanges: RequestChangesBodySchema,
   Sync: SyncBodySchema,
   RedeemSignInCode: RedeemSignInCodeBodySchema,
   PushSubscription: PushSubscriptionSchema,
@@ -49,6 +55,8 @@ export const ANSWER_SCHEMAS = {
   Project: ProjectSchema,
   SyncStatus: SyncStatusSchema,
   Task: TaskSchema,
+  TaskDiff: TaskDiffSchema,
+  ReviewChecks: ReviewChecksSchema,
   Plan: PlanSchema,
   Transcript: TranscriptSchema,
   LlmStatus: LlmStatusSchema,
@@ -147,6 +155,22 @@ const TASKS: ApiOperation[] = [
   },
   { method: "post", path: "/api/tasks/{id}/cancel", tag: "Tasks", summary: "Stop a task (closes its pull request)", responses: act("Task", "task", "Finished, or merging right now") },
   { method: "post", path: "/api/tasks/{id}/retry", tag: "Tasks", summary: "Queue a failed or cancelled task again with fresh limits", responses: act("Task", "task", "Not failed or cancelled") },
+  {
+    method: "get", path: "/api/tasks/{id}/diff", tag: "Tasks", summary: "What the task changes, file by file, against the main it branched from",
+    responses: { 200: ok("TaskDiff"), ...notFound("task"), 409: err("No unmerged commit to show") },
+  },
+  {
+    method: "get", path: "/api/tasks/{id}/checks", tag: "Tasks", summary: "The CI checks on the task's pull request",
+    responses: { 200: ok("ReviewChecks"), ...notFound("task"), 409: err("Not waiting for review, or no pull request yet"), 502: err("GitHub failed") },
+  },
+  {
+    method: "post", path: "/api/tasks/{id}/approve", tag: "Tasks", summary: "Accept the work: merge its pull request (checks must pass unless forced)", body: "ApproveTask", optionalBody: true,
+    responses: { ...act("Task", "task", "Not waiting for review, checks not passing (without force), or it conflicts with main"), 400: err("Invalid body"), 502: err("GitHub failed or refused the merge") },
+  },
+  {
+    method: "post", path: "/api/tasks/{id}/request-changes", tag: "Tasks", summary: "Send the work back to an agent with what should change (a review round)", body: "RequestChanges",
+    responses: { ...act("Task", "task", "Not waiting for review, or no pull request yet"), 400: err("No message") },
+  },
   { method: "get", path: "/api/tasks/{id}/transcript", tag: "Tasks", summary: "The agent's and QA's work on a task, as it happens", query: afterQuery, responses: { 200: ok("Transcript"), ...notFound("task") } },
 ];
 

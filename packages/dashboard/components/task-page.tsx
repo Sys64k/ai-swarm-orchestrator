@@ -3,16 +3,21 @@
 import Link from "next/link";
 import { useState } from "react";
 import { hubAction, usePoll } from "./use-poll.ts";
+import { ChangesView, ReviewPanel } from "./review-panel.tsx";
 import { Terminal } from "./terminal.tsx";
 import { ActionButton, Badge, Banner, LoadingPage, Section, TopBar } from "./ui.tsx";
 import type { Task } from "../lib/types.ts";
-import { crewLine, formatUsd, isLive, reviewLink, reviewView, taskActions, taskBadge, timeAgo } from "../lib/view.ts";
+import { canReview, crewLine, currentTab, formatUsd, hasChanges, isLive, reviewLink, reviewView, taskActions, taskBadge, timeAgo, type TaskTab } from "../lib/view.ts";
 
 export function TaskPage({ id }: { id: string }) {
   const { data: task, error, refresh } = usePoll<Task>(`tasks/${id}`);
-  const [tab, setTab] = useState<"live" | "details">("live");
+  const [chosen, setTab] = useState<TaskTab>();
 
   if (!task) return <LoadingPage title={id} back="/" error={error} />;
+
+  const changes = hasChanges(task);
+  const reviewing = canReview(task);
+  const tab = currentTab(chosen, task);
 
   const live = isLive(task.state);
   const can = taskActions(task);
@@ -52,7 +57,7 @@ export function TaskPage({ id }: { id: string }) {
           )}
           <div className="actions">
             {pr && (
-              <a href={pr.url} target="_blank" rel="noreferrer" className={`button ${pr.primary ? "button-primary" : "button-plain"} button-link`}>
+              <a href={pr.url} target="_blank" rel="noreferrer" className="button button-plain button-link">
                 {pr.label}
               </a>
             )}
@@ -63,20 +68,25 @@ export function TaskPage({ id }: { id: string }) {
           </div>
         </div>
 
+        {reviewing && <ReviewPanel taskId={id} onDone={refresh} />}
+
         <div className="tabs" role="tablist">
           <button type="button" role="tab" aria-selected={tab === "live"} className="tab" onClick={() => setTab("live")}>
             {live ? "Live" : "Transcript"}
           </button>
+          {changes && (
+            <button type="button" role="tab" aria-selected={tab === "changes"} className="tab" onClick={() => setTab("changes")}>
+              Changes
+            </button>
+          )}
           <button type="button" role="tab" aria-selected={tab === "details"} className="tab" onClick={() => setTab("details")}>
             Details
           </button>
         </div>
 
-        {tab === "live" ? (
-          <Terminal source={`tasks/${id}/transcript`} live={live} />
-        ) : (
-          <Details task={task} />
-        )}
+        {tab === "live" && <Terminal source={`tasks/${id}/transcript`} live={live} />}
+        {tab === "changes" && <ChangesView taskId={id} prUrl={pr?.url} />}
+        {tab === "details" && <Details task={task} />}
       </main>
     </>
   );

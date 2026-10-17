@@ -11,7 +11,9 @@ import {
   type TaskState,
   agentName,
   type CrewMemberSchema,
+  type ReviewChecks,
 } from "@aso/shared";
+import { mergeBlock } from "./git/pull-requests.js";
 import type { z } from "zod";
 import type { PullRef } from "./git/github.js";
 import type { HubRepository } from "./git/hub-repo.js";
@@ -24,8 +26,8 @@ const log = createLogger("tasks");
 /**
  * pending → assigned → in_progress → verifying → awaiting_qa → testing → merging → merged
  * With pull requests, QA-approved work goes to awaiting_review instead of merging, and a person
- * merges it on GitHub (→ merged), requests changes (→ pending, a review round) or closes it
- * (→ cancelled).
+ * merges it on GitHub or approves it in ASO (→ merged), requests changes there or in ASO
+ * (→ pending, a review round) or closes it (→ cancelled).
  * Verification, QA or merge problems send the task back to pending as a rework round.
  * A person can cancel any task that isn't finished, and retry a failed or cancelled one.
  */
@@ -99,7 +101,7 @@ export interface ReviewInfo {
 
 /** What a person did with a task's pull request. */
 export type ReviewOutcome =
-  | { kind: "merged"; mainCommit: string }
+  | { kind: "merged"; mainCommit: string; via?: "aso" }
   | { kind: "closed" }
   | { kind: "changes_requested"; reviewId: number; author: string; summary: string; details: string }
   | { kind: "conflict" };
@@ -110,6 +112,12 @@ export interface ReviewGate {
   open(task: TaskRecord): Promise<PullRef>;
   /** Close the task's pull request (the task was cancelled here). */
   close(task: TaskRecord, comment: string): Promise<void>;
+  /** The pull request's CI checks, and whether it can merge. */
+  checks(task: TaskRecord): Promise<ReviewChecks>;
+  /** Merge the pull request at the commit QA passed and bring the Hub's main up to it; returns the merge commit. */
+  merge(task: TaskRecord): Promise<string>;
+  /** Record on the pull request that a person asked for changes in ASO. */
+  noteChangesRequested(task: TaskRecord, message: string): Promise<void>;
 }
 
 export interface AgentTurn {
@@ -124,7 +132,8 @@ const AGENT_LOG_LIMIT = 200;
 export class TaskError extends Error {
   constructor(
     message: string,
-    readonly code: "duplicate" | "invalid" | "not_found" | "conflict",
+    /** upstream: GitHub failed or refused. */
+    readonly code: "duplicate" | "invalid" | "not_found" | "conflict" | "upstream",
   ) {
     super(message);
   }
@@ -186,6 +195,8 @@ export class TaskManager {
   readonly qa: QaOptions;
   private readonly onMerged?: (task: TaskRecord) => void;
   private readonly reviewGate?: ReviewGate;
+  /** Tasks whose approval is merging their pull request right now. */
+  private readonly approving = new Set<string>();
   private readonly onChange?: () => void;
   readonly project: string;
   private readonly onDispatchNeeded?: () => void;
@@ -227,6 +238,7 @@ export class TaskManager {
       throw new TaskError(`task ${taskId} is already ${task.state}`, "conflict");
     }
     if (task.state === "merging") throw new TaskError(`task ${taskId} is being merged right now`, "conflict");
+    this.notApproving(taskId);
     for (const nodeId of [task.nodeId, task.qaNodeId]) if (nodeId) this.registry.release(nodeId, taskId);
     if (task.state === "awaiting_review" && task.review?.pr && this.reviewGate) {
       const pr = task.review.pr;
@@ -753,7 +765,7 @@ export class TaskManager {
       case "merged":
         task.state = "merged";
         task.mainCommit = outcome.mainCommit;
-        this.note(task, `pull request #${pr.number} merged on GitHub @ ${outcome.mainCommit.slice(0, 8)}`);
+        this.note(task, `pull request #${pr.number} merged ${outcome.via === "aso" ? "from ASO" : "on GitHub"} @ ${outcome.mainCommit.slice(0, 8)}`);
         this.onMerged?.(task);
         break;
       case "closed":
@@ -771,6 +783,73 @@ export class TaskManager {
         break;
     }
     this.kick();
+  }
+
+  /** The task under review, or why it can't be reviewed now. */
+  private underReview(taskId: string): TaskRecord & { review: ReviewInfo & { pr: PullRef } } {
+    const task = this.require(taskId);
+    if (task.state !== "awaiting_review") throw new TaskError(`task ${taskId} is ${task.state}, not waiting for review`, "conflict");
+    if (!this.reviewGate || !task.review?.pr) throw new TaskError(`task ${taskId} has no pull request yet`, "conflict");
+    this.notApproving(taskId);
+    return task as TaskRecord & { review: ReviewInfo & { pr: PullRef } };
+  }
+
+  /** While an approval merges the pull request, the task can't be cancelled or decided again. */
+  private notApproving(taskId: string): void {
+    if (this.approving.has(taskId)) throw new TaskError(`task ${taskId} is being merged right now`, "conflict");
+  }
+
+  private async checksOf(task: TaskRecord & { review: { pr: PullRef } }): Promise<ReviewChecks> {
+    try {
+      return await this.reviewGate!.checks(task);
+    } catch (err) {
+      throw new TaskError(`could not read pull request #${task.review.pr.number}: ${(err as Error).message}`, "upstream");
+    }
+  }
+
+  /** The CI checks on the task's pull request. */
+  async reviewChecks(taskId: string): Promise<ReviewChecks> {
+    return this.checksOf(this.underReview(taskId));
+  }
+
+  /**
+   * A person accepts the work: its pull request is merged on GitHub and the Hub's main follows.
+   * Unless `force`, only when every check passed (or there are none) and it doesn't conflict.
+   */
+  async approve(taskId: string, opts: { force?: boolean } = {}): Promise<TaskRecord> {
+    const task = this.underReview(taskId);
+    const pr = task.review.pr;
+    this.approving.add(taskId);
+    try {
+      const block = mergeBlock(await this.checksOf(task), task.commit, opts.force);
+      if (block) throw new TaskError(block, "conflict");
+      let mainCommit: string;
+      try {
+        mainCommit = await this.reviewGate!.merge(task);
+      } catch (err) {
+        throw new TaskError(`could not merge pull request #${pr.number}: ${(err as Error).message}`, "upstream");
+      }
+      this.applyReview(taskId, { kind: "merged", mainCommit, via: "aso" });
+      return task;
+    } finally {
+      this.approving.delete(taskId);
+    }
+  }
+
+  /** A person asks for changes in ASO: back to an agent as a review round, noted on the pull request. */
+  requestChanges(taskId: string, message: string): TaskRecord {
+    const task = this.underReview(taskId);
+    const pr = task.review.pr;
+    const text = message.trim();
+    task.review.rounds++;
+    this.note(task, `a person asked for changes on pull request #${pr.number} in ASO`);
+    const firstLine = text.split("\n")[0];
+    const reason = `Review round ${task.review.rounds}: a person asked for changes: ${firstLine.length > 500 ? `${firstLine.slice(0, 499)}…` : firstLine}`;
+    this.reviewGate!.noteChangesRequested(task, text).catch((err: Error) =>
+      log.warn(`could not note the change request on pull request #${pr.number} of ${taskId}: ${err.message}`),
+    );
+    this.sendBack(task, { reason, failures: [], output: `What the reviewer asked for:\n${text}` }, "back to an agent");
+    return task;
   }
 
   private async merge(task: TaskRecord): Promise<void> {

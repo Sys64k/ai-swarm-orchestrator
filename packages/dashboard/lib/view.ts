@@ -1,4 +1,4 @@
-import type { HubNode, Plan, PlannedTask, Project, Task, TaskState, TranscriptEntry } from "./types.ts";
+import type { CheckState, DiffFile, HubNode, Plan, PlannedTask, Project, ReviewChecks, Task, TaskDiff, TaskState, TranscriptEntry } from "./types.ts";
 
 /** Colour family of a state badge. */
 export type Tone = "active" | "waiting" | "good" | "bad" | "muted";
@@ -137,20 +137,116 @@ export function reviewView(task: Pick<Task, "state" | "review">): { text: string
   const rounds = r.rounds ? ` (after ${r.rounds} round${r.rounds === 1 ? "" : "s"} of changes)` : "";
   if (task.state === "awaiting_review") {
     if (!r.pr) return { text: "Opening a pull request on GitHub", error: r.error };
-    return { text: `Pull request #${r.pr.number} is ready for your review on GitHub${rounds}`, url: r.pr.url, error: r.error };
+    return { text: `Pull request #${r.pr.number} is ready for your review${rounds}`, url: r.pr.url, error: r.error };
   }
   if (!r.pr) return undefined;
-  if (task.state === "merged") return { text: `Merged on GitHub as pull request #${r.pr.number}`, url: r.pr.url };
+  if (task.state === "merged") return { text: `Merged as pull request #${r.pr.number}`, url: r.pr.url };
   if (task.state === "cancelled") return { text: `Pull request #${r.pr.number} was closed`, url: r.pr.url };
   return { text: `Changes requested on pull request #${r.pr.number}; an agent is on it${rounds}`, url: r.pr.url };
 }
 
-/** The task page's button to its pull request: the main action while it waits for review. */
-export function reviewLink(task: Pick<Task, "state" | "review">): { label: string; url: string; primary: boolean } | undefined {
+/** The task page's link to its pull request on GitHub; the review itself happens on the page. */
+export function reviewLink(task: Pick<Task, "review">): { label: string; url: string } | undefined {
   const pr = task.review?.pr;
-  if (!pr) return undefined;
-  const waiting = task.state === "awaiting_review";
-  return { label: waiting ? `Review pull request #${pr.number} on GitHub` : `Pull request #${pr.number} on GitHub`, url: pr.url, primary: waiting };
+  return pr && { label: `Pull request #${pr.number} on GitHub`, url: pr.url };
+}
+
+/** Whether the task page offers Approve and Ask for changes. */
+export function canReview(task: Pick<Task, "state" | "review">): boolean {
+  return task.state === "awaiting_review" && !!task.review?.pr;
+}
+
+/** Whether the task has a commit of its own to show as changes. */
+export function hasChanges(task: Pick<Task, "state" | "commit">): boolean {
+  return !!task.commit && task.state !== "merged" && task.state !== "cancelled";
+}
+
+const CHECK_TONE: Record<CheckState, Tone> = { passing: "good", failing: "bad", pending: "waiting", skipped: "muted" };
+const CHECK_LABEL: Record<CheckState, string> = { passing: "passed", failing: "failed", pending: "running", skipped: "skipped" };
+
+export function checkBadge(state: CheckState): { label: string; tone: Tone } {
+  return { label: CHECK_LABEL[state], tone: CHECK_TONE[state] };
+}
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+/** One line about a pull request's checks. */
+export function checksSummary(checks: ReviewChecks): { text: string; tone: Tone } {
+  const named = (state: CheckState) => checks.checks.filter((c) => c.state === state);
+  if (checks.mergeable === false) return { text: "Conflicts with main: the Hub sends it back to an agent to rebase", tone: "bad" };
+  switch (checks.overall) {
+    case "failing": {
+      const failing = named("failing");
+      return { text: `${plural(failing.length, "check")} failed: ${failing.map((c) => c.name).join(", ")}`, tone: "bad" };
+    }
+    case "unknown":
+      return { text: `Checks can't be read: ${checks.error ?? "unknown error"}`, tone: "waiting" };
+    case "pending":
+      return { text: `${plural(named("pending").length, "check")} still running`, tone: "waiting" };
+    case "passing":
+      return { text: `${plural(named("passing").length, "check")} passed`, tone: "good" };
+    case "none":
+      return { text: "No checks run on this pull request", tone: "muted" };
+  }
+}
+
+export type TaskTab = "live" | "changes" | "details";
+
+/** The task page's tab: the person's choice, else the changes while a review waits, else the live view. */
+export function currentTab(chosen: TaskTab | undefined, task: Pick<Task, "state" | "review" | "commit">): TaskTab {
+  if (chosen === "changes" && !hasChanges(task)) return "live"; // e.g. the work went back to an agent
+  return chosen ?? (canReview(task) ? "changes" : "live");
+}
+
+/** "new · " or "deleted · " before a file's line counts; nothing for a change. */
+export function fileStatusLabel(status: DiffFile["status"]): string {
+  return status === "added" ? "new · " : status === "deleted" ? "deleted · " : "";
+}
+
+/** Small diffs open every file; bigger ones leave them for the person to open. */
+export function filesOpenByDefault(diff: Pick<TaskDiff, "files">): boolean {
+  return diff.files.length <= 3;
+}
+
+/**
+ * The approve button for these checks (mirrors mergeBlock on the Hub): a plain merge when they passed (or there are none), an
+ * explicit "anyway" (force) when they failed, still run or can't be read; none on a conflict.
+ */
+export function approveAction(checks: ReviewChecks): { label: string; confirm: string; force: boolean; variant: "primary" | "danger" } | undefined {
+  const n = checks.pr.number;
+  if (checks.mergeable === false) return undefined;
+  switch (checks.overall) {
+    case "passing":
+    case "none":
+      return { label: "Approve and merge", confirm: `Merge pull request #${n} into main?`, force: false, variant: "primary" };
+    case "pending":
+      return { label: "Merge without waiting", confirm: `Checks are still running. Merge pull request #${n} now?`, force: true, variant: "danger" };
+    case "failing":
+      return { label: "Merge anyway", confirm: `${checksSummary(checks).text}. Merge pull request #${n} anyway?`, force: true, variant: "danger" };
+    case "unknown":
+      return { label: "Merge anyway", confirm: `The checks can't be read. Merge pull request #${n} anyway?`, force: true, variant: "danger" };
+  }
+}
+
+/** "3 files · +40 −2" */
+export function diffSummary(diff: Pick<TaskDiff, "files">): string {
+  const add = diff.files.reduce((n, f) => n + f.additions, 0);
+  const del = diff.files.reduce((n, f) => n + f.deletions, 0);
+  return `${plural(diff.files.length, "file")} · +${add} −${del}`;
+}
+
+export type PatchLineKind = "add" | "del" | "hunk" | "meta" | "context";
+
+/** A file's patch as lines to colour; git's per-file header is left out (the file is named above it). */
+export function patchLines(file: Pick<DiffFile, "patch">): Array<{ text: string; kind: PatchLineKind }> {
+  if (!file.patch) return [];
+  const lines = file.patch.split("\n");
+  // A patch without hunks (a mode change) keeps everything after its `diff --git` line.
+  const firstHunk = lines.findIndex((l) => l.startsWith("@@"));
+  return lines.slice(firstHunk === -1 ? 1 : firstHunk).map((text) => ({
+    text,
+    kind: text.startsWith("@@") ? "hunk" : text.startsWith("+") ? "add" : text.startsWith("-") ? "del" : text.startsWith("\\") ? "meta" : "context",
+  }));
 }
 
 /** Text split into plain parts and web links, so the terminal can make links clickable. */
@@ -526,10 +622,10 @@ export function planThread(plan: Pick<Plan, "requirement" | "createdAt" | "dialo
 /** Mirrors MAX_PLAN_REPLIES in @aso/shared (plan-dialogue.ts): every reply is another planning round. */
 export const MAX_PLAN_REPLIES = 10;
 
-/** What a reply means right now: answering questions, asking for changes, or nothing (can't reply). */
-export type ReplyMode = "answer" | "changes";
+/** What a reply means: answering the Architect, asking for changes to a plan, or to a task under review. */
+export type ReplyMode = "answer" | "changes" | "review";
 
-/** Mirrors replyMode in @aso/shared (the console doesn't depend on it). */
+/** A plan's reply mode, or undefined when it takes no reply. Mirrors replyMode in @aso/shared (the console doesn't depend on it). */
 export function replyMode(plan: Pick<Plan, "state" | "dialogue">): ReplyMode | undefined {
   const replies = plan.dialogue?.filter((d) => d.kind === "reply").length ?? 0;
   if (replies >= MAX_PLAN_REPLIES) return undefined;
@@ -542,4 +638,5 @@ export function replyMode(plan: Pick<Plan, "state" | "dialogue">): ReplyMode | u
 export const REPLY_COPY: Record<ReplyMode, { label: string; placeholder: string; button: string; rows: number; primary: boolean }> = {
   answer: { label: "Your answers", placeholder: "Your answers", button: "Send answers", rows: 5, primary: true },
   changes: { label: "What should change", placeholder: "What should change? e.g. Use SQLite instead, and split the UI into its own task", button: "Ask for changes", rows: 3, primary: false },
+  review: { label: "What should change", placeholder: "What should change? The agent gets this as written, e.g. Make the button bigger and test the empty list", button: "Ask for changes", rows: 3, primary: false },
 };
