@@ -436,6 +436,8 @@ const PromptResultPayload = z.discriminatedUnion("outcome", [
     outcome: z.literal("error"),
     error: z.string(),
     retryable: z.boolean(),
+    /** The Hub is waiting (e.g. for model credit): ask again later, without counting it as a retry. */
+    paused: z.boolean().optional(),
   }),
 ]);
 

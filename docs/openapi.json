@@ -2079,6 +2079,24 @@
               "costUsd"
             ],
             "additionalProperties": false
+          },
+          "paused": {
+            "description": "Model calls are on hold (the account ran out of credit); they resume once a call succeeds again",
+            "type": "object",
+            "properties": {
+              "reason": {
+                "type": "string"
+              },
+              "since": {
+                "type": "string",
+                "description": "ISO 8601 time"
+              }
+            },
+            "required": [
+              "reason",
+              "since"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [

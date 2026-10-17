@@ -1005,6 +1005,13 @@ text. Unfinished work is never pushed, so it never reaches QA or burns rework ro
   at 80 model turns (`--max-turns`), and each task at its budget (default $5, estimated). In
   the last 10 turns the Hub adds a note after the turn's tool results telling the agent how
   many are left and to wrap up (`withTurnWarning`).
+- **Out of credit is a hold, not a failure.** `classify` turns the API's "credit balance is
+  too low" (sent mid-stream as a raw JSON body with no status) into `LlmError(…, pause:
+  "credit")` with a plain message; other streamed errors also show the API's own words
+  (`apiErrorText`). The gateway then sets `paused` (in `GET /api/llm`), notes *waiting* once
+  in the task's or plan's history, calls `onPause` (a push notification) and answers the turn
+  with `paused: true`. `callModelWithRetry` on workers and the Architect then asks again every
+  60 s without using up its retries. The first call that works clears the hold (`onResume`).
 - **Unfinished work is kept.** When an agent is cut off (turn limit, budget, the model gone,
   or it stopped without `finish`), the worker commits what is in the checkout as
   `wip: unfinished (…)` and pushes it to `task/<id>` before reporting the failure
