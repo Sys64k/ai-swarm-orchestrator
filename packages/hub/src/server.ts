@@ -106,7 +106,14 @@ export interface HubOptions {
    * QA-approved work as GitHub pull requests that a person merges, when the remote is on GitHub
    * and `sync.token` is set. Default on; `enabled: false` merges on the Hub instead.
    */
-  pullRequests?: { enabled?: boolean; apiUrl?: string; repo?: { owner: string; repo: string }; pollMs?: number };
+  pullRequests?: {
+    enabled?: boolean;
+    apiUrl?: string;
+    repo?: { owner: string; repo: string };
+    pollMs?: number;
+    /** Where a connected GitHub repository's Git lives (tests); default its github.com URL. */
+    gitUrl?: (slug: { owner: string; repo: string }) => string;
+  };
   /** Push notifications. `send` replaces real delivery (tests); the contact defaults to ASO_PUSH_CONTACT. */
   push?: { send?: typeof sendPush; contact?: string };
   llm?: {
@@ -461,7 +468,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   /** Maps the errors a request can hit to HTTP statuses. */
   const fail = (c: Context, err: unknown) => {
     if (err instanceof ProjectError || err instanceof PlanError) {
-      return c.json({ error: err.message }, err.code === "not_found" ? 404 : err.code === "conflict" ? 409 : 400);
+      return c.json({ error: err.message }, err.code === "not_found" ? 404 : err.code === "conflict" ? 409 : err.code === "upstream" ? 502 : 400);
     }
     if (err instanceof TaskError) {
       const status = err.code === "not_found" ? 404 : err.code === "duplicate" || err.code === "conflict" ? 409 : err.code === "upstream" ? 502 : 400;
@@ -527,7 +534,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     const req = await parsed(c, CreateProjectBodySchema);
     if (!req.ok) return c.json({ error: req.error }, 400);
     try {
-      return c.json(projectView(await projects.create(req.data.name)), 201);
+      return c.json(projectView(await projects.create(req.data.name, { github: req.data.github })), 201);
     } catch (err) {
       return fail(c, err);
     }

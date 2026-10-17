@@ -144,7 +144,7 @@ flowchart LR
 | | `llm/conversations.ts` | `ConversationManager`: Hub-held conversations, turn checks, budget, concurrency queue |
 | | `llm/prompts.ts`, `llm/pricing.ts` | Role system prompts, task prompt (with rework feedback), price table |
 | | `plans.ts` | `PlanManager`: plan queue, Architect assignment, validation, approval → tasks |
-| | `projects.ts` | `ProjectSet`: finds and creates projects; each has its own repo, tasks, plans, dependencies, push sync, state and transcripts. Hub-wide dispatch and lookup by task/plan id |
+| | `projects.ts` | `ProjectSet`: finds and creates projects; each has its own repo, tasks, plans, dependencies, push sync, state and transcripts. Hub-wide dispatch and lookup by task/plan id. `create(name, { github })` connects a GitHub repository: checks the token's write access and default branch (`GitHubApi.repoAccess`), then clones it or, when empty, pushes the first commit; nothing is left behind on failure |
 | | `state-store.ts` | `StateStore`: saves tasks and plans (per project, `.git/aso/`) and conversations (Hub-wide) and loads them on start |
 | `@aso/architect` | `client.ts`, `planner.ts` | Architect node: registers, plans each `PLAN_REQUEST` with read-only tools via the Hub, submits `PLAN_RESULT`. Run by the CLI's hidden `aso architect` command in tmux |
 | `@aso/worker` | `client.ts` | Connect, register (slots, running jobs as resume claims), heartbeat, offline outbox, dispatch jobs |
