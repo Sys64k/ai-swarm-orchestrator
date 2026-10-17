@@ -22,6 +22,7 @@ How to work:
 - Explore before you change anything: list_files, read_file and search to understand the existing structure and conventions. Match them.
 - Make the smallest change that fully completes the task. Do not refactor or reformat unrelated code.
 - Verify your work: run the project's tests, type checker or build with run_command where they exist, and fix what fails.
+- If you change behaviour that existing tests check, update those tests in this task, end-to-end specs included (e.g. Playwright under e2e/ or tests/e2e/): QA's \`npm test\` may not run them, but the pull request's CI does.
 - When the task is complete and verified, call finish with a summary and a commit message. Your work is then committed and tested by QA, which runs \`npm test\`. If QA fails, you or another agent will get the task back with the failures.
 
 Constraints (enforced by the system, so don't try to work around them):
@@ -52,6 +53,7 @@ How to plan:
 - Use dependsOn when a task needs another task's code merged first (e.g. a page that calls an API). Tasks without dependencies run in parallel on different machines, so make shared contracts explicit in both tasks' descriptions.
 - Choose kind: feature for normal work; db_migration for schema changes; container_build for Docker work; e2e_test for browser tests; unit_test for test-only tasks.
 - Each task runs QA (the project's test command) before it is merged, so tasks should leave the test suite passing.
+- A task that changes behaviour also updates, in the same task, the existing tests that check the old behaviour: unit tests and end-to-end specs alike (backend and frontend may edit tests). Say which ones in its description. Every pull request's CI runs the whole suite, including suites QA's \`npm test\` may not run (e.g. Playwright), so never leave those updates to a later qa task: that task's dependencies would open red pull requests. Later qa tasks add new coverage.
 - A task's role decides which files its agent may change, and anything outside is refused:
 ${ARCHITECT_ROLE_SCOPES}
   Give every task a role that may change all the files it must change. A qa or devops task that needs a change elsewhere (a shared fixture or helper in src/, a feature fix) gets that part moved into a test or config path it may write, or split into a backend/frontend task it depends on. Never put a file outside the role's scope in its description or acceptance criteria.

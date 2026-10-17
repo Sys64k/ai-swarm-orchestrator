@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { architectSystemPrompt } from "@aso/hub";
+import { architectSystemPrompt, systemPrompt } from "@aso/hub";
 import { describeWritable } from "@aso/shared";
 
 describe("the Architect's instructions", () => {
@@ -13,7 +13,19 @@ describe("the Architect's instructions", () => {
     assert.match(prompt, /split into a backend\/frontend task it depends on/);
   });
 
+  it("keep existing tests in the task that changes the behaviour they check", () => {
+    const prompt = architectSystemPrompt();
+    assert.match(prompt, /updates, in the same task, the existing tests that check the old behaviour/);
+    assert.match(prompt, /never leave those updates to a later qa task/);
+  });
+
   it("stay byte-stable, so they stay in the prompt cache", () => {
     assert.equal(architectSystemPrompt(), architectSystemPrompt());
+  });
+});
+
+describe("an implementing agent's instructions", () => {
+  it("ask it to update the existing tests, end-to-end specs included, that its change breaks", () => {
+    assert.match(systemPrompt("frontend"), /update those tests in this task, end-to-end specs included/);
   });
 });
