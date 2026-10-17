@@ -567,8 +567,10 @@ in a review) don't. A pull request that conflicts with `main` goes back to an ag
 like a merge conflict. The Hub checks pull requests every 30 seconds; `aso sync` checks now.
 
 The token needs **Pull requests: read and write** as well as *Contents: read and write*. For
-the console to show checks, also give it **Checks: read** and **Commit statuses: read**; without
-them the checks show as unreadable, and approving asks you to merge anyway. Set
+the console to show checks, also give it **Actions: read** and **Commit statuses: read** (a
+fine-grained token can't have *Checks*, so the Hub reads GitHub Actions results through
+*Actions*). Without them the checks show as unreadable, and approving asks you to merge
+anyway. Set
 `ASO_PULL_REQUESTS=0` to merge on the Hub instead. A project's page in the console says which
 of the two it does, and why.
 

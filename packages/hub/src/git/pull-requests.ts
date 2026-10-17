@@ -99,9 +99,19 @@ export class PullRequests implements ReviewGate {
   async checks(task: TaskRecord): Promise<ReviewChecks> {
     const pr = pullOf(task);
     const pull = await this.api.getPull(pr.number);
-    const [runs, statuses] = await Promise.allSettled([this.api.checkRuns(pull.headSha), this.api.statuses(pull.headSha)]);
+    const [runs, statuses] = await Promise.allSettled([this.checkRuns(pull.headSha), this.api.statuses(pull.headSha)]);
     const read = <T>(r: PromiseSettledResult<T[]>) => (r.status === "fulfilled" ? r.value : (r.reason as Error));
     return { pr, headSha: pull.headSha, mergeable: pull.mergeable, ...summarizeChecks(read(runs), read(statuses)) };
+  }
+
+  /** Check runs, or with a fine-grained token (no Checks permission there) the Actions jobs. */
+  private async checkRuns(sha: string): Promise<CheckRun[]> {
+    try {
+      return await this.api.checkRuns(sha);
+    } catch (err) {
+      if (!(err instanceof GitHubError) || (err.status !== 403 && err.status !== 404)) throw err;
+      return this.api.actionJobs(sha);
+    }
   }
 
   /** Merge the pull request at the commit QA passed, and bring the Hub's main up to GitHub's. */
@@ -231,7 +241,7 @@ export function mergeBlock(checks: ReviewChecks, testedCommit: string | undefine
 
 function checksError(err: Error): string {
   if (err instanceof GitHubError && (err.status === 403 || err.status === 404)) {
-    return "the GitHub token can't read this repository's checks: give it read access to Checks and Commit statuses";
+    return "the GitHub token can't read this repository's checks: give it read access to Actions and Commit statuses";
   }
   return err.message;
 }

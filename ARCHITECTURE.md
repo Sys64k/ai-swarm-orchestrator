@@ -1243,8 +1243,10 @@ manager's `ReviewGate`, over `GitHubApi` (`git/github.ts`, a few REST calls on `
     Hub's own repository (`HubRepository.diff`, split per file by `parseDiff` in `git/diff.ts`).
     Patches over 100 kB, and any beyond 1 MB in total, are left out (`truncated`).
   - `GET /api/tasks/{id}/checks`: check runs and commit statuses on the PR's head, summed up by
-    `summarizeChecks`: failing if any fails, else `unknown` if either list can't be read (a
-    token without *Checks* access), else pending, passing or none.
+    `summarizeChecks`: failing if any fails, else `unknown` if either list can't be read, else
+    pending, passing or none. Fine-grained tokens can't have the *Checks* permission (GitHub
+    Apps only), so when check runs are refused the Hub reads the commit's GitHub Actions jobs
+    instead (`GitHubApi.actionJobs`, needs *Actions: read*).
   - `POST /api/tasks/{id}/approve`: refuses (409) when the PR's head isn't the commit QA passed,
     when it conflicts, or (without `force`) when the checks aren't passing or none. Otherwise
     it merges on GitHub (`PUT /pulls/{n}/merge` with that `sha`, so a commit pushed meanwhile

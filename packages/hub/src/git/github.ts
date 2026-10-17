@@ -164,6 +164,20 @@ export class GitHubApi {
     return page.check_runs.map((r) => ({ name: r.name, status: r.status, conclusion: r.conclusion, url: r.html_url ?? undefined }));
   }
 
+  /**
+   * The jobs of the GitHub Actions runs on a commit, as check runs. Fine-grained tokens can't
+   * have the Checks permission (GitHub Apps only), but they can read Actions.
+   */
+  async actionJobs(sha: string): Promise<CheckRun[]> {
+    const runs = await this.call<{ workflow_runs: Array<{ id: number }> }>("GET", `/actions/runs?head_sha=${sha}&per_page=100`);
+    const jobs = await Promise.all(
+      runs.workflow_runs.map((run) =>
+        this.call<{ jobs: Array<{ name: string; status: string; conclusion: string | null; html_url?: string | null }> }>("GET", `/actions/runs/${run.id}/jobs?per_page=100`),
+      ),
+    );
+    return jobs.flatMap((page) => page.jobs.map((j) => ({ name: j.name, status: j.status, conclusion: j.conclusion, url: j.html_url ?? undefined })));
+  }
+
   async statuses(sha: string): Promise<CommitStatus[]> {
     const combined = await this.call<{ statuses: Array<{ context: string; state: string; target_url?: string | null }> }>("GET", `/commits/${sha}/status`);
     return combined.statuses.map((s) => ({ context: s.context, state: s.state, url: s.target_url ?? undefined }));

@@ -37,8 +37,10 @@ class FakeGitHub {
   /** Check runs and commit statuses per commit. */
   checkRuns = new Map<string, Array<{ name: string; status: string; conclusion: string | null; html_url: string }>>();
   statuses = new Map<string, Array<{ context: string; state: string; target_url: string }>>();
-  /** The token may not read checks (a fine-grained token without Checks access). */
+  /** The token may read no checks at all (no Actions or Commit statuses access). */
   checksForbidden = false;
+  /** Check runs are refused but Actions are not: a fine-grained token, which can't have Checks. */
+  checkRunsForbidden = false;
   originDir = "";
   private server?: Server;
   url = "";
@@ -72,6 +74,7 @@ class FakeGitHub {
     this.checkRuns.clear();
     this.statuses.clear();
     this.checksForbidden = false;
+    this.checkRunsForbidden = false;
     this.originDir = originDir;
   }
 
@@ -132,8 +135,21 @@ class FakeGitHub {
       return [201, this.json(pull)];
     }
     const commit = /^\/commits\/([0-9a-f]+)\/(check-runs|status)$/.exec(route);
+    const forbidden: [number, unknown] = [403, { message: "Resource not accessible by personal access token" }];
+    // Actions: one workflow run per commit with check runs, numbered by its place in the map.
+    if (route === "/actions/runs" && req.method === "GET") {
+      if (this.checksForbidden) return forbidden;
+      const shas = [...this.checkRuns.keys()];
+      const id = shas.indexOf(url.searchParams.get("head_sha") ?? "");
+      return [200, { workflow_runs: id === -1 ? [] : [{ id: id + 1 }] }];
+    }
+    const jobs = /^\/actions\/runs\/(\d+)\/jobs$/.exec(route);
+    if (jobs && req.method === "GET") {
+      if (this.checksForbidden) return forbidden;
+      return [200, { jobs: [...this.checkRuns.values()][Number(jobs[1]) - 1] ?? [] }];
+    }
     if (commit && req.method === "GET") {
-      if (this.checksForbidden) return [403, { message: "Resource not accessible by personal access token" }];
+      if (this.checksForbidden || (this.checkRunsForbidden && commit[2] === "check-runs")) return forbidden;
       return commit[2] === "check-runs"
         ? [200, { total_count: 0, check_runs: this.checkRuns.get(commit[1]) ?? [] }]
         : [200, { state: "pending", statuses: this.statuses.get(commit[1]) ?? [] }];
@@ -556,12 +572,13 @@ describe("reviewing in ASO", () => {
       github.checksForbidden = true;
       const unreadable = await api(ctx.port, "GET", "tasks/red/checks");
       assert.equal(unreadable.data.overall, "unknown");
-      assert.match(unreadable.data.error, /read access to Checks and Commit statuses/);
+      assert.match(unreadable.data.error, /read access to Actions and Commit statuses/);
       const refusedUnknown = await api(ctx.port, "POST", "tasks/red/approve", {});
       assert.equal(refusedUnknown.status, 409);
       assert.match(refusedUnknown.data.error, /checks can't be read .*; approve with force to merge anyway/);
 
       github.checksForbidden = false;
+      github.checkRunsForbidden = true; // a fine-grained token: the same results, read through Actions
       addCheck("red", "unit", "success");
       addCheck("red", "Playwright e2e", null);
       assert.match((await api(ctx.port, "POST", "tasks/red/approve")).data.error, /^checks pending: Playwright e2e; approve with force/);
@@ -683,7 +700,7 @@ describe("pull request helpers", () => {
     const forbidden = new GitHubError("HTTP 403", 403);
     const unknown = summarizeChecks([run("a", "success")], forbidden);
     assert.equal(unknown.overall, "unknown", "a passing run says nothing about the statuses nobody could read");
-    assert.match(unknown.error!, /read access to Checks and Commit statuses/);
+    assert.match(unknown.error!, /read access to Actions and Commit statuses/);
     assert.equal(summarizeChecks([run("a", "failure")], forbidden).overall, "failing");
     assert.equal(summarizeChecks(new Error("GitHub unreachable"), []).error, "GitHub unreachable");
     assert.deepEqual(summarizeChecks([], [{ context: "ci", state: "success", url: "u" }]).checks, [{ name: "ci", state: "passing", url: "u" }]);
