@@ -49,6 +49,8 @@ export interface ExecutionContext {
   fileOperation(op: Omit<MessageOf<"FILE_OPERATION">["payload"], "taskId">): void;
   /** Where the agent's commands run (the job sandbox, or directly on this machine). */
   commands: CommandRunner;
+  /** Why the work can't be handed in yet (e.g. conflict markers left), or undefined. */
+  checkFinish?(): Promise<string | undefined>;
 }
 
 export type { ModelReply, ModelTurn } from "./model-channel.js";
@@ -242,16 +244,23 @@ export class JobRunner {
     const { send } = this.opts;
     const repoDir = this.repoDir(task.project, slot);
     const job: RunningJob = { taskId: task.taskId, job: "implement" };
+    let conflicts: string[] = [];
     const status = (state: "in_progress" | "failed", detail?: string) =>
       send(
         "STATUS_UPDATE",
-        { state, taskId: task.taskId, detail: detail?.slice(0, 2000), ...(state === "in_progress" ? { slot: slot + 1 } : {}) },
+        {
+          state,
+          taskId: task.taskId,
+          detail: detail?.slice(0, 2000),
+          ...(state === "in_progress" ? { slot: slot + 1, ...(conflicts.length ? { conflicts } : {}) } : {}),
+        },
         state === "failed" ? job : undefined,
       );
     try {
       const git = await this.openRepo(repoDir, task.project, task.role);
       const { resumed } = await git.startTask(task.taskId);
-      if (resumed) await git.syncWithMain();
+      // A conflict with main is the agent's to resolve: the files come back with markers in them.
+      if (resumed) conflicts = (await git.syncForRework()).conflicts;
       // The agent may not install packages itself, so the checkout's dependencies are its to provide.
       const install = await this.installDependencies(repoDir);
       if (!install.ok) status("in_progress", `npm ci failed; the agent can retry it: ${install.output.slice(-500)}`);
@@ -265,6 +274,10 @@ export class JobRunner {
         callModel: (turn) => this.model.call({ taskId: task.taskId }, turn),
         fileOperation: (op) => send("FILE_OPERATION", { ...op, taskId: task.taskId } as PayloadInput<"FILE_OPERATION">),
         commands: this.commands,
+        checkFinish: async () => {
+          const left = await git.unresolvedConflicts();
+          return left.length ? `these files still have merge conflict markers (<<<<<<< / >>>>>>>): ${left.join(", ")}. Resolve them, then call finish again.` : undefined;
+        },
       });
       const done = await git.completeTask(result?.commitMessage ?? `${task.taskId}: ${task.title}`);
       send(

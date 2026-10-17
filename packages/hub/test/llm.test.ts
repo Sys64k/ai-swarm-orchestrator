@@ -10,6 +10,7 @@ import {
   hardware,
   lastToolResults,
   postTask,
+  pushTaskBranch,
   reply,
   ScriptedModel,
   tempDir,
@@ -17,6 +18,7 @@ import {
   toolUse,
   waitFor,
   withHub,
+  writeFiles,
   worker,
   type Block,
   type HubContext,
@@ -390,6 +392,42 @@ console.log("greeting ok");\n`;
         assert.equal(record.state, "merged", record.history.map((h) => h.event).join("\n"));
         assert.equal(git(ctx.repoDir, "show", "main:greeting.txt"), "hello");
         assert.equal(model.requests.length, 3); // write, stop, finish after the reminder
+      },
+      { qa: { enabled: false }, llm: { adapter: model } },
+    );
+  });
+
+  it("hands a conflict with main to the agent, and refuses finish until the markers are gone", () => {
+    const model = new ScriptedModel((req) => {
+      const first = req.messages[0].content as string;
+      assert.match(first, /## Merge conflicts to resolve[\s\S]*- greeting\.txt/);
+      const last = req.messages.at(-1)!.content;
+      switch (req.messages.length) {
+        case 1:
+          return reply([toolUse("t1", "read_file", { path: "greeting.txt" })]);
+        case 3:
+          assert.match(JSON.stringify(last), /<<<<<<<[\s\S]*hello from main[\s\S]*helo from the task[\s\S]*>>>>>>>/);
+          return reply([toolUse("t2", "finish", { summary: "too early", commit_message: "feat: greeting" })]);
+        case 5:
+          assert.match(JSON.stringify(last), /finish was not accepted: these files still have merge conflict markers[^"]*greeting\.txt/);
+          return reply([toolUse("t3", "write_file", { path: "greeting.txt", content: "hello\n" }), toolUse("t4", "finish", { summary: "resolved", commit_message: "feat: greeting" })]);
+        default:
+          throw new Error(`unexpected request ${req.messages.length}`);
+      }
+    });
+    return withHub(
+      async (ctx) => {
+        // An earlier attempt left task/greet behind, and main has since changed the same line.
+        await pushTaskBranch(ctx.gitUrl, "greet", { "greeting.txt": "helo from the task\n" });
+        writeFiles(ctx.repoDir, { "greeting.txt": "hello from main\n" });
+        git(ctx.repoDir, "add", "-A");
+        git(ctx.repoDir, "commit", "--quiet", "-m", "main changes the greeting");
+        const record = await runGreet(ctx);
+        const events = record.history.map((h) => h.event);
+        assert.equal(record.state, "merged", events.join("\n"));
+        assert.ok(events.some((e) => /conflict markers left for the agent in greeting\.txt/.test(e)), events.join("\n"));
+        assert.equal(git(ctx.repoDir, "show", "main:greeting.txt"), "hello");
+        assert.equal(record.conflicts, undefined, "cleared once the work is handed in");
       },
       { qa: { enabled: false }, llm: { adapter: model } },
     );

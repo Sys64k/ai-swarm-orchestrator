@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync, existsSync
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { AgentGitClient, AgentGitError, excludeLocally, ProtectedFileError, RebaseConflictError } from "@aso/worker";
+import { AgentGitClient, AgentGitError, excludeLocally, hasConflictMarkers, ProtectedFileError, RebaseConflictError } from "@aso/worker";
 
 process.env.ASO_LOG_LEVEL ??= "warn";
 
@@ -210,6 +210,53 @@ describe("AgentGitClient", () => {
       return true;
     });
     assert.match(git(client.repoDir, "stash", "list"), /aso: syncWithMain/);
+  });
+
+  it("syncForRework keeps a clean rebase as it is", async () => {
+    await client.startTask("feat-1");
+    write(client.repoDir, "a.txt", "mine\n");
+    await client.completeTask("a");
+    await client.startTask("feat-1");
+    const mainHead = hubCommit("b.txt", "theirs\n");
+
+    const { conflicts } = await client.syncForRework();
+    assert.deepEqual(conflicts, []);
+    assert.equal(git(client.repoDir, "rev-parse", "HEAD~1"), mainHead, "the task commit on top of main");
+    assert.equal(git(client.repoDir, "status", "--porcelain"), "");
+  });
+
+  it("syncForRework replays a conflicting branch onto main and leaves markers for the agent", async () => {
+    await client.startTask("feat-1");
+    write(client.repoDir, "README.md", "hello\ntask line\n");
+    write(client.repoDir, "src/new.ts", "export const n = 1;\n");
+    await client.completeTask("task edit");
+    await client.startTask("feat-1");
+    const mainHead = hubCommit("README.md", "hello\nmain line\n");
+
+    const { conflicts, head } = await client.syncForRework();
+    assert.deepEqual(conflicts, ["README.md"]);
+    assert.equal(head, mainHead, "the branch starts over from main");
+    const readme = readFileSync(path.join(client.repoDir, "README.md"), "utf8");
+    assert.match(readme, /^<{7}[\s\S]*main line[\s\S]*task line[\s\S]*^>{7}/m);
+    assert.equal(readFileSync(path.join(client.repoDir, "src/new.ts"), "utf8"), "export const n = 1;\n", "what merges cleanly is applied");
+    assert.equal(git(client.repoDir, "diff", "--name-only", "--diff-filter=U"), "", "nothing left unmerged in the index");
+    assert.deepEqual(await client.unresolvedConflicts(), ["README.md"]);
+
+    // The agent resolves the file; then the work can be handed in, on top of main.
+    write(client.repoDir, "README.md", "hello\nmain line\ntask line\n");
+    assert.deepEqual(await client.unresolvedConflicts(), []);
+    const done = await client.completeTask("task edit, on the new main");
+    assert.deepEqual(done.files, ["README.md", "src/new.ts"]);
+    assert.equal(git(origin, "rev-parse", "task/feat-1~1"), mainHead);
+    assert.equal(git(origin, "show", "task/feat-1:README.md"), "hello\nmain line\ntask line");
+  });
+
+  it("recognises conflict markers, not look-alike lines", () => {
+    assert.equal(hasConflictMarkers("a\n<<<<<<< ours\nx\n=======\ny\n>>>>>>> theirs\n"), true);
+    assert.equal(hasConflictMarkers("<<<<<<<\nx\n>>>>>>>\n"), true, "bare markers");
+    assert.equal(hasConflictMarkers("Title\n=======\n"), false, "a setext heading");
+    assert.equal(hasConflictMarkers(">>>>>>> theirs\n<<<<<<< ours\n"), false, "no end after the start");
+    assert.equal(hasConflictMarkers("x <<<<<<< y\n"), false, "only at the start of a line");
   });
 
   it("reports whether startTask resumed an existing remote branch", async () => {

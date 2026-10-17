@@ -56,7 +56,8 @@ export class LlmTaskExecutor implements TaskExecutor {
 
       if (finish) {
         const parsed = AGENT_TOOLS.finish.input.safeParse(finish.input);
-        if (parsed.success && results.every((r) => !r.isError)) {
+        const refused = parsed.success && results.every((r) => !r.isError) ? await ctx.checkFinish?.() : undefined;
+        if (parsed.success && results.every((r) => !r.isError) && !refused) {
           log.info(`task ${task.taskId} finished: ${parsed.data.summary.split("\n")[0]}`);
           ctx.report(`finished: ${parsed.data.summary.slice(0, 500)}`);
           return { commitMessage: parsed.data.commit_message, summary: parsed.data.summary };
@@ -64,9 +65,11 @@ export class LlmTaskExecutor implements TaskExecutor {
         // Refuse a premature finish: the model sees why and continues.
         results.push({
           toolUseId: finish.id,
-          content: parsed.success
-            ? "finish was not accepted because other tool calls in the same turn failed; fix them first"
-            : `invalid finish input: ${parsed.error.issues.map((i) => i.message).join("; ")}`,
+          content: refused
+            ? `finish was not accepted: ${refused}`
+            : parsed.success
+              ? "finish was not accepted because other tool calls in the same turn failed; fix them first"
+              : `invalid finish input: ${parsed.error.issues.map((i) => i.message).join("; ")}`,
           isError: true,
         });
       } else if (reply.toolCalls.length === 0) {

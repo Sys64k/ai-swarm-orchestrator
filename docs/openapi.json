@@ -981,6 +981,13 @@
           "qaSummary": {
             "type": "string"
           },
+          "conflicts": {
+            "description": "Files left with merge conflict markers for the agent to resolve this round",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "crew": {
             "description": "The agents that implemented and tested it, oldest first",
             "type": "array",

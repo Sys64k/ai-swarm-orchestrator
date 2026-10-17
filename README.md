@@ -572,8 +572,10 @@ other CI) and offers:
 The Hub opens pull requests as the token's owner, usually you, and GitHub lets no one request
 changes on their own pull request: there the review form offers only **Comment**, so a
 submitted Comment review from you sends the work back too. Comments in the conversation (not
-in a review) don't. A pull request that conflicts with `main` goes back to an agent to rebase,
-like a merge conflict. The Hub checks pull requests every 30 seconds; `aso sync` checks now.
+in a review) don't. A pull request that conflicts with `main` (often because another one was
+merged first) goes back to an agent: the worker restarts the branch from `main` with the task's
+changes re-applied, the conflicting files keep `<<<<<<<`/`>>>>>>>` markers, and the agent
+resolves them and can't hand the work in until they're gone. The Hub checks pull requests every 30 seconds; `aso sync` checks now.
 
 The token needs **Pull requests: read and write** as well as *Contents: read and write*. For
 the console to show checks, also give it **Actions: read** and **Commit statuses: read** (a

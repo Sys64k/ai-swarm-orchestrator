@@ -59,6 +59,8 @@ export interface TaskRecord {
   commit?: string;
   /** Merge commit on main. */
   mainCommit?: string;
+  /** Files the worker left with merge conflict markers when it brought the branch up to main. */
+  conflicts?: string[];
   /** What the last passing QA run reported (shown in the pull request). */
   qaSummary?: string;
   /** The agents (machine and desk) that implemented and tested it, oldest first. */
@@ -275,6 +277,7 @@ export class TaskManager {
     task.commit = undefined;
     task.detail = undefined;
     task.review = undefined; // a cancelled task's pull request was closed; the next one is new
+    task.conflicts = undefined;
     task.rework = { round: 1, reason: `Retried by a person; ${why}. Your branch may already contain that attempt.` };
     task.state = "pending";
     this.note(task, `retry ${task.retries} requested by a person`);
@@ -532,12 +535,17 @@ export class TaskManager {
       case "waiting_llm": {
         const agent = update.slot ? this.joinCrew(task, "implement", nodeId, update.slot) : undefined;
         if (task.state !== "in_progress") this.note(task, `started on ${nodeId}${agent ? ` (${agent})` : ""}`);
+        if (update.conflicts?.length && !task.conflicts) {
+          task.conflicts = update.conflicts;
+          this.note(task, `main changed the same lines; conflict markers left for the agent in ${update.conflicts.join(", ")}`);
+        }
         task.state = "in_progress";
         this.touch(task);
         return undefined;
       }
       case "completed":
         this.registry.release(nodeId, task.spec.taskId);
+        task.conflicts = undefined;
         task.state = "verifying";
         task.commit = update.commit;
         this.note(task, `pushed ${update.commit!.slice(0, 8)}${update.detail ? `: ${update.detail}` : ""}`);
@@ -887,6 +895,7 @@ export class TaskManager {
   private sendBack(task: TaskRecord, rework: Omit<Rework, "round">, label: string): void {
     // The agent sees one running count of every time its work came back.
     task.rework = { round: task.reworkRound + (task.review?.rounds ?? 0), ...rework };
+    task.conflicts = undefined; // the next round reports its own
     task.state = "pending";
     task.nodeId = undefined;
     task.qaNodeId = undefined;

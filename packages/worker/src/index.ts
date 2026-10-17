@@ -4,6 +4,7 @@ export {
   AgentGitClient,
   AgentGitError,
   excludeLocally,
+  hasConflictMarkers,
   LOCAL_EXCLUDES,
   ProtectedFileError,
   RebaseConflictError,
