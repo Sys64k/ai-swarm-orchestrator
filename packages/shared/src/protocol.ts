@@ -232,6 +232,39 @@ const TaskAssignmentPayload = TaskSpecSchema.extend({
     .optional(),
 });
 
+/**
+ * A view a developer agent asks QA to screenshot, because its change shows there. The project's
+ * screenshots script reads the list (SCREENSHOT_TARGETS_ENV) and saves each as `<name>.png`.
+ */
+export const ScreenshotTargetSchema = z.strictObject({
+  name: z
+    .string()
+    .regex(/^[a-z0-9][a-z0-9-]{0,59}$/, "lowercase letters, digits and -, up to 60")
+    .describe("File name without extension, e.g. task-screenshots-dark-phone"),
+  path: z
+    .string()
+    .max(500)
+    .regex(/^\/[^\s]*$/, "a path in the app starting with /, no spaces")
+    .describe("Page to open, e.g. /tasks/t-1"),
+  theme: z.enum(["light", "dark"]).optional().describe("Colour scheme; the app's default without one"),
+  width: z.number().int().min(320).max(3840).optional().describe("Viewport width in CSS pixels, e.g. 412 for a phone; desktop size without one"),
+  height: z.number().int().min(320).max(3840).optional().describe("Viewport height in CSS pixels"),
+  selector: z.string().min(1).max(300).optional().describe("CSS selector of the element to shoot; the whole viewport without one"),
+  state: z
+    .string()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe("Data the page needs, in the project's own terms (e.g. a mock scenario name), if its screenshots script supports one"),
+});
+export type ScreenshotTarget = z.infer<typeof ScreenshotTargetSchema>;
+
+export const ScreenshotTargetsSchema = z
+  .array(ScreenshotTargetSchema)
+  .min(1)
+  .max(QA_SCREENSHOTS_MAX)
+  .refine((list) => new Set(list.map((t) => t.name)).size === list.length, { message: "screenshot names must be unique" });
+
 const TestExecutionPayload = z.strictObject({
   taskId: TaskIdSchema,
   project: ProjectIdSchema,
@@ -242,6 +275,8 @@ const TestExecutionPayload = z.strictObject({
   /** argv lists run before the tests (e.g. `npm ci`); a failing step fails the run. */
   setup: z.array(z.array(z.string().min(1)).min(1)).default([]),
   timeoutSec: z.number().int().positive().max(3600).default(900),
+  /** The views the developer agent listed for the screenshots script (see SCREENSHOT_TARGETS_ENV). */
+  screenshotTargets: ScreenshotTargetsSchema.optional(),
 });
 
 const FileOperationPayload = z.discriminatedUnion("op", [
@@ -280,6 +315,8 @@ const StatusUpdatePayload = z
      * with conflict markers for the agent to resolve.
      */
     conflicts: z.array(z.string().min(1).max(1000)).max(500).optional(),
+    /** Sent with `completed`: the views the agent asks QA to screenshot. */
+    screenshotTargets: ScreenshotTargetsSchema.optional(),
   })
   .refine((p) => p.state === "idle" || p.taskId !== undefined, {
     message: "taskId is required unless state is idle",

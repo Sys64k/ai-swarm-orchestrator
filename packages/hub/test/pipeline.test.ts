@@ -347,6 +347,52 @@ writeFileSync(path.join(dir, "notes.txt"), "not an image");
       },
     ));
 
+  it("hands the views the developer listed to the screenshots script", () =>
+    withHub(
+      async (ctx) => {
+        const targets = [
+          { name: "page-dark", path: "/tasks/t-1", theme: "dark" as const },
+          { name: "page-phone", path: "/tasks/t-1", width: 412, selector: "#shots", state: "with-screenshots" },
+        ];
+        const executor: TaskExecutor = {
+          async implement(_t, { repoDir }) {
+            writeFiles(repoDir, { "page.txt": "a page\n" });
+            return { commitMessage: "feat: page", screenshotTargets: targets };
+          },
+        };
+        const dirs = [tempDir("aso-w1-"), tempDir("aso-w2-")];
+        const start = (nodeId: string, workDir: string, extra: { executor?: TaskExecutor } = {}) =>
+          startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId, workDir, hardware: hardware(), sandbox: "none", ...extra });
+        const dev = await start("dev", dirs[0], { executor });
+        const qa = await start("qa", dirs[1]);
+        try {
+          await waitFor(() => ctx.hub.registry.has("dev") && ctx.hub.registry.has("qa"));
+          await postTask(ctx.port, task("views"));
+          const record = await waitFor(() => ["merged", "failed"].includes(ctx.hub.tasks.get("views")!.state) && ctx.hub.tasks.get("views")!, 30_000, "task to finish");
+          assert.equal(record.state, "merged", record.history.map((h) => h.event).join("\n"));
+          assert.deepEqual(record.screenshotTargets, targets);
+          // The script saved one image per view, named after it: it got the list.
+          assert.deepEqual(record.screenshots?.files.map((f) => f.name), ["page-dark.png", "page-phone.png"]);
+        } finally {
+          dev.stop();
+          qa.stop();
+          await Promise.all([dev.runner.idle(), qa.runner.idle()]);
+          for (const d of dirs) rmSync(d, { recursive: true, force: true });
+        }
+      },
+      {
+        files: {
+          "package.json": JSON.stringify({ name: "views", private: true, scripts: { test: "node -e 0", screenshots: "node shot.mjs" } }),
+          "shot.mjs": `
+import { writeFileSync } from "node:fs";
+import path from "node:path";
+const targets = JSON.parse(process.env.ASO_SCREENSHOT_TARGETS ?? "[]");
+for (const t of targets) writeFileSync(path.join(process.env.ASO_SCREENSHOT_DIR, t.name + ".png"), Buffer.from("${"${PNG}"}", "base64"));
+`.replaceAll("${PNG}", PNG_1X1),
+        },
+      },
+    ));
+
   it("notes a failing screenshots script without failing QA", () =>
     withHub(
       async (ctx) => {

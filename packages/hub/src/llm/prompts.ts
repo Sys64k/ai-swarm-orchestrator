@@ -1,4 +1,16 @@
-import { DEVOPS_WRITABLE, describeWritable, lastReplyAsksForChanges, QA_WRITABLE, type PlannedTask, type WorkerRole } from "@aso/shared";
+import {
+  DEVOPS_WRITABLE,
+  QA_SCREENSHOTS_MAX,
+  SCREENSHOT_DIR_ENV,
+  SCREENSHOT_SCRIPT,
+  SCREENSHOT_TARGETS_ENV,
+  SCREENSHOT_TIMEOUT_SEC,
+  describeWritable,
+  lastReplyAsksForChanges,
+  QA_WRITABLE,
+  type PlannedTask,
+  type WorkerRole,
+} from "@aso/shared";
 import type { PlanRecord } from "../plans.js";
 import { DEFAULT_MAX_TOKENS } from "./adapter.js";
 import type { TaskRecord } from "../tasks.js";
@@ -25,6 +37,7 @@ How to work:
 - Keep each answer short: it is limited to about ${DEFAULT_MAX_TOKENS.toLocaleString("en-US")} tokens, your thinking included, and an answer that runs over is cut off and thrown away. Change existing files with targeted edit_file calls instead of rewriting them, and write a large new file in parts: a short write_file first, then edit_file to add the rest.
 - Verify your work: run the project's tests, type checker or build with run_command where they exist, and fix what fails.
 - Look at visual changes (layout, styling, drawings) before you finish: tests can pass while something looks wrong. Save a screenshot with a script or test the project can already run (e.g. Playwright's page.screenshot or locator.screenshot) and open it with view_image; check the light and dark themes and a phone width where the project has them. Save screenshots where .gitignore keeps them out of the commit (e.g. test-results/), or delete them before finish.
+- If package.json has a "screenshots" script and your change shows in the UI, list the views that show it in finish's screenshots, so QA screenshots them from the tested commit for the reviewer: each page path, with the theme, a phone width or an element selector where they matter. Read the script first to see what it supports (e.g. which data states it can show). If a view needs data the app's mock or fixtures don't have yet, add it in this task.
 - If you change behaviour that existing tests check, update those tests in this task, end-to-end specs included (e.g. Playwright under e2e/ or tests/e2e/): QA's \`npm test\` may not run them, but the pull request's CI does.
 - When the task is complete and verified, call finish with a summary and a commit message. Your work is then committed and tested by QA, which runs \`npm test\`. If QA fails, you or another agent will get the task back with the failures.
 
@@ -61,6 +74,7 @@ How to plan:
 ${ARCHITECT_ROLE_SCOPES}
   Give every task a role that may change all the files it must change. A qa or devops task that needs a change elsewhere (a shared fixture or helper in src/, a feature fix) gets that part moved into a test or config path it may write, or split into a backend/frontend task it depends on. Never put a file outside the role's scope in its description or acceptance criteria.
 - Agents cannot edit package.json directly; they request dependencies and npm scripts through the Hub themselves. Mention needed packages and scripts in the description. If the project has no package.json or no "test" script yet, make the first task set one up (QA runs \`npm test\` on every task).
+- QA screenshots: if the project has a user interface but no "screenshots" npm script, plan a task that adds one, so reviewers see each change. After the tests pass, QA runs \`npm run ${SCREENSHOT_SCRIPT}\` with ${SCREENSHOT_DIR_ENV} set to an empty folder to save PNGs into and, when the developer listed the views its change affects, ${SCREENSHOT_TARGETS_ENV} set to a JSON array of {name, path, theme?, width?, height?, selector?, state?} (save each as <name>.png; state is the project's own name for the data a page needs, e.g. a mock scenario). Without ${SCREENSHOT_TARGETS_ENV} it saves a few overview pages. The script starts the app itself on free ports with the data it needs (several QA runs can share a machine) and finishes within ${SCREENSHOT_TIMEOUT_SEC / 60} minutes, saving at most ${QA_SCREENSHOTS_MAX} images. A failure never fails QA.
 
 When the plan is ready, call submit_plan with a summary of the approach and the tasks. A human reviews it before any work starts: they approve it, or reply asking for changes.
 

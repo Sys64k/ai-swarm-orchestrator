@@ -187,8 +187,8 @@ keys are rejected.
 | `REGISTRATION_ACK` | hub → node | 1 | Registration accepted |
 | `NODE_HEARTBEAT` | node → hub | 2 | Every 15 s: free RAM, CPU load, Docker availability |
 | `TASK_ASSIGNMENT` | hub → node | 2 | A `TaskSpec` with its `project` (the worker checks out `/git/<project>.git`), plus `rework` (round, reason, failures, test output) when the task comes back |
-| `STATUS_UPDATE` | node → hub | 2 | `accepted`, `in_progress`, `waiting_*`, `completed` (with commit), `failed`, `idle` |
-| `TEST_EXECUTION` | hub → node | 3 | QA: test an exact commit with `setup` steps and a `command` argv; carries the `project` |
+| `STATUS_UPDATE` | node → hub | 2 | `accepted`, `in_progress`, `waiting_*`, `completed` (with commit and any `screenshotTargets`), `failed`, `idle` |
+| `TEST_EXECUTION` | hub → node | 3 | QA: test an exact commit with `setup` steps and a `command` argv; carries the `project` and any `screenshotTargets` |
 | `FEEDBACK_LOOP` | node → hub | 3 | QA verdict: `pass` (with the screenshots the project's script saved, if any), or `fail` with at least one failure and the output tail |
 | `FILE_OPERATION` | node → hub | 5 | Audit trail of agent file edits (sent by the agent loop) |
 | `DEPENDENCY_REQUEST` | node → hub | 4 | Ask the Hub for a package.json change: `add_dependencies` or `set_scripts` (idempotent by `requestId`) |
@@ -780,6 +780,14 @@ type from the bytes and keeps at most 12 images, each up to 2 MB and 4 MB togeth
 verdict stays well under the frame limit. They ride on `FEEDBACK_LOOP pass`. A failing or
 slow (5 min) script is only noted in the summary: it never fails QA.
 
+What to shoot comes from the developer agent. `finish` takes an optional `screenshots` list of
+views (`ScreenshotTarget`: `name`, `path`, optional `theme`, `width`, `height`, `selector`,
+`state`), which rides on `STATUS_UPDATE completed` as `screenshotTargets`. The Hub keeps it on the
+task, replacing it at each finish, because a rework may change something else, and sends it with
+`TEST_EXECUTION`. The worker passes it to the script as JSON in `ASO_SCREENSHOT_TARGETS`. Without a
+list, the variable is unset and the script takes its default views. The project's script decides
+how to start the app and show each view; the schema keeps names plain and paths app-relative.
+
 The Hub keeps one set per task in `<stateDir>/screenshots/<taskId>/` (`Screenshots`), and the
 task record lists them (`screenshots: { commit, at, files }`). A new passing run replaces the set,
 and one without screenshots removes it, so a reviewer never sees an older commit's images.
@@ -1001,7 +1009,7 @@ sequenceDiagram
 | `run_command` | argv without a shell, in the job sandbox; `CI=1`; default 120 s timeout (max 900); `git`, shells, `sudo` and `npm install`-style commands refused |
 | `request_dependencies` | Adds up to 30 npm packages via the Hub in one commit; returns once installed and rebased |
 | `set_package_scripts` | Sets npm scripts via the Hub (creates package.json if missing); returns once rebased |
-| `finish` | Ends the loop with a summary and commit message; refused if other calls in the same turn failed |
+| `finish` | Ends the loop with a summary, a commit message and, for a visible change, the views QA should screenshot; refused if other calls in the same turn failed |
 
 **Stopping without `finish`.** A reply with no tool calls hands nothing in. The worker sends the
 next turn with no tool results, and the Hub turns that into a reminder (`CONTINUE_PROMPT`): call

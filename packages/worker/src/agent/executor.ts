@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { AGENT_TOOLS, createLogger, TURN_IMAGE_BUDGET } from "@aso/shared";
+import { AGENT_TOOLS, createLogger, TURN_IMAGE_BUDGET, type ScreenshotTarget } from "@aso/shared";
 import type { ExecutionContext, TaskAssignment, TaskExecutor } from "../jobs.js";
 import type { ModelReply, ModelTurn } from "../model-channel.js";
 import { AgentTools, type ToolResult } from "./tools.js";
@@ -29,7 +29,10 @@ export class AgentStoppedError extends Error {
 export class LlmTaskExecutor implements TaskExecutor {
   constructor(private readonly opts: { retryDelaysMs?: number[] } = {}) {}
 
-  async implement(task: TaskAssignment, ctx: ExecutionContext): Promise<{ commitMessage: string; summary?: string }> {
+  async implement(
+    task: TaskAssignment,
+    ctx: ExecutionContext,
+  ): Promise<{ commitMessage: string; summary?: string; screenshotTargets?: ScreenshotTarget[] }> {
     const tools = new AgentTools({
       repoDir: ctx.repoDir,
       role: task.role,
@@ -62,7 +65,7 @@ export class LlmTaskExecutor implements TaskExecutor {
         if (parsed.success && results.every((r) => !r.isError) && !refused) {
           log.info(`task ${task.taskId} finished: ${parsed.data.summary.split("\n")[0]}`);
           ctx.report(`finished: ${parsed.data.summary.slice(0, 500)}`);
-          return { commitMessage: parsed.data.commit_message, summary: parsed.data.summary };
+          return { commitMessage: parsed.data.commit_message, summary: parsed.data.summary, screenshotTargets: parsed.data.screenshots };
         }
         // Refuse a premature finish: the model sees why and continues.
         results.push({

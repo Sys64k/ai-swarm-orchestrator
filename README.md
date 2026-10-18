@@ -611,15 +611,23 @@ the result next to the diff:
 1. **Add a `screenshots` npm script.** After the tests pass, the QA worker runs `npm run
    screenshots` with `ASO_SCREENSHOT_DIR` set to an empty folder. The script saves images there,
    e.g. a Playwright spec that calls `page.screenshot({ path: path.join(process.env.ASO_SCREENSHOT_DIR, "home-dark.png") })`.
-2. **Limits.** QA keeps up to 12 PNG, JPEG, GIF or WebP files from the top of that folder, in
+2. **Shots of the change.** A developer agent whose change shows in the UI lists the views that
+   show it when it finishes, e.g. `{"name": "task-dark-phone", "path": "/tasks/t-1", "theme":
+   "dark", "width": 412}`. QA passes the list as JSON in `ASO_SCREENSHOT_TARGETS`, and the script
+   saves each as `<name>.png`. The fields are `name`, `path`, and optional `theme` (`light` or
+   `dark`), `width`, `height`, `selector` (shoot one element) and `state` (the project's own name
+   for the data a page needs, e.g. a mock scenario). Without the variable, the script takes its
+   default views. The shots come from the tested commit, not from the agent. The Architect plans
+   a screenshots script for a project with a UI that has none.
+3. **Limits.** QA keeps up to 12 PNG, JPEG, GIF or WebP files from the top of that folder, in
    name order: up to 2 MB each and 4 MB together. Names may use letters, digits and `._-`.
    The QA summary says what was left out and why.
-3. **Never a failure.** A screenshots script that fails or times out (5 minutes) is noted in
+4. **Never a failure.** A screenshots script that fails or times out (5 minutes) is noted in
    the QA summary; the tests passed, so QA still passes.
-4. **Where to see them.** The task's page in the console has a **Screenshots** tab. The pull
+5. **Where to see them.** The task's page in the console has a **Screenshots** tab. The pull
    request lists them and, with `--console-url`, links to that page; GitHub can't show the images
    themselves, because they stay on the Hub (`GET /api/tasks/{id}/screenshots/{name}`).
-5. **One set per task.** A later passing QA run replaces them. A run that takes none removes them,
+6. **One set per task.** A later passing QA run replaces them. A run that takes none removes them,
    because they would show an older commit.
 
 ### Pushing main

@@ -237,6 +237,20 @@ export const TaskSchema = z.object({
     })
     .optional()
     .describe("What the project's screenshots script saved in the last passing QA run; GET /api/tasks/{id}/screenshots/{name} serves each"),
+  screenshotTargets: z
+    .array(
+      z.object({
+        name: z.string(),
+        path: z.string(),
+        theme: z.enum(["light", "dark"]).optional(),
+        width: z.number().int().optional(),
+        height: z.number().int().optional(),
+        selector: z.string().optional(),
+        state: z.string().optional(),
+      }),
+    )
+    .optional()
+    .describe("The views the developer agent asked QA to screenshot at its last finish (passed to the screenshots script)"),
   conflicts: z.array(z.string()).optional().describe("Files left with merge conflict markers for the agent to resolve this round"),
   crew: z.array(CrewMemberSchema).optional().describe("The agents that implemented and tested it, oldest first"),
   review: ReviewSchema.optional(),
