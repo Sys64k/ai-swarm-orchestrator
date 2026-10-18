@@ -7,10 +7,13 @@ import {
   PackageChangeSchema,
   SCREENSHOT_DIR_ENV,
   SCREENSHOT_SCRIPT,
+  SCREENSHOT_TARGETS_ENV,
+  SCREENSHOT_TIMEOUT_SEC,
   createLogger,
   type AgentMessageType,
   type MessageOf,
   type PayloadInput,
+  type ScreenshotTarget,
   type TaskId,
 } from "@aso/shared";
 import { AgentGitClient } from "./git/agent-git-client.js";
@@ -69,7 +72,7 @@ export class DependencyRejectedError extends Error {
 
 /** Does the actual work for a task. The LLM agent loop (Phase 5) implements this. */
 export interface TaskExecutor {
-  implement(task: TaskAssignment, ctx: ExecutionContext): Promise<{ commitMessage?: string; summary?: string } | void>;
+  implement(task: TaskAssignment, ctx: ExecutionContext): Promise<{ commitMessage?: string; summary?: string; screenshotTargets?: ScreenshotTarget[] } | void>;
 }
 
 export const unconfiguredExecutor: TaskExecutor = {
@@ -123,8 +126,6 @@ const NPM_CI_TIMEOUT_MS = 10 * 60_000;
 
 /** Feedback output budget (schema allows 100k; leave room for the envelope). */
 const FEEDBACK_OUTPUT_CHARS = 50_000;
-/** How long the project's screenshots script may run after the tests passed. */
-const SCREENSHOT_TIMEOUT_MS = 300_000;
 /** Folder in the QA checkout the screenshots script saves into (removed before each run). */
 const SCREENSHOT_DIR = ".aso-screenshots";
 
@@ -294,7 +295,13 @@ export class JobRunner {
       const done = await git.completeTask(result?.commitMessage ?? `${task.taskId}: ${task.title}`);
       send(
         "STATUS_UPDATE",
-        { state: "completed", taskId: task.taskId, commit: done.commit, detail: result?.summary?.slice(0, 2000) },
+        {
+          state: "completed",
+          taskId: task.taskId,
+          commit: done.commit,
+          detail: result?.summary?.slice(0, 2000),
+          ...(result?.screenshotTargets?.length ? { screenshotTargets: result.screenshotTargets } : {}),
+        },
         job,
       );
     } catch (err) {
@@ -400,7 +407,7 @@ export class JobRunner {
         output: result.output.slice(-FEEDBACK_OUTPUT_CHARS) || undefined,
       });
     }
-    const shots = await this.screenshots(repoDir, env);
+    const shots = await this.screenshots(repoDir, env, job.screenshotTargets);
     send("FEEDBACK_LOOP", {
       taskId: job.taskId,
       commit: job.commit,
@@ -414,7 +421,11 @@ export class JobRunner {
    * After the tests passed: run the project's screenshots script, if it has one, and collect
    * what it saved. Screenshots never fail QA; a problem is only noted in the summary.
    */
-  private async screenshots(repoDir: string, env: Record<string, string>): Promise<{ screenshots: Screenshot[]; note: string } | undefined> {
+  private async screenshots(
+    repoDir: string,
+    env: Record<string, string>,
+    targets: ScreenshotTarget[] | undefined,
+  ): Promise<{ screenshots: Screenshot[]; note: string } | undefined> {
     if (!(await hasScreenshotScript(repoDir))) return undefined;
     const dir = path.join(repoDir, SCREENSHOT_DIR);
     const label = `npm run ${SCREENSHOT_SCRIPT}`;
@@ -423,11 +434,11 @@ export class JobRunner {
       await mkdir(dir, { recursive: true });
       const result = await this.commands.run(["npm", "run", SCREENSHOT_SCRIPT], {
         cwd: repoDir,
-        env: { ...env, [SCREENSHOT_DIR_ENV]: dir },
-        timeoutMs: SCREENSHOT_TIMEOUT_MS,
+        env: { ...env, [SCREENSHOT_DIR_ENV]: dir, ...(targets?.length ? { [SCREENSHOT_TARGETS_ENV]: JSON.stringify(targets) } : {}) },
+        timeoutMs: SCREENSHOT_TIMEOUT_SEC * 1000,
       });
       if (result.exitCode !== 0) {
-        const why = result.timedOut ? `timed out after ${SCREENSHOT_TIMEOUT_MS / 1000}s` : `exited with ${result.exitCode ?? result.signal}`;
+        const why = result.timedOut ? `timed out after ${SCREENSHOT_TIMEOUT_SEC}s` : `exited with ${result.exitCode ?? result.signal}`;
         log.warn(`${label} ${why}: ${result.output.slice(-500)}`);
         return { screenshots: [], note: `no screenshots: \`${label}\` ${why}` };
       }

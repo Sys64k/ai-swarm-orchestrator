@@ -188,6 +188,26 @@ describe("AgentMessageSchema", () => {
     issuesOf(frame("FEEDBACK_LOOP", { taskId: "t1", commit: "a".repeat(40), outcome: "fail", summary: "x", failures: [{ message: "x" }], screenshots: [shot("a.png")] }));
   });
 
+  it("carries the views to screenshot from a finished task to its QA run, checked", () => {
+    const completed = (screenshotTargets: unknown) =>
+      frame("STATUS_UPDATE", { state: "completed", taskId: "t1", commit: SHA, screenshotTargets });
+    const view = { name: "task-dark-phone", path: "/tasks/t-1?tab=x", theme: "dark", width: 412, selector: "#shots", state: "with-screenshots" };
+    assert.ok(parseAgentMessage(completed([view, { name: "fleet", path: "/" }])).ok);
+    issuesOf(completed([{ name: "Fleet.png", path: "/" }]));
+    issuesOf(completed([{ name: "../x", path: "/" }]));
+    issuesOf(completed([{ name: "a", path: "https://evil.example/" }]));
+    issuesOf(completed([{ name: "a", path: "/a b" }]));
+    issuesOf(completed([{ name: "a", path: "/", theme: "sepia" }]));
+    issuesOf(completed([{ name: "a", path: "/", width: 100 }]));
+    issuesOf(completed([{ name: "a", path: "/", script: "evil()" }]));
+    issuesOf(completed([{ name: "a", path: "/" }, { name: "a", path: "/b" }]));
+    issuesOf(completed([]));
+    issuesOf(completed(Array.from({ length: QA_SCREENSHOTS_MAX + 1 }, (_, i) => ({ name: `v${i}`, path: "/" }))));
+    const test = createMessage("TEST_EXECUTION", "hub", { taskId: "t1", project: "shop", commit: SHA, screenshotTargets: [view] });
+    assert.deepEqual(test.payload.screenshotTargets, [view]);
+    assert.throws(() => createMessage("TEST_EXECUTION", "hub", { taskId: "t1", project: "shop", commit: SHA, screenshotTargets: [{ name: "a", path: "a" }] }));
+  });
+
   it("takes an image with a tool result, only of a known type, in base64 and within the size limit", () => {
     const base = { requestId: randomUUID(), taskId: "t1", conversationId: randomUUID(), turn: 1 };
     const withImage = (image: unknown) => frame("PROMPT_EXECUTION", { ...base, toolResults: [{ toolUseId: "tu_1", content: "shot.png", image }] });

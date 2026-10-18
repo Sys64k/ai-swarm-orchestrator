@@ -4,6 +4,7 @@ import {
   TaskSpecSchema,
   createLogger,
   type MessageOf,
+  type ScreenshotTarget,
   type PayloadInput,
   type TaskKind,
   type LlmUsage,
@@ -66,6 +67,8 @@ export interface TaskRecord {
   qaSummary?: string;
   /** What the project's screenshots script saved in the last passing QA run. */
   screenshots?: ScreenshotSet;
+  /** The views the developer agent listed at its last finish, for QA's screenshots script. */
+  screenshotTargets?: ScreenshotTarget[];
   /** The agents (machine and desk) that implemented and tested it, oldest first. */
   crew?: CrewMember[];
   /** The pull request a person reviews, with pull requests on. */
@@ -444,6 +447,7 @@ export class TaskManager {
       command: this.qa.command,
       setup: task.qaSetup ?? [],
       timeoutSec: this.qa.timeoutSec,
+      ...(task.screenshotTargets?.length ? { screenshotTargets: task.screenshotTargets } : {}),
     });
   }
 
@@ -555,6 +559,8 @@ export class TaskManager {
         task.conflicts = undefined;
         task.state = "verifying";
         task.commit = update.commit;
+        // Each finish lists the views anew: a rework's change may show elsewhere.
+        task.screenshotTargets = update.screenshotTargets;
         this.note(task, `pushed ${update.commit!.slice(0, 8)}${update.detail ? `: ${update.detail}` : ""}`);
         void this.verify(task, update.commit!);
         this.kick();

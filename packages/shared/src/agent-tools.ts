@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CONVERSATION_MAX_IMAGES, IMAGE_MAX_BYTES } from "./constants.js";
+import { CONVERSATION_MAX_IMAGES, IMAGE_MAX_BYTES, QA_SCREENSHOTS_MAX } from "./constants.js";
 import {
   MAX_PACKAGES_PER_REQUEST,
   NpmPackageNameSchema,
@@ -7,6 +7,7 @@ import {
   PlannedTaskSchema,
   RepoPathSchema,
   ScriptCommandSchema,
+  ScreenshotTargetsSchema,
   ScriptNameSchema,
   VersionRangeSchema,
 } from "./protocol.js";
@@ -118,6 +119,11 @@ export const AGENT_TOOLS = {
     input: z.strictObject({
       summary: z.string().min(1).max(5000).describe("What you changed and how you verified it"),
       commit_message: z.string().min(1).max(500).describe("Conventional, imperative commit message"),
+      screenshots: ScreenshotTargetsSchema.optional().describe(
+        "Only when the project has a \"screenshots\" npm script and your change shows in the UI: the views that show it " +
+          `(up to ${QA_SCREENSHOTS_MAX}), e.g. the changed page in light and dark and at a phone width. QA screenshots them ` +
+          "from the tested commit and shows them to the reviewer. List them on every finish, rework included.",
+      ),
     }),
   },
   submit_plan: {

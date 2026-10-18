@@ -57,6 +57,13 @@ export const CONVERSATION_MAX_IMAGE_BYTES = 12_000_000;
  */
 export const SCREENSHOT_SCRIPT = "screenshots";
 export const SCREENSHOT_DIR_ENV = "ASO_SCREENSHOT_DIR";
+/**
+ * The views to screenshot, as a JSON array of ScreenshotTarget, when the developer agent listed
+ * the views its change affects; unset otherwise (the script then takes its default views).
+ */
+export const SCREENSHOT_TARGETS_ENV = "ASO_SCREENSHOT_TARGETS";
 /** At most this many screenshots per QA run, together at most QA_SCREENSHOTS_MAX_BYTES (raw). */
 export const QA_SCREENSHOTS_MAX = 12;
+/** How long the screenshots script may run after the tests passed. */
+export const SCREENSHOT_TIMEOUT_SEC = 300;
 export const QA_SCREENSHOTS_MAX_BYTES = 4_000_000;
