@@ -83,6 +83,8 @@ interface Conversation {
   lastActivity: number;
   /** Its subject's history already says it waits for model credit. */
   waitingNoted?: boolean;
+  /** The current turn's last answer was cut off at the output limit (and thrown away). */
+  cutOff?: { outputTokens: number };
 }
 
 /** A conversation as saved on disk: the subject and tools are rebuilt from the kind, id and role. */
@@ -314,7 +316,7 @@ export class ConversationManager {
             })),
           };
 
-    const userMessage = withTurnWarning(base, this.maxTurns - req.turn, subject.kind);
+    const userMessage = withCutOffNote(withTurnWarning(base, this.maxTurns - req.turn, subject.kind), conv.cutOff, subject.kind);
 
     if (req.turn > 0 && req.toolResults.length) {
       const names = new Map(conv.results.get(req.turn - 1)?.toolCalls.map((c) => [c.id, c.name]) ?? []);
@@ -355,8 +357,12 @@ export class ConversationManager {
         return fail(`the model declined this request${response.refusalCategory ? ` (${response.refusalCategory})` : ""}`, false);
       }
       if (response.stopReason === "max_tokens") {
+        // The retry of this turn tells the model, so it doesn't repeat the same answer.
+        conv.cutOff = { outputTokens: response.tokens.outputTokens };
+        conv.subject.recordEvent(describeCutOff(response.content, response.tokens.outputTokens));
         return fail("the model's response exceeded the per-turn output limit", true);
       }
+      conv.cutOff = undefined;
 
       const toolCalls = response.content
         .filter((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === "tool_use")
@@ -478,6 +484,39 @@ export function withTurnWarning(message: Anthropic.Beta.BetaMessageParam, turnsL
   const text = `[ASO] ${turnsLeft} model turn${turnsLeft === 1 ? "" : "s"} left in this round, counting this one. ${wrapUp}`;
   const blocks = typeof message.content === "string" ? [{ type: "text" as const, text: message.content }] : message.content;
   return { ...message, content: [...blocks, { type: "text" as const, text }] };
+}
+
+/**
+ * After an answer was cut off at the output limit, tell the model before it answers the same
+ * turn again: the cut-off answer was thrown away, and repeating it would be cut off too.
+ */
+export function withCutOffNote(
+  message: Anthropic.Beta.BetaMessageParam,
+  cutOff: { outputTokens: number } | undefined,
+  kind: "task" | "plan",
+): Anthropic.Beta.BetaMessageParam {
+  if (!cutOff) return message;
+  const advice =
+    kind === "task"
+      ? "Keep this answer shorter: think briefly, change existing files with targeted edit_file calls instead of rewriting them, and write a large new file in parts (a short write_file, then edit_file to add the rest)."
+      : "Keep this answer shorter: think briefly and keep the plan's task descriptions concise.";
+  const text = `[ASO] Your previous answer to this turn was cut off at the output limit (${cutOff.outputTokens.toLocaleString("en-US")} tokens) and thrown away, so none of it took effect. ${advice}`;
+  const blocks = typeof message.content === "string" ? [{ type: "text" as const, text: message.content }] : message.content;
+  return { ...message, content: [...blocks, { type: "text" as const, text }] };
+}
+
+/** What a cut-off answer held, for the history: it is thrown away, so this is all that's left of it. */
+export function describeCutOff(content: Anthropic.Beta.BetaContentBlock[], outputTokens: number): string {
+  const parts = content.map((b) => {
+    if (b.type === "thinking") return b.thinking ? `thinking (${b.thinking.length.toLocaleString("en-US")} chars)` : "thinking";
+    if (b.type === "text") return `text (${b.text.length.toLocaleString("en-US")} chars)`;
+    if (b.type === "tool_use") {
+      const input = (b.input ?? {}) as Record<string, unknown>;
+      return `${describeCall({ name: b.name, input })} (${JSON.stringify(input).length.toLocaleString("en-US")} chars of input)`;
+    }
+    return b.type;
+  });
+  return `answer cut off at the output limit (${outputTokens.toLocaleString("en-US")} tokens) and discarded; it held: ${parts.join(", ") || "nothing"}`;
 }
 
 const round = (n: number) => Math.round(n * 10_000) / 10_000;

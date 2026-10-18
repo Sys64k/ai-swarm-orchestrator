@@ -968,7 +968,7 @@ sequenceDiagram
 |---|---|---|
 | No API key | error, not retryable | Task `failed` ("no LLM configured") |
 | Rate limit, 5xx, connection, unparseable stream | error, retryable; turn not committed | Retry the same turn after 2/5/15/30/60 s |
-| `stop_reason: max_tokens` | error, retryable; not committed | Retry |
+| `stop_reason: max_tokens` | error, retryable; not committed. The history notes what the discarded answer held | Retry; the retried turn tells the model its answer was cut off and to keep it shorter (targeted edits, large files in parts) |
 | `stop_reason: refusal` (after fallbacks) | error, not retryable | Task `failed` with the category |
 | Bad key, bad request, credits exhausted | error, not retryable | Task `failed` with the API's message |
 | Task over budget | error, not retryable | Task `failed`; raise `--task-budget` and resubmit |

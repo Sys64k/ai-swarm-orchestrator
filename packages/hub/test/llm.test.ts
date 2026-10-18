@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { describe, it } from "node:test";
 import Anthropic from "@anthropic-ai/sdk";
-import { AnthropicApiAdapter, classify, CREDIT_MESSAGE, DEFAULT_PLAN_BUDGET_USD, LlmError, priceUsage, taskPrompt, TURN_WARNING, withTurnWarning, type LlmRequest } from "@aso/hub";
+import { AnthropicApiAdapter, classify, CREDIT_MESSAGE, DEFAULT_PLAN_BUDGET_USD, describeCutOff, withCutOffNote, LlmError, priceUsage, taskPrompt, TURN_WARNING, withTurnWarning, type LlmRequest } from "@aso/hub";
 import { createMessage, type AgentMessage } from "@aso/shared";
 import { callModelWithRetry, startWorker, type ModelReply } from "@aso/worker";
 import {
@@ -212,6 +212,51 @@ describe("LLM gateway (Hub)", () => {
       },
       { llm: { adapter: model } },
     );
+  });
+
+  it("tells the model when its last answer was cut off, and notes what the answer held", () => {
+    const big = "x".repeat(5000);
+    const outcomes = [
+      () => reply([{ type: "thinking", thinking: "plan", signature: "s" }, toolUse("tu_x", "write_file", { path: "src/big.css", content: big })], "max_tokens"),
+      () => reply([toolUse("tu_1", "list_files", {})]),
+      () => reply([text("Done.")], "end_turn"),
+    ];
+    const model = new ScriptedModel((_r, n) => outcomes[n]());
+    return withHub(
+      async (ctx) => {
+        const w = await implementer(ctx, "dev", "greet");
+        const conv = crypto.randomUUID();
+        w.send(prompt("dev", conv, 0));
+        assert.equal(result(await w.next()).outcome, "error");
+        w.send(prompt("dev", conv, 0));
+        assert.equal(result(await w.next()).outcome, "ok");
+        w.send(prompt("dev", conv, 1, [{ toolUseId: "tu_1", content: "files" }]));
+        assert.equal(result(await w.next()).outcome, "ok");
+
+        const [first, retry, next] = model.requests.map((r) => r.messages.at(-1)!.content);
+        assert.equal(typeof first, "string", "no note before anything was cut off");
+        const note = (retry as Block[]).at(-1)!;
+        assert.match(String(note.text), /^\[ASO\] Your previous answer to this turn was cut off at the output limit \(100 tokens\) and thrown away/);
+        assert.match(String(note.text), /targeted edit_file calls instead of rewriting them/);
+        assert.ok(!(next as Block[]).some((b) => b.type === "text"), "the note is gone once a turn succeeds");
+
+        const history = ctx.hub.tasks.get("greet")!.history.map((h) => h.event);
+        assert.ok(
+          history.includes("answer cut off at the output limit (100 tokens) and discarded; it held: thinking (4 chars), write_file src/big.css (5,035 chars of input)"),
+          history.join("\n"),
+        );
+        w.ws.close();
+      },
+      { llm: { adapter: model } },
+    );
+  });
+
+  it("words the cut-off note for the Architect, and describes empty answers", () => {
+    const plan = withCutOffNote({ role: "user", content: "Continue." }, { outputTokens: 32000 }, "plan").content as Block[];
+    assert.match(String(plan[1].text), /32,000 tokens\) and thrown away[\s\S]*keep the plan's task descriptions concise/);
+    const same = { role: "user" as const, content: "x" };
+    assert.equal(withCutOffNote(same, undefined, "task"), same);
+    assert.equal(describeCutOff([], 5), "answer cut off at the output limit (5 tokens) and discarded; it held: nothing");
   });
 
   it("puts model calls on hold when the credit runs out, in plain words, and carries on once it's back", async () => {
