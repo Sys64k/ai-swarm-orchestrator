@@ -955,7 +955,7 @@ sequenceDiagram
 |---|---|---|
 | Model | `claude-opus-5-5` (configurable) | Default current Opus; task agents can run on another model (`--agent-model`), the Architect always uses this one |
 | Transport | `client.beta.messages.stream(...).finalMessage()` | Long agentic turns; streaming avoids HTTP timeouts |
-| `max_tokens` | 32,000 per turn | Room for large file writes in one tool call |
+| `max_tokens` | 32,000 per turn (`DEFAULT_MAX_TOKENS`) | Room for large file writes in one tool call. Agents' instructions name the limit and ask for targeted edits and large files in parts, so answers stay under it |
 | `output_config.effort` | `high` (configurable) | Agentic coding benefits from effort; `medium` is Opus 5.5's default |
 | Thinking | Not set (adaptive) | Opus 5.5 rejects disabling it; history keeps the blocks |
 | `cache_control` | `{type: "ephemeral"}` (automatic) | Caches the growing prefix |

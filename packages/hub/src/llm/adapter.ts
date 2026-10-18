@@ -46,6 +46,9 @@ export function apiErrorText(message: string): string {
   return message;
 }
 
+/** Per-answer output cap (thinking included); the agents' instructions name it. */
+export const DEFAULT_MAX_TOKENS = 32_000;
+
 /** A model provider. The Hub is the only component that talks to one. */
 export interface LlmAdapter {
   readonly name: string;
