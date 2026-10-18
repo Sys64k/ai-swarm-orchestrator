@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { describe, it } from "node:test";
 import { createMessage, type AgentMessage } from "@aso/shared";
+import { pullRequestBody } from "@aso/hub";
 import { startWorker, type TaskExecutor } from "@aso/worker";
 import {
   git,
@@ -185,7 +186,55 @@ describe("QA pipeline (fake nodes)", () => {
       },
       { files: { "package-lock.json": "{}\n" } },
     ));
+
+  it("keeps the screenshots of the last passing QA run, serves them, and drops them when a later run takes none", () =>
+    withHub(async (ctx) => {
+      const dev = await worker(ctx.port, "dev");
+      const qa = await worker(ctx.port, "qa");
+      await postTask(ctx.port, task("shots"));
+      const { commit } = await implement(ctx, dev, "dev", { "s.txt": "s\n" });
+      expectType(await qa.next(), "TEST_EXECUTION");
+      qa.send(createMessage("STATUS_UPDATE", "qa", { state: "in_progress", taskId: "shots" }));
+      qa.send(createMessage("FEEDBACK_LOOP", "qa", {
+        taskId: "shots", commit, outcome: "pass", summary: "ok; 2 screenshots",
+        screenshots: [{ name: "desk-dark.png", mediaType: "image/png", data: PNG_1X1 }, { name: "page.webp", mediaType: "image/webp", data: "UklGRg==" }],
+      }));
+      const record = await waitFor(() => ctx.hub.tasks.get("shots")?.screenshots && ctx.hub.tasks.get("shots"));
+      assert.equal(record.screenshots!.commit, commit);
+      assert.deepEqual(record.screenshots!.files, [
+        { name: "desk-dark.png", mediaType: "image/png", bytes: 70 },
+        { name: "page.webp", mediaType: "image/webp", bytes: 4 },
+      ]);
+
+      const get = (name: string) => fetch(`http://127.0.0.1:${ctx.port}/api/tasks/shots/screenshots/${name}`, { headers: { authorization: `Bearer ${TOKEN}` } });
+      const png = await get("desk-dark.png");
+      assert.equal(png.status, 200);
+      assert.equal(png.headers.get("content-type"), "image/png");
+      assert.equal(png.headers.get("x-content-type-options"), "nosniff");
+      assert.equal(Buffer.from(await png.arrayBuffer()).toString("base64"), PNG_1X1);
+      assert.equal((await get("missing.png")).status, 404);
+      assert.equal((await get("..%2Fstate.json")).status, 404);
+      assert.equal((await fetch(`http://127.0.0.1:${ctx.port}/api/tasks/shots/screenshots/desk-dark.png`)).status, 401, "needs the token like the rest of the API");
+
+      assert.match(pullRequestBody(record), /\*\*Screenshots\*\* \(2\): `desk-dark\.png`, `page\.webp`; see them on the task in the ASO console/);
+      assert.match(pullRequestBody(record, "https://hub.example.ts.net/"), /\[see them in the ASO console\]\(https:\/\/hub\.example\.ts\.net\/tasks\/shots\)/);
+
+      // A later passing run without screenshots: the old ones would show the wrong commit.
+      // (Set up by hand: the first run merged the task, and no review gate sends it back.)
+      Object.assign(ctx.hub.tasks.get("shots")!, { state: "testing", qaNodeId: "qa" });
+      assert.equal(ctx.hub.projects.taskOwner("shots")!.tasks.handleFeedback("qa", { taskId: "shots", commit, outcome: "pass", summary: "ok" }), undefined);
+      assert.equal(ctx.hub.tasks.get("shots")!.screenshots, undefined);
+      // Let the second approval's merge settle before the Hub and its checkout go away.
+      await waitFor(() => ["merged", "failed"].includes(ctx.hub.tasks.get("shots")!.state));
+      assert.equal((await get("desk-dark.png")).status, 404);
+      assert.doesNotMatch(pullRequestBody(ctx.hub.tasks.get("shots")!), /Screenshots/);
+      dev.ws.close();
+      qa.ws.close();
+    }));
 });
+
+/** The smallest valid PNG: 1×1 pixel. */
+const PNG_1X1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 
 describe("QA pipeline (real workers)", () => {
   const CHECK = `
@@ -250,6 +299,80 @@ console.log("greeting ok");
         }
       },
       { files: { "check.mjs": CHECK }, qa: { command: ["node", "check.mjs"] } },
+    ));
+
+  it("runs the project's screenshots script after passing tests and hands the images to the Hub", () =>
+    withHub(
+      async (ctx) => {
+        const executor: TaskExecutor = {
+          async implement(_t, { repoDir }) {
+            writeFiles(repoDir, { "greeting.txt": "hello\n" });
+            return { commitMessage: "feat: greeting" };
+          },
+        };
+        const dirs = [tempDir("aso-w1-"), tempDir("aso-w2-")];
+        const start = (nodeId: string, workDir: string, extra: { executor?: TaskExecutor } = {}) =>
+          startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId, workDir, hardware: hardware(), sandbox: "none", ...extra });
+        const dev = await start("dev", dirs[0], { executor });
+        const qa = await start("qa", dirs[1]);
+        try {
+          await waitFor(() => ctx.hub.registry.has("dev") && ctx.hub.registry.has("qa"));
+          await postTask(ctx.port, task("look"));
+          const record = await waitFor(() => ["merged", "failed"].includes(ctx.hub.tasks.get("look")!.state) && ctx.hub.tasks.get("look")!, 30_000, "task to finish");
+          assert.equal(record.state, "merged", record.history.map((h) => h.event).join("\n"));
+          assert.deepEqual(record.screenshots?.files, [{ name: "desk.png", mediaType: "image/png", bytes: 70 }]);
+          assert.equal(record.qaSummary, "`npm test` passed; 1 screenshot, left out: bad name.png (name not allowed: letters, digits and ._- only), notes.txt (not a PNG, JPEG, GIF or WebP image)");
+          const res = await fetch(`http://127.0.0.1:${ctx.port}/api/tasks/look/screenshots/desk.png`, { headers: { authorization: `Bearer ${TOKEN}` } });
+          assert.equal(Buffer.from(await res.arrayBuffer()).toString("base64"), PNG_1X1);
+          assert.equal(git(ctx.repoDir, "ls-tree", "-r", "--name-only", "main").includes(".aso-screenshots"), false);
+        } finally {
+          dev.stop();
+          qa.stop();
+          await Promise.all([dev.runner.idle(), qa.runner.idle()]);
+          for (const d of dirs) rmSync(d, { recursive: true, force: true });
+        }
+      },
+      {
+        files: {
+          "package.json": JSON.stringify({ name: "shots", private: true, scripts: { test: "node -e 0", screenshots: "node shot.mjs" } }),
+          "shot.mjs": `
+import { writeFileSync } from "node:fs";
+import path from "node:path";
+const dir = process.env.ASO_SCREENSHOT_DIR;
+writeFileSync(path.join(dir, "desk.png"), Buffer.from("${"${PNG}"}", "base64"));
+writeFileSync(path.join(dir, "bad name.png"), Buffer.from("${"${PNG}"}", "base64"));
+writeFileSync(path.join(dir, "notes.txt"), "not an image");
+`.replaceAll("${PNG}", PNG_1X1),
+        },
+      },
+    ));
+
+  it("notes a failing screenshots script without failing QA", () =>
+    withHub(
+      async (ctx) => {
+        const dir = tempDir("aso-w-");
+        // The fake implementer takes the task before the real QA worker connects.
+        const dev = await worker(ctx.port, "dev");
+        await postTask(ctx.port, task("broken-shots"));
+        expectType(await dev.next(), "TASK_ASSIGNMENT");
+        const qa = await startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "qa", workDir: dir, hardware: hardware(), sandbox: "none" });
+        try {
+          await waitFor(() => ctx.hub.registry.has("qa"));
+          dev.send(createMessage("STATUS_UPDATE", "dev", { state: "in_progress", taskId: "broken-shots" }));
+          const commit = await pushTaskBranch(ctx.gitUrl, "broken-shots", { "b.txt": "b\n" });
+          dev.send(createMessage("STATUS_UPDATE", "dev", { state: "completed", taskId: "broken-shots", commit }));
+          const record = await waitFor(() => ["merged", "failed"].includes(ctx.hub.tasks.get("broken-shots")!.state) && ctx.hub.tasks.get("broken-shots")!, 30_000, "task to finish");
+          assert.equal(record.state, "merged");
+          assert.equal(record.qaSummary, "`npm test` passed; no screenshots: `npm run screenshots` exited with 3");
+          assert.equal(record.screenshots, undefined);
+        } finally {
+          dev.ws.close();
+          qa.stop();
+          await qa.runner.idle();
+          rmSync(dir, { recursive: true, force: true });
+        }
+      },
+      { files: { "package.json": JSON.stringify({ name: "s", private: true, scripts: { test: "node -e 0", screenshots: "exit 3" } }) } },
     ));
 
   it("fails the task with a clear reason when the Hub has no LLM configured", () =>

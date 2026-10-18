@@ -190,12 +190,33 @@ export function checksSummary(checks: ReviewChecks): { text: string; tone: Tone 
   }
 }
 
-export type TaskTab = "live" | "changes" | "details";
+export type TaskTab = "live" | "changes" | "screenshots" | "details";
 
 /** The task page's tab: the person's choice, else the changes while a review waits, else the live view. */
-export function currentTab(chosen: TaskTab | undefined, task: Pick<Task, "state" | "review" | "commit">): TaskTab {
+export function currentTab(chosen: TaskTab | undefined, task: Pick<Task, "state" | "review" | "commit" | "screenshots">): TaskTab {
   if (chosen === "changes" && !hasChanges(task)) return "live"; // e.g. the work went back to an agent
+  if (chosen === "screenshots" && !task.screenshots?.files.length) return "live"; // a later QA run took none
   return chosen ?? (canReview(task) ? "changes" : "live");
+}
+
+/** The task's QA screenshots, each with the URL the console serves it at and a caption. */
+export function screenshotList(task: Pick<Task, "spec" | "screenshots">): Array<{ name: string; url: string; caption: string }> {
+  const set = task.screenshots;
+  if (!set) return [];
+  const base = `/api/hub/tasks/${encodeURIComponent(task.spec.taskId)}/screenshots`;
+  return set.files.map((f) => ({
+    name: f.name,
+    // The commit in the query makes a new QA run's image replace a cached older one.
+    url: `${base}/${encodeURIComponent(f.name)}?commit=${set.commit.slice(0, 12)}`,
+    caption: `${f.name.replace(/\.(png|jpe?g|gif|webp)$/i, "").replace(/[-_]+/g, " ")} · ${formatBytes(f.bytes)}`,
+  }));
+}
+
+/** "820 B", "35 KB", "1.4 MB". */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1000) return `${bytes} B`;
+  if (bytes < 1_000_000) return `${Math.round(bytes / 1000)} KB`;
+  return `${(bytes / 1_000_000).toFixed(1)} MB`;
 }
 
 /** "new · " or "deleted · " before a file's line counts; nothing for a change. */

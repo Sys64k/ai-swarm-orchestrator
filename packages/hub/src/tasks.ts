@@ -20,6 +20,7 @@ import type { HubRepository } from "./git/hub-repo.js";
 import type { NodeRegistry } from "./registry.js";
 import { DEFAULT_ROUTING_POLICIES, selectNode, type RoutingPolicies } from "./routing.js";
 import type { TranscriptInput } from "./transcripts.js";
+import type { Screenshots, ScreenshotSet } from "./screenshots.js";
 
 const log = createLogger("tasks");
 
@@ -63,6 +64,8 @@ export interface TaskRecord {
   conflicts?: string[];
   /** What the last passing QA run reported (shown in the pull request). */
   qaSummary?: string;
+  /** What the project's screenshots script saved in the last passing QA run. */
+  screenshots?: ScreenshotSet;
   /** The agents (machine and desk) that implemented and tested it, oldest first. */
   crew?: CrewMember[];
   /** The pull request a person reviews, with pull requests on. */
@@ -181,6 +184,8 @@ export interface TaskManagerOptions {
   onChange?: () => void;
   /** Receives task events and QA verdicts for the task's transcript. */
   onTranscript?: (taskId: string, entry: TranscriptInput) => void;
+  /** Keeps the screenshots of each task's last passing QA run. */
+  screenshots?: Pick<Screenshots, "save" | "clear">;
 }
 
 const HISTORY_LIMIT = 50;
@@ -204,6 +209,7 @@ export class TaskManager {
   private readonly onDispatchNeeded?: () => void;
   private readonly isIdTaken: (taskId: string) => boolean;
   private readonly onTranscript?: (taskId: string, entry: TranscriptInput) => void;
+  private readonly screenshots?: Pick<Screenshots, "save" | "clear">;
 
   constructor(
     private readonly registry: NodeRegistry,
@@ -220,6 +226,7 @@ export class TaskManager {
     this.reviewGate = opts.reviewGate;
     this.onChange = opts.onChange;
     this.onTranscript = opts.onTranscript;
+    this.screenshots = opts.screenshots;
     this.project = opts.project ?? "project";
     this.onDispatchNeeded = opts.onDispatchNeeded;
     this.isIdTaken = opts.isIdTaken ?? ((id) => this.tasks.has(id));
@@ -609,6 +616,13 @@ export class TaskManager {
     if (feedback.outcome === "pass") {
       this.note(task, `QA passed on ${nodeId}: ${feedback.summary}`);
       task.qaSummary = feedback.summary;
+      if (feedback.screenshots?.length && this.screenshots) {
+        task.screenshots = this.screenshots.save(task.spec.taskId, feedback.commit, feedback.screenshots);
+      } else if (task.screenshots) {
+        // Screenshots of an earlier commit would show a reviewer something this one may not do.
+        this.screenshots?.clear(task.spec.taskId);
+        task.screenshots = undefined;
+      }
       this.approved(task);
     } else {
       this.note(task, `QA failed on ${nodeId}: ${feedback.summary}`);

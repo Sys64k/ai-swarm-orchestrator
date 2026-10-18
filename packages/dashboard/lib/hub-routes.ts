@@ -25,6 +25,8 @@ const RULES: ReadonlyArray<{ method: "GET" | "POST"; pattern: RegExp }> = [
   { method: "GET", pattern: /^tasks$/ },
   { method: "GET", pattern: new RegExp(`^tasks/${ID}$`) },
   { method: "GET", pattern: new RegExp(`^tasks/${ID}/(transcript|diff|checks)$`) },
+  // A QA screenshot; names start with a letter or digit, so never `.` or `..`.
+  { method: "GET", pattern: new RegExp(`^tasks/${ID}/screenshots/[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`) },
   { method: "POST", pattern: new RegExp(`^tasks/${ID}/(cancel|retry|approve|request-changes)$`) },
   { method: "GET", pattern: /^plans$/ },
   { method: "POST", pattern: /^plans$/ },

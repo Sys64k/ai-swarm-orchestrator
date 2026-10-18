@@ -51,6 +51,8 @@ export interface Task {
   filesTouched: string[];
   commit?: string;
   mainCommit?: string;
+  /** What the project's screenshots script saved in the last passing QA run. */
+  screenshots?: { commit: string; at: string; files: Array<{ name: string; mediaType: string; bytes: number }> };
   /** The agents (machine and desk) that implemented and tested it, oldest first. */
   crew?: Array<{ job: "implement" | "test"; host: string; slot: number; nodeId: string; at: string }>;
   /** The task's pull request on GitHub (Hubs with pull requests on). */

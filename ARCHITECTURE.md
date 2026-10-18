@@ -189,7 +189,7 @@ keys are rejected.
 | `TASK_ASSIGNMENT` | hub → node | 2 | A `TaskSpec` with its `project` (the worker checks out `/git/<project>.git`), plus `rework` (round, reason, failures, test output) when the task comes back |
 | `STATUS_UPDATE` | node → hub | 2 | `accepted`, `in_progress`, `waiting_*`, `completed` (with commit), `failed`, `idle` |
 | `TEST_EXECUTION` | hub → node | 3 | QA: test an exact commit with `setup` steps and a `command` argv; carries the `project` |
-| `FEEDBACK_LOOP` | node → hub | 3 | QA verdict: `pass`, or `fail` with at least one failure and the output tail |
+| `FEEDBACK_LOOP` | node → hub | 3 | QA verdict: `pass` (with the screenshots the project's script saved, if any), or `fail` with at least one failure and the output tail |
 | `FILE_OPERATION` | node → hub | 5 | Audit trail of agent file edits (sent by the agent loop) |
 | `DEPENDENCY_REQUEST` | node → hub | 4 | Ask the Hub for a package.json change: `add_dependencies` or `set_scripts` (idempotent by `requestId`) |
 | `DEPENDENCY_RESPONSE` | hub → node | 4 | `installed` (with the main commit) or `rejected` |
@@ -771,6 +771,21 @@ The QA worker distinguishes two kinds of failure:
   The Hub retries QA, possibly on another node.
 - **Code problems** (non-zero exit, timeout): `FEEDBACK_LOOP fail`, which starts a rework
   round.
+
+**Screenshots.** After the tests pass, if the checkout's `package.json` has a `screenshots`
+script, the worker runs `npm run screenshots` with `ASO_SCREENSHOT_DIR` pointing at an empty
+`.aso-screenshots/` folder in the QA checkout (inside the job sandbox's mount, removed after).
+`collectScreenshots` takes the images at the top of that folder in name order. It reads each
+type from the bytes and keeps at most 12 images, each up to 2 MB and 4 MB together, so the
+verdict stays well under the frame limit. They ride on `FEEDBACK_LOOP pass`. A failing or
+slow (5 min) script is only noted in the summary: it never fails QA.
+
+The Hub keeps one set per task in `<stateDir>/screenshots/<taskId>/` (`Screenshots`), and the
+task record lists them (`screenshots: { commit, at, files }`). A new passing run replaces the set,
+and one without screenshots removes it, so a reviewer never sees an older commit's images.
+`GET /api/tasks/{id}/screenshots/{name}` serves them with the recorded image type, `nosniff`
+and a `default-src 'none'` CSP. The console shows them in the task's **Screenshots** tab. The
+pull request body lists them and, with `--console-url`, links to the task's page.
 
 ### Pushing to origin
 

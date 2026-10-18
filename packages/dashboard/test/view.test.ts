@@ -33,6 +33,8 @@ import {
   patchLines,
   currentTab,
   fileStatusLabel,
+  formatBytes,
+  screenshotList,
 } from "../lib/view.ts";
 import type { HubNode, Plan, PlannedTask, Project, ReviewChecks, Task, TranscriptEntry } from "../lib/types.ts";
 
@@ -108,7 +110,22 @@ describe("pull request reviews", () => {
     assert.equal(currentTab("details", waiting), "details");
     assert.equal(currentTab(undefined, task("t", "in_progress")), "live");
     assert.equal(currentTab("changes", task("t", "pending")), "live", "sent back: no commit to show any more");
+    const shots = { commit: "0123456789abcdef", at: "2026-10-18T10:00:00.000Z", files: [{ name: "desk_dark-mode.png", mediaType: "image/png", bytes: 35_400 }] };
+    assert.equal(currentTab("screenshots", task("t", "awaiting_review", { screenshots: shots })), "screenshots");
+    assert.equal(currentTab("screenshots", task("t", "awaiting_review")), "live", "a later QA run took none");
     assert.deepEqual(["added", "deleted", "modified"].map((s) => fileStatusLabel(s as "added")), ["new · ", "deleted · ", ""]);
+  });
+
+  it("lists QA screenshots with their console URL and a readable caption", () => {
+    const t = task("a b", "awaiting_review", {
+      screenshots: { commit: "0123456789abcdef", at: "2026-10-18T10:00:00.000Z", files: [{ name: "desk_dark-mode.png", mediaType: "image/png", bytes: 35_400 }, { name: "page.webp", mediaType: "image/webp", bytes: 1_400_000 }] },
+    });
+    assert.deepEqual(screenshotList(t), [
+      { name: "desk_dark-mode.png", url: "/api/hub/tasks/a%20b/screenshots/desk_dark-mode.png?commit=0123456789ab", caption: "desk dark mode · 35 KB" },
+      { name: "page.webp", url: "/api/hub/tasks/a%20b/screenshots/page.webp?commit=0123456789ab", caption: "page · 1.4 MB" },
+    ]);
+    assert.deepEqual(screenshotList(task("t", "merged")), []);
+    assert.deepEqual([820, 35_400, 1_400_000].map(formatBytes), ["820 B", "35 KB", "1.4 MB"]);
   });
 
   it("words the checks and picks the approve button for them", () => {

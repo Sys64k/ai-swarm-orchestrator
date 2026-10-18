@@ -1,10 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import {
   PackageChangeSchema,
+  SCREENSHOT_DIR_ENV,
+  SCREENSHOT_SCRIPT,
   createLogger,
   type AgentMessageType,
   type MessageOf,
@@ -17,6 +19,7 @@ import { AgentGitClient } from "./git/agent-git-client.js";
 const AGENT_CUT_OFF = new Set(["ModelError", "AgentStoppedError"]);
 import { ModelChannel, type ModelReply, type ModelTurn } from "./model-channel.js";
 import { hostRunner, type CommandRunner } from "./sandbox.js";
+import { collectScreenshots, hasScreenshotScript, type Screenshot } from "./screenshots.js";
 
 const log = createLogger("jobs");
 
@@ -120,6 +123,10 @@ const NPM_CI_TIMEOUT_MS = 10 * 60_000;
 
 /** Feedback output budget (schema allows 100k; leave room for the envelope). */
 const FEEDBACK_OUTPUT_CHARS = 50_000;
+/** How long the project's screenshots script may run after the tests passed. */
+const SCREENSHOT_TIMEOUT_MS = 300_000;
+/** Folder in the QA checkout the screenshots script saves into (removed before each run). */
+const SCREENSHOT_DIR = ".aso-screenshots";
 
 /**
  * Runs up to `slots` jobs at once, each in its own checkout (slot 1 uses `<workDir>/<project>`,
@@ -393,11 +400,44 @@ export class JobRunner {
         output: result.output.slice(-FEEDBACK_OUTPUT_CHARS) || undefined,
       });
     }
+    const shots = await this.screenshots(repoDir, env);
     send("FEEDBACK_LOOP", {
       taskId: job.taskId,
       commit: job.commit,
       outcome: "pass",
-      summary: `\`${job.command.join(" ")}\` passed`,
+      summary: [`\`${job.command.join(" ")}\` passed`, shots?.note].filter(Boolean).join("; "),
+      ...(shots?.screenshots.length ? { screenshots: shots.screenshots } : {}),
     });
+  }
+
+  /**
+   * After the tests passed: run the project's screenshots script, if it has one, and collect
+   * what it saved. Screenshots never fail QA; a problem is only noted in the summary.
+   */
+  private async screenshots(repoDir: string, env: Record<string, string>): Promise<{ screenshots: Screenshot[]; note: string } | undefined> {
+    if (!(await hasScreenshotScript(repoDir))) return undefined;
+    const dir = path.join(repoDir, SCREENSHOT_DIR);
+    const label = `npm run ${SCREENSHOT_SCRIPT}`;
+    try {
+      await rm(dir, { recursive: true, force: true });
+      await mkdir(dir, { recursive: true });
+      const result = await this.commands.run(["npm", "run", SCREENSHOT_SCRIPT], {
+        cwd: repoDir,
+        env: { ...env, [SCREENSHOT_DIR_ENV]: dir },
+        timeoutMs: SCREENSHOT_TIMEOUT_MS,
+      });
+      if (result.exitCode !== 0) {
+        const why = result.timedOut ? `timed out after ${SCREENSHOT_TIMEOUT_MS / 1000}s` : `exited with ${result.exitCode ?? result.signal}`;
+        log.warn(`${label} ${why}: ${result.output.slice(-500)}`);
+        return { screenshots: [], note: `no screenshots: \`${label}\` ${why}` };
+      }
+      const { screenshots, skipped } = await collectScreenshots(dir);
+      const count = `${screenshots.length} screenshot${screenshots.length === 1 ? "" : "s"}`;
+      return { screenshots, note: skipped.length ? `${count}, left out: ${skipped.join(", ").slice(0, 1000)}` : count };
+    } catch (err) {
+      return { screenshots: [], note: `no screenshots: ${(err as Error).message.slice(0, 500)}` };
+    } finally {
+      await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+    }
   }
 }

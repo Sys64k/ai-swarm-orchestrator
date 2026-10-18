@@ -7,7 +7,7 @@ import { ChangesView, ReviewPanel } from "./review-panel.tsx";
 import { Terminal } from "./terminal.tsx";
 import { ActionButton, Badge, Banner, LoadingPage, Section, TopBar } from "./ui.tsx";
 import type { Task } from "../lib/types.ts";
-import { canReview, crewLine, currentTab, formatUsd, hasChanges, isLive, reviewLink, reviewView, taskActions, taskBadge, timeAgo, type TaskTab } from "../lib/view.ts";
+import { canReview, crewLine, currentTab, formatUsd, hasChanges, isLive, reviewLink, reviewView, screenshotList, taskActions, taskBadge, timeAgo, type TaskTab } from "../lib/view.ts";
 
 export function TaskPage({ id }: { id: string }) {
   const { data: task, error, refresh } = usePoll<Task>(`tasks/${id}`);
@@ -24,6 +24,7 @@ export function TaskPage({ id }: { id: string }) {
   const review = reviewView(task);
   const pr = reviewLink(task);
   const crew = crewLine(task);
+  const shots = screenshotList(task);
   const act = (action: "cancel" | "retry") => async () => {
     const err = await hubAction(`tasks/${id}/${action}`);
     refresh();
@@ -79,6 +80,11 @@ export function TaskPage({ id }: { id: string }) {
               Changes
             </button>
           )}
+          {shots.length > 0 && (
+            <button type="button" role="tab" aria-selected={tab === "screenshots"} className="tab" onClick={() => setTab("screenshots")}>
+              Screenshots
+            </button>
+          )}
           <button type="button" role="tab" aria-selected={tab === "details"} className="tab" onClick={() => setTab("details")}>
             Details
           </button>
@@ -86,9 +92,30 @@ export function TaskPage({ id }: { id: string }) {
 
         {tab === "live" && <Terminal source={`tasks/${id}/transcript`} live={live} />}
         {tab === "changes" && <ChangesView taskId={id} prUrl={pr?.url} />}
+        {tab === "screenshots" && <Screenshots shots={shots} commit={task.screenshots!.commit} />}
         {tab === "details" && <Details task={task} />}
       </main>
     </>
+  );
+}
+
+function Screenshots({ shots, commit }: { shots: ReturnType<typeof screenshotList>; commit: string }) {
+  return (
+    <Section title="Screenshots" count={shots.length}>
+      <p className="muted small">
+        Taken by QA&apos;s screenshots script on commit <code>{commit.slice(0, 8)}</code>. Tap one for full size.
+      </p>
+      <div className="shots">
+        {shots.map((s) => (
+          <figure key={s.name} className="shot">
+            <a href={s.url} target="_blank" rel="noreferrer">
+              <img src={s.url} alt={s.caption} loading="lazy" />
+            </a>
+            <figcaption className="small muted">{s.caption}</figcaption>
+          </figure>
+        ))}
+      </div>
+    </Section>
   );
 }
 

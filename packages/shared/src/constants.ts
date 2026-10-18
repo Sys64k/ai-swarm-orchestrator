@@ -49,3 +49,14 @@ export const IMAGE_MEDIA_TYPES = ["image/png", "image/jpeg", "image/gif", "image
  */
 export const CONVERSATION_MAX_IMAGES = 20;
 export const CONVERSATION_MAX_IMAGE_BYTES = 12_000_000;
+
+/**
+ * QA screenshots: a project opts in with an npm script of this name. After the tests pass, the
+ * QA worker runs it with SCREENSHOT_DIR_ENV set to an empty folder; the images the script saves
+ * there go to the Hub with the verdict, so a reviewer sees them next to the diff.
+ */
+export const SCREENSHOT_SCRIPT = "screenshots";
+export const SCREENSHOT_DIR_ENV = "ASO_SCREENSHOT_DIR";
+/** At most this many screenshots per QA run, together at most QA_SCREENSHOTS_MAX_BYTES (raw). */
+export const QA_SCREENSHOTS_MAX = 12;
+export const QA_SCREENSHOTS_MAX_BYTES = 4_000_000;

@@ -420,6 +420,32 @@ code,
   box-shadow: 0 1px 3px rgb(0 0 0 / 0.12);
 }
 
+/* QA screenshots */
+.shots {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.shot {
+  margin: 0;
+}
+
+.shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--muted-bg);
+}
+
+.shot figcaption {
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+
 /* Terminal */
 .terminal {
   padding: 10px 12px 14px;

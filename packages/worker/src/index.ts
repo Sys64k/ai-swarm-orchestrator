@@ -40,3 +40,4 @@ export { AgentStoppedError, LlmTaskExecutor, ModelError, callModelWithRetry, des
 export { ModelChannel, type ModelSubject } from "./model-channel.js";
 export { AgentTools, TOOL_OUTPUT_LIMIT, type ToolCall, type ToolHost, type ToolResult } from "./agent/tools.js";
 export { probeImage, type ImageInfo } from "./agent/image.js";
+export { collectScreenshots, hasScreenshotScript, type Screenshot } from "./screenshots.js";

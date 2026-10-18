@@ -229,6 +229,14 @@ export const TaskSchema = z.object({
   commit: z.string().optional(),
   mainCommit: z.string().optional(),
   qaSummary: z.string().optional(),
+  screenshots: z
+    .object({
+      commit: z.string().describe("The commit QA tested when it took them"),
+      at: Timestamp,
+      files: z.array(z.object({ name: z.string(), mediaType: z.string(), bytes: z.number().int() })),
+    })
+    .optional()
+    .describe("What the project's screenshots script saved in the last passing QA run; GET /api/tasks/{id}/screenshots/{name} serves each"),
   conflicts: z.array(z.string()).optional().describe("Files left with merge conflict markers for the agent to resolve this round"),
   crew: z.array(CrewMemberSchema).optional().describe("The agents that implemented and tested it, oldest first"),
   review: ReviewSchema.optional(),

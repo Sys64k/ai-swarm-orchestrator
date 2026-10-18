@@ -603,6 +603,25 @@ anyway. Set
 `ASO_PULL_REQUESTS=0` to merge on the Hub instead. A project's page in the console says which
 of the two it does, and why.
 
+### QA screenshots
+
+Tests can pass while a change looks wrong. A project can have QA take screenshots, so you see
+the result next to the diff:
+
+1. **Add a `screenshots` npm script.** After the tests pass, the QA worker runs `npm run
+   screenshots` with `ASO_SCREENSHOT_DIR` set to an empty folder. The script saves images there,
+   e.g. a Playwright spec that calls `page.screenshot({ path: path.join(process.env.ASO_SCREENSHOT_DIR, "home-dark.png") })`.
+2. **Limits.** QA keeps up to 12 PNG, JPEG, GIF or WebP files from the top of that folder, in
+   name order: up to 2 MB each and 4 MB together. Names may use letters, digits and `._-`.
+   The QA summary says what was left out and why.
+3. **Never a failure.** A screenshots script that fails or times out (5 minutes) is noted in
+   the QA summary; the tests passed, so QA still passes.
+4. **Where to see them.** The task's page in the console has a **Screenshots** tab. The pull
+   request lists them and, with `--console-url`, links to that page; GitHub can't show the images
+   themselves, because they stay on the Hub (`GET /api/tasks/{id}/screenshots/{name}`).
+5. **One set per task.** A later passing QA run replaces them. A run that takes none removes them,
+   because they would show an older commit.
+
 ### Pushing main
 
 If the target repository has an `origin` remote, the Hub pushes `main` to it after every
@@ -646,6 +665,7 @@ failure), and so do the dashboard and `aso sync`.
 | `--no-qa` | | Merge verified work without a QA run |
 | `--no-push` | | Keep merges local (don't push `main` to `origin`) |
 | `--allow-deps <list>` | any | npm packages agents may request; `@scope/*` allows a scope |
+| `--console-url <url>` | *(none)* | The console's address. Pull requests then link to their task, e.g. for its QA screenshots |
 | `--model <id>` | `claude-opus-5-5` | Claude model for the Architect, and for agents without `--agent-model` |
 | `--agent-model <id>` | `--model` | Claude model for the builder and QA agents. The Architect keeps `--model`: a strong planner breaking work into small, clear tasks lets a cheaper model build them |
 | `--effort <level>` | `high` | `low`, `medium`, `high`, `xhigh`, `max` |
@@ -870,6 +890,7 @@ For the scoring formula, see [ARCHITECTURE.md](ARCHITECTURE.md#6-hardware-aware-
 | `ASO_AUTO_UPDATE` | `1` | `0` stops the Hub from updating outdated workers itself |
 | `ASO_PULL_REQUESTS` | `1` | `0` merges QA-approved work on the Hub instead of opening GitHub pull requests |
 | `ASO_ALLOW_DEPS` | *(any)* | Default for `--allow-deps` (also passed into the container) |
+| `ASO_CONSOLE_URL` | *(none)* | Default for `--console-url` (also passed into the container) |
 | `ANTHROPIC_API_KEY` | *(none)* | Hub only. Without it, agents fail tasks with "no LLM configured" |
 | *(file)* `.env` | — | Loaded on start: the shell's variables win, then `ASO_ENV_FILE`, then `~/.config/aso/.env`, then a source checkout's `.env`. See `.env.example` |
 | `ASO_MODEL`, `ASO_AGENT_MODEL`, `ASO_EFFORT`, `ASO_TASK_BUDGET`, `ASO_PLAN_BUDGET`, `ASO_MAX_TURNS`, `ASO_LLM_CONCURRENCY` | see flags | Defaults for the LLM flags (also passed into the container) |

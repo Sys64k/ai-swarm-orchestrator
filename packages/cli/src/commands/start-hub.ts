@@ -21,6 +21,7 @@ export interface StartHubOptions {
   qa: boolean;
   push: boolean;
   allowDeps?: string;
+  consoleUrl?: string;
   model: string;
   agentModel?: string;
   effort: Effort;
@@ -49,7 +50,7 @@ export async function startHubCommand(opts: StartHubOptions): Promise<void> {
     host: opts.host,
     token: auth.token,
     sync: { enabled: opts.push && process.env.ASO_PUSH !== "0", token: process.env.ASO_GIT_TOKEN || undefined },
-    pullRequests: { enabled: process.env.ASO_PULL_REQUESTS !== "0" },
+    pullRequests: { enabled: process.env.ASO_PULL_REQUESTS !== "0", consoleUrl: opts.consoleUrl },
     qa: { enabled: qaEnabled, command: testCommand },
     allowDependencies: parseList(opts.allowDeps),
     dist: { version: () => layout.distVersion(), tarball: () => layout.distTarball() },
@@ -109,6 +110,7 @@ async function startHubInDocker(root: string, opts: StartHubOptions, token: stri
       ASO_QA: opts.qa ? "1" : "0",
       ASO_PUSH: opts.push && process.env.ASO_PUSH !== "0" ? "1" : "0",
       ASO_ALLOW_DEPS: parseList(opts.allowDeps)?.join(",") ?? "",
+      ASO_CONSOLE_URL: opts.consoleUrl ?? "",
       ASO_MODEL: opts.model,
       ASO_AGENT_MODEL: opts.agentModel ?? "",
       ASO_EFFORT: opts.effort,

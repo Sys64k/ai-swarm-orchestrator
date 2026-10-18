@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { IMAGE_MAX_BYTES, IMAGE_MEDIA_TYPES } from "./constants.js";
+import { IMAGE_MAX_BYTES, IMAGE_MEDIA_TYPES, QA_SCREENSHOTS_MAX, QA_SCREENSHOTS_MAX_BYTES } from "./constants.js";
 
 // ---------------------------------------------------------------------------
 // Primitives
@@ -291,12 +291,32 @@ const StatusUpdatePayload = z
   });
 
 
+/** A screenshot's file name: also its URL segment and its file on the Hub, so kept plain. */
+export const ScreenshotNameSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/, "screenshot names are letters, digits and ._- (up to 100)");
+
+const ScreenshotSchema = z.strictObject({
+  name: ScreenshotNameSchema,
+  mediaType: z.enum(IMAGE_MEDIA_TYPES),
+  data: z.base64().max(Math.ceil(IMAGE_MAX_BYTES / 3) * 4),
+});
+
 const FeedbackLoopPayload = z.discriminatedUnion("outcome", [
   z.strictObject({
     taskId: TaskIdSchema,
     commit: CommitShaSchema,
     outcome: z.literal("pass"),
     summary: z.string().max(5000),
+    /** What the project's screenshots script saved, in name order (see SCREENSHOT_SCRIPT). */
+    screenshots: z
+      .array(ScreenshotSchema)
+      .max(QA_SCREENSHOTS_MAX)
+      .refine((list) => new Set(list.map((s) => s.name)).size === list.length, { message: "screenshot names must be unique" })
+      .refine((list) => list.reduce((n, s) => n + s.data.length, 0) <= Math.ceil(QA_SCREENSHOTS_MAX_BYTES / 3) * 4, {
+        message: `screenshots may hold at most ${QA_SCREENSHOTS_MAX_BYTES / 1_000_000} MB together`,
+      })
+      .optional(),
   }),
   z.strictObject({
     taskId: TaskIdSchema,
