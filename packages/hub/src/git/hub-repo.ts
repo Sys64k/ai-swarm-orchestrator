@@ -286,11 +286,16 @@ export class HubRepository {
   }
 
   /** Whether commit `a` is in the history of `b`. */
-  private isAncestor(a: string, b: string): Promise<boolean> {
-    return this.git.raw(["merge-base", "--is-ancestor", a, b]).then(
-      () => true,
-      () => false,
-    );
+  /**
+   * Whether `a` is in `b`'s history. Not `merge-base --is-ancestor`: it answers by exit code
+   * alone, and simple-git resolves a non-zero exit that prints nothing, so "no" read as "yes".
+   */
+  private async isAncestor(a: string, b: string): Promise<boolean> {
+    const [base, commit] = await Promise.all([
+      this.git.raw(["merge-base", a, b]).catch(() => ""),
+      this.git.raw(["rev-parse", "--verify", "--quiet", `${a}^{commit}`]).catch(() => ""),
+    ]);
+    return base.trim() !== "" && base.trim() === commit.trim();
   }
 
   /** What `commit` changes against the main it branched from (their merge base); undefined if the Hub lacks it. */

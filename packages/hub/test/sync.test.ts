@@ -92,6 +92,34 @@ describe("pushing main to origin", () => {
     }, { origin: true, qa: { enabled: false }, sync: { enabled: false } });
   });
 
+  it("catches up with a pull request merged on origin by fast forward", () =>
+    withHub(
+      async (ctx) => {
+        const theirs = pushToOrigin(ctx.originDir!, { "merged.md": "merged on GitHub\n" }, "merge a pull request");
+        assert.deepEqual(await ctx.hub.sync.catchUp(), { ok: true });
+        assert.equal(git(ctx.repoDir, "rev-parse", "main"), theirs);
+      },
+      { origin: true, qa: { enabled: false } },
+    ));
+
+  it("catches up by merging when main has a commit origin lacks", () =>
+    withHub(
+      async (ctx) => {
+        // The Hub committed to main (e.g. a package script change) before a pull request was merged on origin.
+        writeFiles(ctx.repoDir, { "scripts.txt": "hub's own\n" });
+        git(ctx.repoDir, "add", "-A");
+        git(ctx.repoDir, "commit", "--quiet", "-m", "hub's own commit");
+        const ours = git(ctx.repoDir, "rev-parse", "main");
+        const theirs = pushToOrigin(ctx.originDir!, { "merged.md": "merged on GitHub\n" }, "merge a pull request");
+        assert.deepEqual(await ctx.hub.sync.catchUp(), { ok: true });
+        assert.equal(git(ctx.repoDir, "merge-base", "--is-ancestor", ours, "main"), "", "our commit is in main");
+        assert.equal(git(ctx.repoDir, "merge-base", "--is-ancestor", theirs, "main"), "", "their commit is in main");
+        assert.equal(git(ctx.repoDir, "log", "-1", "--format=%s", "main"), "Merge origin/main into main");
+        await waitFor(() => git(ctx.originDir!, "rev-parse", "main") === git(ctx.repoDir, "rev-parse", "main"), 5000, "push");
+      },
+      { origin: true, qa: { enabled: false } },
+    ));
+
   it("never shows credentials from remote URLs", () => {
     assert.equal(sanitizeUrl("https://user:ghp_secret@github.com/me/app.git"), "https://github.com/me/app.git");
     assert.equal(sanitizeUrl("https://x-access-token:abc@github.com/me/app.git"), "https://github.com/me/app.git");
