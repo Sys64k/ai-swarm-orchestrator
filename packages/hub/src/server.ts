@@ -35,7 +35,7 @@ import {
 } from "@aso/shared";
 import { openApiDocument } from "./api/openapi.js";
 import type { z } from "zod";
-import { AnthropicApiAdapter, type Effort, type LlmAdapter } from "./llm/adapter.js";
+import { AnthropicApiAdapter, DEFAULT_MAX_TOKENS, type Effort, type LlmAdapter } from "./llm/adapter.js";
 import { ConversationManager } from "./llm/conversations.js";
 import { hasPrice } from "./llm/pricing.js";
 import { gitHttpHandler } from "./git/http-backend.js";
@@ -192,7 +192,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   const llm = opts.llm ?? {};
   const model = llm.model ?? "claude-opus-5-5";
   const anthropic = (id: string) =>
-    process.env.ANTHROPIC_API_KEY ? new AnthropicApiAdapter({ model: id, effort: llm.effort ?? "high", maxTokens: llm.maxTokens ?? 32_000 }) : undefined;
+    process.env.ANTHROPIC_API_KEY ? new AnthropicApiAdapter({ model: id, effort: llm.effort ?? "high", maxTokens: llm.maxTokens ?? DEFAULT_MAX_TOKENS }) : undefined;
   const adapter = llm.adapter ?? anthropic(model);
   const agentAdapter = llm.agentAdapter ?? (llm.agentModel && llm.agentModel !== model ? anthropic(llm.agentModel) : undefined);
   if (!adapter) log.warn("no LLM configured: set ANTHROPIC_API_KEY to let agents work");

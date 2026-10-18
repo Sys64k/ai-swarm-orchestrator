@@ -28,4 +28,12 @@ describe("an implementing agent's instructions", () => {
   it("ask it to update the existing tests, end-to-end specs included, that its change breaks", () => {
     assert.match(systemPrompt("frontend"), /update those tests in this task, end-to-end specs included/);
   });
+
+  it("name the answer size limit and how to stay under it, for every role", () => {
+    for (const role of ["backend", "frontend", "qa", "devops"] as const) {
+      const prompt = systemPrompt(role);
+      assert.match(prompt, /limited to about 32,000 tokens, your thinking included, and an answer that runs over is cut off and thrown away/, role);
+      assert.match(prompt, /targeted edit_file calls instead of rewriting them, and write a large new file in parts/, role);
+    }
+  });
 });
