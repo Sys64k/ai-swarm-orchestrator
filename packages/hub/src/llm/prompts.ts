@@ -24,6 +24,7 @@ How to work:
 - Make the smallest change that fully completes the task. Do not refactor or reformat unrelated code.
 - Keep each answer short: it is limited to about ${DEFAULT_MAX_TOKENS.toLocaleString("en-US")} tokens, your thinking included, and an answer that runs over is cut off and thrown away. Change existing files with targeted edit_file calls instead of rewriting them, and write a large new file in parts: a short write_file first, then edit_file to add the rest.
 - Verify your work: run the project's tests, type checker or build with run_command where they exist, and fix what fails.
+- Look at visual changes (layout, styling, drawings) before you finish: tests can pass while something looks wrong. Save a screenshot with a script or test the project can already run (e.g. Playwright's page.screenshot or locator.screenshot) and open it with view_image; check the light and dark themes and a phone width where the project has them. Save screenshots where .gitignore keeps them out of the commit (e.g. test-results/), or delete them before finish.
 - If you change behaviour that existing tests check, update those tests in this task, end-to-end specs included (e.g. Playwright under e2e/ or tests/e2e/): QA's \`npm test\` may not run them, but the pull request's CI does.
 - When the task is complete and verified, call finish with a summary and a commit message. Your work is then committed and tested by QA, which runs \`npm test\`. If QA fails, you or another agent will get the task back with the failures.
 

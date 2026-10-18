@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { AGENT_TOOLS, createLogger } from "@aso/shared";
+import { AGENT_TOOLS, createLogger, TURN_IMAGE_BUDGET } from "@aso/shared";
 import type { ExecutionContext, TaskAssignment, TaskExecutor } from "../jobs.js";
 import type { ModelReply, ModelTurn } from "../model-channel.js";
 import { AgentTools, type ToolResult } from "./tools.js";
@@ -10,7 +10,7 @@ const log = createLogger("agent");
 const RETRY_DELAYS_MS = [2_000, 5_000, 15_000, 30_000, 60_000];
 /** How often to ask again while the Hub holds model calls (e.g. out of credit). */
 export const PAUSE_RETRY_MS = 60_000;
-/** Keep each turn's tool results well under the Hub's 2 MB frame limit. */
+/** Keep each turn's text results well under the Hub's frame limit (images have TURN_IMAGE_BUDGET). */
 const TURN_RESULTS_BUDGET = 1_200_000;
 
 export class ModelError extends Error {
@@ -85,7 +85,7 @@ export class LlmTaskExecutor implements TaskExecutor {
         continue;
       }
       reminded = false;
-      results = fitBudget(results);
+      results = fitTurnResults(results);
     }
   }
 }
@@ -125,10 +125,23 @@ export function describe(call: { name: string; input: Record<string, unknown> })
   return typeof arg === "string" ? `${call.name} ${arg.slice(0, 80)}` : call.name;
 }
 
-/** Share the per-turn budget across results so one huge output can't crowd out the rest. */
-function fitBudget(results: ToolResult[]): ToolResult[] {
+/**
+ * Fit a turn's tool results into one frame: the text budget is shared across results so one
+ * huge output can't crowd out the rest, and images go in order until TURN_IMAGE_BUDGET is used;
+ * a later image is left out, and its result says so.
+ */
+export function fitTurnResults(results: ToolResult[]): ToolResult[] {
   const per = Math.floor(TURN_RESULTS_BUDGET / Math.max(1, results.length));
-  return results.map((r) =>
-    r.content.length <= per ? r : { ...r, content: `${r.content.slice(0, per)}\n… truncated to fit this turn` },
-  );
+  let imageChars = 0;
+  return results.map((r) => {
+    const fitted = r.content.length <= per ? r : { ...r, content: `${r.content.slice(0, per)}\n… truncated to fit this turn` };
+    if (!r.image) return fitted;
+    if (imageChars + r.image.data.length <= TURN_IMAGE_BUDGET) {
+      imageChars += r.image.data.length;
+      return fitted;
+    }
+    const { image: _, ...text } = fitted;
+    const mb = (TURN_IMAGE_BUDGET * 0.75) / 1_000_000;
+    return { ...text, isError: true, content: `${text.content}\nImage not sent: this turn's images are over ${mb.toFixed(1)} MB together. View it again in a later turn.` };
+  });
 }

@@ -7,6 +7,7 @@ import {
   ModelChannel,
   callModelWithRetry,
   describeToolCall,
+  fitTurnResults,
   type ToolResult,
 } from "@aso/worker";
 
@@ -63,7 +64,7 @@ export class Planner {
       for (;;) {
         const reply = await callModelWithRetry(
           (t) => this.opts.model.call({ planId }, t),
-          { conversationId, turn, toolResults: results },
+          { conversationId, turn, toolResults: fitTurnResults(results) },
           (m) => log.warn(`${planId}: ${m}`),
           this.opts.retryDelaysMs,
         );
