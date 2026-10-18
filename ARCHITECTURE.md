@@ -953,7 +953,7 @@ sequenceDiagram
 
 | Setting | Value | Why |
 |---|---|---|
-| Model | `claude-opus-5-5` (configurable) | Default current Opus |
+| Model | `claude-opus-5-5` (configurable) | Default current Opus; task agents can run on another model (`--agent-model`), the Architect always uses this one |
 | Transport | `client.beta.messages.stream(...).finalMessage()` | Long agentic turns; streaming avoids HTTP timeouts |
 | `max_tokens` | 32,000 per turn | Room for large file writes in one tool call |
 | `output_config.effort` | `high` (configurable) | Agentic coding benefits from effort; `medium` is Opus 5.5's default |

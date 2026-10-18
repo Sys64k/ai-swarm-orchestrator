@@ -26,6 +26,7 @@ services:
       ASO_PULL_REQUESTS: "${ASO_PULL_REQUESTS:-1}"
       ASO_ALLOW_DEPS: "${ASO_ALLOW_DEPS:-}"
       ASO_MODEL: "${ASO_MODEL:-claude-opus-5-5}"
+      ASO_AGENT_MODEL: "${ASO_AGENT_MODEL:-}"
       ASO_EFFORT: "${ASO_EFFORT:-high}"
       ASO_TASK_BUDGET: "${ASO_TASK_BUDGET:-5}"
       ASO_PLAN_BUDGET: "${ASO_PLAN_BUDGET:-3}"

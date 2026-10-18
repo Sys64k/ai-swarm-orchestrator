@@ -109,6 +109,37 @@ describe("LLM gateway (Hub)", () => {
     );
   });
 
+  it("runs task agents on the agent model and reports both models", () => {
+    const architect = new ScriptedModel(() => assert.fail("a task agent reached the Architect's model"));
+    const agents = new ScriptedModel(() => reply([text("Done.")], "end_turn"), "claude-haiku-5-5");
+    return withHub(
+      async (ctx) => {
+        const w = await implementer(ctx, "dev", "greet");
+        w.send(prompt("dev", crypto.randomUUID(), 0));
+        assert.equal(result(await w.next()).outcome, "ok");
+        assert.equal(agents.requests.length, 1);
+        assert.match(agents.requests[0].system, /backend engineer/);
+        const res = await fetch(`http://127.0.0.1:${ctx.port}/api/llm`, { headers: { authorization: `Bearer ${TOKEN}` } });
+        const status = (await res.json()) as { model: string; agentModel: string };
+        assert.deepEqual([status.model, status.agentModel], ["claude-opus-5-5", "claude-haiku-5-5"]);
+        w.ws.close();
+      },
+      { llm: { adapter: architect, agentAdapter: agents } },
+    );
+  });
+
+  it("runs task agents on the Architect's model when no agent model is set", async () => {
+    let status: { model: string; agentModel: string } | undefined;
+    await withHub(
+      async (ctx) => {
+        const res = await fetch(`http://127.0.0.1:${ctx.port}/api/llm`, { headers: { authorization: `Bearer ${TOKEN}` } });
+        status = (await res.json()) as never;
+      },
+      { llm: { adapter: new ScriptedModel(() => reply([], "end_turn")) } },
+    );
+    assert.deepEqual([status!.model, status!.agentModel], ["claude-opus-5-5", "claude-opus-5-5"]);
+  });
+
   it("answers retries from cache without calling the model again", () => {
     const model = new ScriptedModel(() => reply([toolUse("tu_1", "list_files", {})]));
     return withHub(

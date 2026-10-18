@@ -323,7 +323,8 @@ export const TranscriptSchema = z.object({
 export const LlmStatusSchema = z.object({
   configured: z.boolean(),
   adapter: z.string().nullable(),
-  model: z.string().nullable(),
+  model: z.string().nullable().describe("The Architect's model"),
+  agentModel: z.string().nullable().describe("The task agents' model (builders, QA)"),
   taskBudgetUsd: z.number(),
   planBudgetUsd: z.number(),
   maxTurns: z.number().int(),

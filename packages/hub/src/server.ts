@@ -119,7 +119,11 @@ export interface HubOptions {
   llm?: {
     /** Defaults to the Anthropic API adapter when ANTHROPIC_API_KEY is set; otherwise no LLM. */
     adapter?: LlmAdapter;
+    /** The Architect's model, and the agents' unless `agentModel` is set. */
     model?: string;
+    /** Task agents' model (builders, QA). `agentAdapter` replaces it in tests. */
+    agentModel?: string;
+    agentAdapter?: LlmAdapter;
     effort?: Effort;
     maxTokens?: number;
     taskBudgetUsd?: number;
@@ -187,17 +191,19 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   for (const p of projects.list()) notifier.observe({ id: p.id, tasks: p.tasks.list(), plans: p.plans.list() });
   const llm = opts.llm ?? {};
   const model = llm.model ?? "claude-opus-5-5";
-  const adapter =
-    llm.adapter ??
-    (process.env.ANTHROPIC_API_KEY
-      ? new AnthropicApiAdapter({ model, effort: llm.effort ?? "high", maxTokens: llm.maxTokens ?? 32_000 })
-      : undefined);
+  const anthropic = (id: string) =>
+    process.env.ANTHROPIC_API_KEY ? new AnthropicApiAdapter({ model: id, effort: llm.effort ?? "high", maxTokens: llm.maxTokens ?? 32_000 }) : undefined;
+  const adapter = llm.adapter ?? anthropic(model);
+  const agentAdapter = llm.agentAdapter ?? (llm.agentModel && llm.agentModel !== model ? anthropic(llm.agentModel) : undefined);
   if (!adapter) log.warn("no LLM configured: set ANTHROPIC_API_KEY to let agents work");
   else {
-    log.info(`LLM: ${adapter.name} ${adapter.model}`);
-    if (!hasPrice(adapter.model)) log.warn(`no price known for ${adapter.model}; cost estimates will read $0`);
+    log.info(`LLM: ${adapter.name} ${adapter.model}${agentAdapter ? ` (Architect); ${agentAdapter.model} (agents)` : ""}`);
+    for (const a of [adapter, agentAdapter]) {
+      if (a && !hasPrice(a.model)) log.warn(`no price known for ${a.model}; cost estimates will read $0`);
+    }
   }
   const conversations = new ConversationManager(adapter, tasks, registry, plans, {
+    agentAdapter,
     taskBudgetUsd: llm.taskBudgetUsd,
     planBudgetUsd: llm.planBudgetUsd,
     maxTurns: llm.maxTurns,

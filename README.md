@@ -100,6 +100,7 @@ prohibited outright.
 | | Default | Flag |
 |---|---|---|
 | Model | `claude-opus-5-5` ($4 / $20 per million input/output tokens; cached input $0.20) | `--model` |
+| Builder and QA agents' model | the same as `--model`; e.g. `claude-haiku-5-5` ($0.10 / $0.50, cached input $0.01) for small, clear tasks | `--agent-model` |
 | Effort | `high` | `--effort low…max` |
 | Spend cap per task (estimated) | $5 | `--task-budget` |
 | Spend cap per planning round (estimated) | $3 | `--plan-budget` |
@@ -643,7 +644,8 @@ failure), and so do the dashboard and `aso sync`.
 | `--no-qa` | | Merge verified work without a QA run |
 | `--no-push` | | Keep merges local (don't push `main` to `origin`) |
 | `--allow-deps <list>` | any | npm packages agents may request; `@scope/*` allows a scope |
-| `--model <id>` | `claude-opus-5-5` | Claude model for agents |
+| `--model <id>` | `claude-opus-5-5` | Claude model for the Architect, and for agents without `--agent-model` |
+| `--agent-model <id>` | `--model` | Claude model for the builder and QA agents. The Architect keeps `--model`: a strong planner breaking work into small, clear tasks lets a cheaper model build them |
 | `--effort <level>` | `high` | `low`, `medium`, `high`, `xhigh`, `max` |
 | `--task-budget <usd>` | `5` | Estimated LLM spend cap per task |
 | `--plan-budget <usd>` | `3` | Estimated LLM spend cap per planning round |
@@ -776,7 +778,7 @@ Answers can gain fields over time: clients should ignore fields they don't know.
 | `GET` | `/api/openapi.json` | This API as an OpenAPI 3.1 document (public) |
 | `GET` | `/dist/aso.tgz` | The `aso` package for installing/updating machines (public; contains no secrets) |
 | `GET` / `POST` | `/api/sync` | Push status / retry the push of `main` to `origin` |
-| `GET` | `/api/llm` | LLM status: model, queue, calls and estimated spend since start |
+| `GET` | `/api/llm` | LLM status: the Architect's and the agents' models, queue, calls and estimated spend since start |
 | `GET` | `/api/nodes` | Registered nodes with hardware, latest heartbeat, current task, the aso build each runs (`version`), `outdated` (a different build than the Hub serves), `supervisor`, `updates` (`package`: it can update itself), `draining`, `restart`, `updateTo` (the build a pending or running update installs), `updateError` (why the Hub stopped updating that machine) and `actions` (what the console may do now, with `why` for a refusal) |
 | `GET` | `/api/tasks` | All tasks with state, nodes, commits, rework round, `crew` (the agents that built and tested it) and history |
 | `GET` | `/api/tasks/:id` | A single task (history, agent turn log, LLM cost, files touched) |
@@ -868,7 +870,7 @@ For the scoring formula, see [ARCHITECTURE.md](ARCHITECTURE.md#6-hardware-aware-
 | `ASO_ALLOW_DEPS` | *(any)* | Default for `--allow-deps` (also passed into the container) |
 | `ANTHROPIC_API_KEY` | *(none)* | Hub only. Without it, agents fail tasks with "no LLM configured" |
 | *(file)* `.env` | — | Loaded on start: the shell's variables win, then `ASO_ENV_FILE`, then `~/.config/aso/.env`, then a source checkout's `.env`. See `.env.example` |
-| `ASO_MODEL`, `ASO_EFFORT`, `ASO_TASK_BUDGET`, `ASO_PLAN_BUDGET`, `ASO_MAX_TURNS`, `ASO_LLM_CONCURRENCY` | see flags | Defaults for the LLM flags (also passed into the container) |
+| `ASO_MODEL`, `ASO_AGENT_MODEL`, `ASO_EFFORT`, `ASO_TASK_BUDGET`, `ASO_PLAN_BUDGET`, `ASO_MAX_TURNS`, `ASO_LLM_CONCURRENCY` | see flags | Defaults for the LLM flags (also passed into the container) |
 | `ASO_PUSH_CONTACT` | project URL | Contact (`mailto:` or `https:`) sent to push services with notifications (VAPID `sub`) |
 | `ASO_UPDATE_SPEC` | `@aso/cli@latest` | Default source for `aso update` |
 

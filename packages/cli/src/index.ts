@@ -99,7 +99,8 @@ function hubOptions(cmd: Command): Command {
       "comma-separated npm packages agents may request (`@scope/*` allows a scope); default: any",
       process.env.ASO_ALLOW_DEPS || undefined,
     )
-    .option("--model <id>", "Claude model for agents", process.env.ASO_MODEL || "claude-opus-5-5")
+    .option("--model <id>", "Claude model for the Architect (and agents without --agent-model)", process.env.ASO_MODEL || "claude-opus-5-5")
+    .option("--agent-model <id>", "Claude model for the builder and QA agents (default: --model)", process.env.ASO_AGENT_MODEL || undefined)
     .option("--effort <level>", `model effort: ${EFFORTS.join(", ")}`, parseEffort, (process.env.ASO_EFFORT as Effort) || "high")
     .option("--task-budget <usd>", "estimated LLM spend cap per task", parseUsd, Number(process.env.ASO_TASK_BUDGET) || 5)
     .option("--plan-budget <usd>", "estimated LLM spend cap per planning round", parseUsd, Number(process.env.ASO_PLAN_BUDGET) || 3)
