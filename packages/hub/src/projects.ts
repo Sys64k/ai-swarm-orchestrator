@@ -14,6 +14,7 @@ import type { NodeRegistry } from "./registry.js";
 import { StateStore } from "./state-store.js";
 import { TaskManager, type AgentTurn, type TaskManagerOptions, type TaskRecord } from "./tasks.js";
 import { Transcripts, type TranscriptInput, type TranscriptSubject } from "./transcripts.js";
+import { Screenshots } from "./screenshots.js";
 
 const log = createLogger("projects");
 const exec = promisify(execFile);
@@ -42,6 +43,8 @@ export interface Project {
   /** Whether QA-approved work goes to GitHub pull requests, and if not, why. */
   pullRequests: PullRequestStatus;
   transcripts: Transcripts;
+  /** The screenshots of each task's last passing QA run. */
+  screenshots: Screenshots;
   store?: StateStore;
 }
 
@@ -276,6 +279,7 @@ export class ProjectSet {
       this.reviewers.get(p.id)?.stopPolling();
       await p.store?.close();
       await p.transcripts.close();
+      await p.screenshots.flush();
     }
   }
 
@@ -288,11 +292,12 @@ export class ProjectSet {
     const store = this.opts.persist === false ? undefined : new StateStore(path.join(await repo.gitDir(), "aso"));
     const saved = await store?.load<TaskRecord, PlanRecord>();
     const transcripts = new Transcripts(store ? path.join(store.dir, "transcripts") : undefined);
+    const screenshots = new Screenshots(store ? path.join(store.dir, "screenshots") : undefined);
     const sync = await GitSync.create(repo, { ...this.opts.sync, enabled: this.opts.sync.enabled ?? true });
     const { gate, status: pullRequests } = await PullRequests.create(sync, repo.mainBranch, { token: this.opts.sync.token, ...this.opts.pullRequests });
     log.info(`project ${id}: ${gate ? `QA-approved work goes to pull requests on ${pullRequests.repo}` : `merged on the Hub (${pullRequests.reason})`}`);
     // Filled in below; the managers' callbacks only run after construction.
-    const project = { id, dir, repo, sync, pullRequests, transcripts, store } as Project;
+    const project = { id, dir, repo, sync, pullRequests, transcripts, screenshots, store } as Project;
     /** The managers report changes while they are still being constructed; listeners wait for both. */
     const ready = () => project.tasks !== undefined && project.plans !== undefined;
     const persist = () => {
@@ -315,6 +320,7 @@ export class ProjectSet {
       reviewGate: gate,
       onChange: persist,
       onTranscript: (taskId, entry) => transcripts.append({ kind: "task", id: taskId }, entry),
+      screenshots,
     });
     project.plans = new PlanManager(
       this.registry,

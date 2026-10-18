@@ -981,6 +981,51 @@
           "qaSummary": {
             "type": "string"
           },
+          "screenshots": {
+            "description": "What the project's screenshots script saved in the last passing QA run; GET /api/tasks/{id}/screenshots/{name} serves each",
+            "type": "object",
+            "properties": {
+              "commit": {
+                "type": "string",
+                "description": "The commit QA tested when it took them"
+              },
+              "at": {
+                "type": "string",
+                "description": "ISO 8601 time"
+              },
+              "files": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "mediaType": {
+                      "type": "string"
+                    },
+                    "bytes": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "mediaType",
+                    "bytes"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "commit",
+              "at",
+              "files"
+            ],
+            "additionalProperties": false
+          },
           "conflicts": {
             "description": "Files left with merge conflict markers for the agent to resolve this round",
             "type": "array",
@@ -3792,6 +3837,77 @@
           },
           "404": {
             "description": "No such task",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}/screenshots/{name}": {
+      "get": {
+        "operationId": "getTaskScreenshot",
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "One screenshot from the task's last passing QA run (listed in the task's screenshots)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The image",
+            "content": {
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "contentMediaType": "image/png"
+                }
+              },
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "contentMediaType": "image/jpeg"
+                }
+              },
+              "image/gif": {
+                "schema": {
+                  "type": "string",
+                  "contentMediaType": "image/gif"
+                }
+              },
+              "image/webp": {
+                "schema": {
+                  "type": "string",
+                  "contentMediaType": "image/webp"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "No such task, or it has no screenshot of that name",
             "content": {
               "application/json": {
                 "schema": {

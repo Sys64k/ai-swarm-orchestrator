@@ -27,6 +27,8 @@ export interface PullRequestOptions {
   repo?: RepoSlug;
   /** How often open pull requests are checked. */
   pollMs?: number;
+  /** The console's address, for links from a pull request to its task (e.g. its screenshots). */
+  consoleUrl?: string;
 }
 
 export interface PullRequestStatus {
@@ -56,6 +58,7 @@ export class PullRequests implements ReviewGate {
     private readonly sync: GitSync,
     private readonly mainBranch: string,
     private readonly pollMs: number,
+    private readonly consoleUrl?: string,
   ) {}
 
   /** Pull requests for this project (`gate`), or why work is merged on the Hub instead; `status` says which. */
@@ -67,7 +70,7 @@ export class PullRequests implements ReviewGate {
     const slug = opts.repo ?? (url ? parseGitHubRemote(url) : undefined);
     if (!slug) return off(`${sync.status().remote} is not a GitHub repository`);
     if (!opts.token) return off("no GitHub token (ASO_GIT_TOKEN) for opening pull requests");
-    const gate = new PullRequests(new GitHubApi(slug, opts.token, opts.apiUrl), sync, mainBranch, opts.pollMs ?? DEFAULT_POLL_MS);
+    const gate = new PullRequests(new GitHubApi(slug, opts.token, opts.apiUrl), sync, mainBranch, opts.pollMs ?? DEFAULT_POLL_MS, opts.consoleUrl);
     return { gate, status: { enabled: true, repo: `${slug.owner}/${slug.repo}` } };
   }
 
@@ -84,7 +87,7 @@ export class PullRequests implements ReviewGate {
   async open(task: TaskRecord): Promise<PullRef> {
     const branch = taskBranchName(task.spec.taskId);
     await this.sync.pushBranch(branch);
-    const body = pullRequestBody(task);
+    const body = pullRequestBody(task, this.consoleUrl);
     const existing = task.review?.pr ?? (await this.api.findOpenPull(branch));
     if (existing && (await this.api.getPull(existing.number)).state === "open") {
       await this.api.updatePull(existing.number, { body });
@@ -272,7 +275,7 @@ export function reviewFeedback(review: Review, comments: readonly ReviewComment[
 }
 
 /** What the pull request says about the task: what was asked, what QA found, what it cost. */
-export function pullRequestBody(task: TaskRecord): string {
+export function pullRequestBody(task: TaskRecord, consoleUrl?: string): string {
   const s = task.spec;
   const criteria = s.acceptanceCriteria.length ? ["", "**Acceptance criteria**", ...s.acceptanceCriteria.map((c) => `- ${c}`)] : [];
   const files = task.filesTouched.length ? ["", `**Files** (${task.filesTouched.length})`, ...task.filesTouched.slice(-30).map((f) => `- \`${f}\``)] : [];
@@ -283,11 +286,23 @@ export function pullRequestBody(task: TaskRecord): string {
     ...files,
     "",
     `**QA:** ${task.qaSummary ?? "not run"}`,
+    ...screenshotsNote(task, consoleUrl),
     `**Task:** \`${s.taskId}\` (${s.role}, ${s.kind})${rounds ? `, after ${rounds}` : ""}; model cost about $${task.llm.costUsd.toFixed(2)}`,
     "",
     "---",
     "Opened by the ASO Hub. **Merge** (here or in the ASO console) to accept it. To send it back to an agent, submit a review that **requests changes** (on a pull request you opened yourself, GitHub only offers **Comment**: that works too). **Close** to cancel the task.",
   ].join("\n");
+}
+
+/** Where to see the screenshots QA took; GitHub can't show them, as they stay on the Hub. */
+function screenshotsNote(task: Pick<TaskRecord, "spec" | "screenshots">, consoleUrl?: string): string[] {
+  const files = task.screenshots?.files ?? [];
+  if (!files.length) return [];
+  const names = files.map((f) => `\`${f.name}\``).join(", ");
+  const where = consoleUrl
+    ? `[see them in the ASO console](${consoleUrl.replace(/\/+$/, "")}/tasks/${encodeURIComponent(task.spec.taskId)})`
+    : "see them on the task in the ASO console";
+  return [`**Screenshots** (${files.length}): ${names}; ${where}`];
 }
 
 /** "2 rework rounds and 1 review round", or empty when the work never came back. */

@@ -4,6 +4,7 @@ import {
   CreatePlanBodySchema,
   CreateProjectBodySchema,
   CreateTaskBodySchema,
+  IMAGE_MEDIA_TYPES,
   HealthSchema,
   LlmStatusSchema,
   NodeSchema,
@@ -74,9 +75,10 @@ export type AnswerName = keyof typeof ANSWER_SCHEMAS;
 
 export interface Answer {
   description: string;
-  /** A schema, or `[schema]` for a list of them; none for the package download. */
+  /** A schema, or `[schema]` for a list of them; none for a file download. */
   schema?: AnswerName | [AnswerName];
-  binary?: boolean;
+  /** A file instead of JSON: the media types it may have. */
+  binary?: readonly string[];
 }
 
 export interface ApiOperation {
@@ -109,7 +111,7 @@ const HUB: ApiOperation[] = [
   { method: "get", path: "/api/version", tag: "Hub", public: true, summary: "The aso build this Hub serves to other machines", responses: { 200: ok("Version") } },
   {
     method: "get", path: "/dist/aso.tgz", tag: "Hub", id: "getPackage", public: true, summary: "The aso package, for installing and updating machines",
-    responses: { 200: { description: "The npm package (gzipped tarball)", binary: true }, 404: err("This Hub serves no package") },
+    responses: { 200: { description: "The npm package (gzipped tarball)", binary: ["application/gzip"] }, 404: err("This Hub serves no package") },
   },
   { method: "get", path: "/api/health", tag: "Hub", public: true, summary: "Liveness, plus details with the token", responses: { 200: ok("Health") } },
   { method: "get", path: "/api/openapi.json", tag: "Hub", public: true, summary: "This description (OpenAPI 3.1)", responses: { 200: { description: "OpenAPI 3.1 document" } } },
@@ -172,6 +174,10 @@ const TASKS: ApiOperation[] = [
     responses: { ...act("Task", "task", "Not waiting for review, or no pull request yet"), 400: err("No message") },
   },
   { method: "get", path: "/api/tasks/{id}/transcript", tag: "Tasks", summary: "The agent's and QA's work on a task, as it happens", query: afterQuery, responses: { 200: ok("Transcript"), ...notFound("task") } },
+  {
+    method: "get", path: "/api/tasks/{id}/screenshots/{name}", tag: "Tasks", summary: "One screenshot from the task's last passing QA run (listed in the task's screenshots)",
+    responses: { 200: { description: "The image", binary: IMAGE_MEDIA_TYPES }, 404: err("No such task, or it has no screenshot of that name") },
+  },
 ];
 
 const WORKERS: ApiOperation[] = [

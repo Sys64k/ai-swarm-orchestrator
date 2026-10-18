@@ -38,7 +38,7 @@ function jsonSchema(schema: z.ZodType, io: "input" | "output"): Record<string, u
 const ref = (name: AnswerName | RequestName) => ({ $ref: `#/components/schemas/${name}` });
 
 function answer(a: Answer) {
-  if (a.binary) return { description: a.description, content: { "application/gzip": { schema: { type: "string", contentMediaType: "application/gzip" } } } };
+  if (a.binary) return { description: a.description, content: Object.fromEntries(a.binary.map((type) => [type, { schema: { type: "string", contentMediaType: type } }])) };
   if (!a.schema) return { description: a.description };
   const schema = Array.isArray(a.schema) ? { type: "array", items: ref(a.schema[0]) } : ref(a.schema);
   return { description: a.description, content: { "application/json": { schema } } };

@@ -60,6 +60,17 @@ function parseUsd(value: string): number {
   return n;
 }
 
+function parseUrl(value: string): string {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new InvalidArgumentError("must be a URL, e.g. https://hub.example.ts.net");
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") throw new InvalidArgumentError("must be an http(s) URL");
+  return value.replace(/\/+$/, "");
+}
+
 function parseEffort(value: string): Effort {
   if (!EFFORTS.includes(value as Effort)) throw new InvalidArgumentError(`expected one of: ${EFFORTS.join(", ")}`);
   return value as Effort;
@@ -99,6 +110,7 @@ function hubOptions(cmd: Command): Command {
       "comma-separated npm packages agents may request (`@scope/*` allows a scope); default: any",
       process.env.ASO_ALLOW_DEPS || undefined,
     )
+    .option("--console-url <url>", "the console's address, for links from pull requests to their tasks (e.g. QA screenshots)", parseUrl, process.env.ASO_CONSOLE_URL || undefined)
     .option("--model <id>", "Claude model for the Architect (and agents without --agent-model)", process.env.ASO_MODEL || "claude-opus-5-5")
     .option("--agent-model <id>", "Claude model for the builder and QA agents (default: --model)", process.env.ASO_AGENT_MODEL || undefined)
     .option("--effort <level>", `model effort: ${EFFORTS.join(", ")}`, parseEffort, (process.env.ASO_EFFORT as Effort) || "high")

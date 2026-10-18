@@ -70,6 +70,10 @@ describe("Hub proxy allowlist", () => {
     assert.equal(hubPath("POST", ["sign-in-codes"]), "/api/sign-in-codes");
     assert.equal(hubPath("POST", ["projects"]), "/api/projects");
     assert.equal(hubPath("GET", ["projects", "shop"]), "/api/projects/shop");
+    assert.equal(hubPath("GET", ["tasks", "api-1", "screenshots", "desk-dark.png"]), "/api/tasks/api-1/screenshots/desk-dark.png");
+    assert.equal(hubPath("GET", ["tasks", "api-1", "screenshots", ".."]), undefined);
+    assert.equal(hubPath("GET", ["tasks", "api-1", "screenshots", "..", "x"]), undefined);
+    assert.equal(hubPath("POST", ["tasks", "api-1", "screenshots", "a.png"]), undefined);
   });
 
   it("refuses everything else", () => {

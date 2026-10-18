@@ -109,6 +109,8 @@ export interface HubOptions {
     apiUrl?: string;
     repo?: { owner: string; repo: string };
     pollMs?: number;
+    /** The console's address, for links from a pull request to its task. Default: ASO_CONSOLE_URL. */
+    consoleUrl?: string;
     /** Where a connected GitHub repository's Git lives (tests); default its github.com URL. */
     gitUrl?: (slug: { owner: string; repo: string }) => string;
   };
@@ -617,6 +619,21 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   };
   app.get("/api/tasks/:id/transcript", (c) => transcript(c, "task", !!tasks.get(c.req.param("id"))));
   app.get("/api/plans/:id/transcript", (c) => transcript(c, "plan", !!plans.get(c.req.param("id"))));
+
+  app.get("/api/tasks/:id/screenshots/:name", async (c) => {
+    const id = c.req.param("id");
+    const name = c.req.param("name");
+    const owner = projects.taskOwner(id);
+    const file = owner?.tasks.get(id)?.screenshots?.files.find((f) => f.name === name);
+    const data = file && (await owner!.screenshots.read(id, name));
+    if (!file || !data) return c.json({ error: `task ${id} has no screenshot ${name}` }, 404);
+    return c.body(new Uint8Array(data), 200, {
+      "content-type": file.mediaType,
+      "x-content-type-options": "nosniff",
+      "content-security-policy": "default-src 'none'",
+      "cache-control": "no-cache",
+    });
+  });
 
   const taskAction = (c: Context, action: (p: Project, id: string) => TaskRecord) => {
     const id = c.req.param("id")!;

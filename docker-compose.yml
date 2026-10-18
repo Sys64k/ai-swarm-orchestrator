@@ -25,6 +25,7 @@ services:
       ASO_AUTO_UPDATE: "${ASO_AUTO_UPDATE:-1}"
       ASO_PULL_REQUESTS: "${ASO_PULL_REQUESTS:-1}"
       ASO_ALLOW_DEPS: "${ASO_ALLOW_DEPS:-}"
+      ASO_CONSOLE_URL: "${ASO_CONSOLE_URL:-}"
       ASO_MODEL: "${ASO_MODEL:-claude-opus-5-5}"
       ASO_AGENT_MODEL: "${ASO_AGENT_MODEL:-}"
       ASO_EFFORT: "${ASO_EFFORT:-high}"
