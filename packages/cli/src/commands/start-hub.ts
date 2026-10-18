@@ -22,6 +22,7 @@ export interface StartHubOptions {
   push: boolean;
   allowDeps?: string;
   model: string;
+  agentModel?: string;
   effort: Effort;
   taskBudget: number;
   planBudget: number;
@@ -55,6 +56,7 @@ export async function startHubCommand(opts: StartHubOptions): Promise<void> {
     autoUpdate: process.env.ASO_AUTO_UPDATE !== "0",
     llm: {
       model: opts.model,
+      agentModel: opts.agentModel,
       effort: opts.effort,
       taskBudgetUsd: opts.taskBudget,
       planBudgetUsd: opts.planBudget,
@@ -108,6 +110,7 @@ async function startHubInDocker(root: string, opts: StartHubOptions, token: stri
       ASO_PUSH: opts.push && process.env.ASO_PUSH !== "0" ? "1" : "0",
       ASO_ALLOW_DEPS: parseList(opts.allowDeps)?.join(",") ?? "",
       ASO_MODEL: opts.model,
+      ASO_AGENT_MODEL: opts.agentModel ?? "",
       ASO_EFFORT: opts.effort,
       ASO_TASK_BUDGET: String(opts.taskBudget),
       ASO_PLAN_BUDGET: String(opts.planBudget),

@@ -2014,6 +2014,14 @@
             ]
           },
           "model": {
+            "description": "The Architect's model",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "agentModel": {
+            "description": "The task agents' model (builders, QA)",
             "type": [
               "string",
               "null"
@@ -2103,6 +2111,7 @@
           "configured",
           "adapter",
           "model",
+          "agentModel",
           "taskBudgetUsd",
           "planBudgetUsd",
           "maxTurns",

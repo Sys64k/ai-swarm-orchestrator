@@ -351,7 +351,8 @@ describe("Architect → plan → workers (real nodes, scripted model)", () => {
       {
         files: { "package.json": JSON.stringify({ name: "t", type: "module", scripts: { test: "node --test" } }) },
         qa: { command: ["node", "--test"] },
-        llm: { adapter: model },
+        // The Architect plans on the main model, never the agents' one.
+        llm: { adapter: model, agentAdapter: new ScriptedModel(() => assert.fail("the Architect reached the agent model"), "claude-haiku-5-5") },
       },
     );
   });

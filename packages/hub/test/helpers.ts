@@ -237,11 +237,12 @@ export const reply = (content: Block[], stopReason = "tool_use", tokens = 1000):
 /** Stand-in model: returns whatever the script says for the n-th call. */
 export class ScriptedModel implements LlmAdapter {
   readonly name = "scripted";
-  readonly model = "claude-opus-5-5";
+  readonly model: string;
   readonly requests: LlmRequest[] = [];
   private readonly script: (req: LlmRequest, n: number) => LlmResponse | Promise<LlmResponse>;
-  constructor(script: (req: LlmRequest, n: number) => LlmResponse | Promise<LlmResponse>) {
+  constructor(script: (req: LlmRequest, n: number) => LlmResponse | Promise<LlmResponse>, model = "claude-opus-5-5") {
     this.script = script;
+    this.model = model;
   }
   async complete(req: LlmRequest): Promise<LlmResponse> {
     this.requests.push(structuredClone(req));

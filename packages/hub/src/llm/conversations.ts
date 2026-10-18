@@ -31,6 +31,8 @@ type Result = PayloadInput<"PROMPT_RESULT">;
 type OkResult = Extract<Result, { outcome: "ok" }>;
 
 export interface ConversationOptions {
+  /** Model for task agents (builders, QA); the Architect keeps the main adapter. Defaults to it. */
+  agentAdapter?: LlmAdapter;
   /** Per-task spend cap (USD, estimated). */
   taskBudgetUsd?: number;
   /** Spend cap for each of the Architect's planning rounds (USD, estimated). */
@@ -116,6 +118,7 @@ export class ConversationManager {
   private readonly store?: StateStore;
   private readonly transcripts?: Pick<Transcripts, "append">;
   private totals = { calls: 0, costUsd: 0 };
+  private readonly agentAdapter: LlmAdapter | undefined;
 
   constructor(
     private readonly adapter: LlmAdapter | undefined,
@@ -124,6 +127,7 @@ export class ConversationManager {
     private readonly plans: PlanDirectory,
     opts: ConversationOptions = {},
   ) {
+    this.agentAdapter = opts.agentAdapter ?? adapter;
     this.taskBudgetUsd = opts.taskBudgetUsd ?? 5;
     this.onPause = opts.onPause;
     this.onResume = opts.onResume;
@@ -214,11 +218,17 @@ export class ConversationManager {
     };
   }
 
+  /** The Architect plans on the main model; task agents use the agent model. */
+  private adapterFor(role: AgentRole): LlmAdapter | undefined {
+    return role === "architect" ? this.adapter : this.agentAdapter;
+  }
+
   status() {
     return {
       configured: this.adapter !== undefined,
       adapter: this.adapter?.name ?? null,
       model: this.adapter?.model ?? null,
+      agentModel: this.agentAdapter?.model ?? null,
       taskBudgetUsd: this.taskBudgetUsd,
       planBudgetUsd: this.planBudgetUsd,
       maxTurns: this.maxTurns,
@@ -328,7 +338,7 @@ export class ConversationManager {
     try {
       const messages = [...conv.messages, userMessage];
       const response = await this.slots.run(() =>
-        this.adapter!.complete({ system: conv.system, tools: conv.tools, messages }),
+        this.adapterFor(conv.subject.role)!.complete({ system: conv.system, tools: conv.tools, messages }),
       );
 
       if (this.paused) {
