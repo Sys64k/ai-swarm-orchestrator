@@ -1,6 +1,8 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import {
   agentToolDefinitions,
+  CONVERSATION_MAX_IMAGE_BYTES,
+  CONVERSATION_MAX_IMAGES,
   createLogger,
   ROLE_POLICIES,
   type AgentRole,
@@ -306,15 +308,7 @@ export class ConversationManager {
         ? { role: "user", content: subject.firstPrompt() }
         : req.toolResults.length === 0
           ? { role: "user", content: CONTINUE_PROMPT }
-          : {
-            role: "user",
-            content: req.toolResults.map((r) => ({
-              type: "tool_result" as const,
-              tool_use_id: r.toolUseId,
-              content: r.content,
-              is_error: r.isError,
-            })),
-          };
+          : { role: "user", content: toolResultBlocks(req.toolResults, conv.messages) };
 
     const userMessage = withCutOffNote(withTurnWarning(base, this.maxTurns - req.turn, subject.kind), conv.cutOff, subject.kind);
 
@@ -484,6 +478,58 @@ export function withTurnWarning(message: Anthropic.Beta.BetaMessageParam, turnsL
   const text = `[ASO] ${turnsLeft} model turn${turnsLeft === 1 ? "" : "s"} left in this round, counting this one. ${wrapUp}`;
   const blocks = typeof message.content === "string" ? [{ type: "text" as const, text: message.content }] : message.content;
   return { ...message, content: [...blocks, { type: "text" as const, text }] };
+}
+
+type ToolResultInput = Request["toolResults"][number];
+
+/**
+ * The tool results as the model gets them. An image (view_image) goes in as an image block
+ * next to its text, unless the conversation already holds as many images, or as many image
+ * bytes, as it may: every image is sent again with each later turn.
+ */
+export function toolResultBlocks(results: ToolResultInput[], history: Anthropic.Beta.BetaMessageParam[]): Anthropic.Beta.BetaToolResultBlockParam[] {
+  let { count, bytes } = imagesIn(history);
+  return results.map((r) => {
+    const block = { type: "tool_result" as const, tool_use_id: r.toolUseId, is_error: r.isError };
+    if (!r.image) return { ...block, content: r.content };
+    const size = base64Bytes(r.image.data);
+    if (count + 1 > CONVERSATION_MAX_IMAGES || bytes + size > CONVERSATION_MAX_IMAGE_BYTES) {
+      const limit = `${CONVERSATION_MAX_IMAGES} images or ${CONVERSATION_MAX_IMAGE_BYTES / 1_000_000} MB of images`;
+      return { ...block, is_error: true, content: `${r.content}\n[ASO] Image not shown: this conversation already holds ${count} images (${(bytes / 1_000_000).toFixed(1)} MB), and it may hold at most ${limit}. Check the rest with tests instead.` };
+    }
+    count += 1;
+    bytes += size;
+    return {
+      ...block,
+      content: [
+        { type: "text" as const, text: r.content },
+        { type: "image" as const, source: { type: "base64" as const, media_type: r.image.mediaType, data: r.image.data } },
+      ],
+    };
+  });
+}
+
+/** Number and decoded size of the images already in a conversation's history. */
+function imagesIn(history: Anthropic.Beta.BetaMessageParam[]): { count: number; bytes: number } {
+  let count = 0;
+  let bytes = 0;
+  for (const message of history) {
+    if (typeof message.content === "string") continue;
+    for (const block of message.content) {
+      if (block.type !== "tool_result" || typeof block.content === "string" || !block.content) continue;
+      for (const part of block.content) {
+        if (part.type === "image" && part.source.type === "base64") {
+          count += 1;
+          bytes += base64Bytes(part.source.data);
+        }
+      }
+    }
+  }
+  return { count, bytes };
+}
+
+function base64Bytes(data: string): number {
+  return Math.floor((data.length * 3) / 4) - (data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0);
 }
 
 /**

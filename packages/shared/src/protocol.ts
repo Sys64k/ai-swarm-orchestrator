@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import { IMAGE_MAX_BYTES, IMAGE_MEDIA_TYPES } from "./constants.js";
 
 // ---------------------------------------------------------------------------
 // Primitives
@@ -398,6 +399,13 @@ const PromptExecutionPayload = z
           toolUseId: z.string().min(1).max(200),
           content: z.string().max(200_000),
           isError: z.boolean().default(false),
+          /** An image the tool returned (view_image), base64-encoded, shown to the model with the text. */
+          image: z
+            .strictObject({
+              mediaType: z.enum(IMAGE_MEDIA_TYPES),
+              data: z.base64().max(Math.ceil(IMAGE_MAX_BYTES / 3) * 4),
+            })
+            .optional(),
         }),
       )
       .max(64)

@@ -441,6 +441,8 @@ their desk.
    again, the task fails with the agent's explanation, and nothing is pushed or sent to QA.
    The tools are:
    - `list_files`, `read_file`, `search`
+   - `view_image`, to look at a screenshot the agent saved (agents are asked to check visual
+     changes this way before they finish, since tests can pass while something looks wrong)
    - `write_file`, `edit_file`, `delete_file`
    - `run_command` (no shell, no git)
    - `request_dependencies`, `set_package_scripts`

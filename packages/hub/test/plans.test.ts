@@ -332,7 +332,7 @@ describe("Architect → plan → workers (real nodes, scripted model)", () => {
           assert.equal(plan.llm.calls, 3);
           assert.deepEqual(plan.agentLog.map((t) => t.actions.join(", ")), ["list_files, write_file x.md", "submit_plan", "submit_plan"]);
           assert.match(model.requests[0].system, /You are the Architect/);
-          assert.deepEqual(model.requests[0].tools.map((t) => t.name), ["list_files", "read_file", "search", "submit_plan", "ask_questions"]);
+          assert.deepEqual(model.requests[0].tools.map((t) => t.name), ["list_files", "read_file", "search", "view_image", "submit_plan", "ask_questions"]);
 
           const ids = (await api(ctx, `/api/plans/${planId}/approve`, { method: "POST" })).body.taskIds;
           await waitFor(() => ctx.hub.tasks.get(ids.tests)?.state === "merged", 20_000, "both tasks merged");

@@ -11,7 +11,7 @@ export interface RolePolicy {
   writable: "any" | "none" | readonly string[];
 }
 
-const EXPLORE: AgentToolName[] = ["list_files", "read_file", "search"];
+const EXPLORE: AgentToolName[] = ["list_files", "read_file", "search", "view_image"];
 const BUILD: AgentToolName[] = [
   ...EXPLORE,
   "write_file",

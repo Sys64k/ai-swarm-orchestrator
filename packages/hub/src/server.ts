@@ -8,6 +8,7 @@ import { createNodeWebSocket } from "@hono/node-ws";
 import type { WSContext } from "hono/ws";
 import {
   DEFAULT_HUB_PORT,
+  MAX_FRAME_BYTES,
   GIT_PATH,
   HUB_NODE_ID,
   NODE_TIMEOUT_MS,
@@ -52,9 +53,6 @@ import { StateStore } from "./state-store.js";
 import { TaskError, type QaOptions, type TaskRecord } from "./tasks.js";
 
 const log = createLogger("hub");
-
-/** Frames larger than this are rejected before parsing. */
-const MAX_FRAME_BYTES = 2 * 1024 * 1024;
 
 export interface HubOptions {
   /**

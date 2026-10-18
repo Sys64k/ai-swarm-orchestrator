@@ -24,3 +24,28 @@ export const NODE_TIMEOUT_MS = 60_000;
 
 /** What a node reports when it doesn't know its aso build (always shown as outdated). */
 export const UNKNOWN_VERSION = "unknown";
+
+/** Largest WebSocket frame the Hub accepts; larger frames are rejected before parsing. */
+export const MAX_FRAME_BYTES = 8 * 1024 * 1024;
+
+/**
+ * Base64 characters of images one turn's tool results may carry. With the text results'
+ * own budget (about 1.2 MB) the turn stays well under MAX_FRAME_BYTES.
+ */
+export const TURN_IMAGE_BUDGET = 5_500_000;
+
+/** Largest image file `view_image` sends to the model (raw bytes; base64 adds a third). */
+export const IMAGE_MAX_BYTES = 2_000_000;
+
+/** Longest image side the model accepts, in pixels. */
+export const IMAGE_MAX_SIDE = 8000;
+
+/** Image types `view_image` accepts, as the Messages API names them. */
+export const IMAGE_MEDIA_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"] as const;
+
+/**
+ * Images one agent conversation may hold. Every image stays in the history and is sent again
+ * with each turn, so these keep a request well under the API's 32 MB limit.
+ */
+export const CONVERSATION_MAX_IMAGES = 20;
+export const CONVERSATION_MAX_IMAGE_BYTES = 12_000_000;

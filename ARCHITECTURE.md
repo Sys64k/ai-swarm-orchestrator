@@ -205,7 +205,7 @@ keys are rejected.
 
 ```mermaid
 flowchart TD
-  F["WebSocket frame"] --> B{"text frame,<br/>≤ 2 MB?"}
+  F["WebSocket frame"] --> B{"text frame,<br/>≤ 8 MiB?"}
   B -- no --> E["PROTOCOL_ERROR"]
   B -- yes --> J{"valid JSON?"}
   J -- no --> E
@@ -981,6 +981,7 @@ sequenceDiagram
 | `list_files` | `git ls-files` (tracked and untracked, honours `.gitignore`); up to 2,000 entries |
 | `read_file` | Numbered lines; `offset`/`limit` (default first 2,000 lines); refuses binaries |
 | `search` | `git grep -E` over tracked and untracked files; up to 300 matches |
+| `view_image` | Shows the model a PNG, JPEG, GIF or WebP in the checkout (e.g. a screenshot the agent saved with `run_command`), up to 2 MB and 8,000 px a side; the type is read from the bytes, not the name |
 | `write_file` / `edit_file` / `delete_file` | Exact-match edits (unique unless `replace_all`); protected files refused; reported via `FILE_OPERATION` |
 | `run_command` | argv without a shell, in the job sandbox; `CI=1`; default 120 s timeout (max 900); `git`, shells, `sudo` and `npm install`-style commands refused |
 | `request_dependencies` | Adds up to 30 npm packages via the Hub in one commit; returns once installed and rebased |
@@ -996,8 +997,16 @@ text. Unfinished work is never pushed, so it never reaches QA or burns rework ro
 **Limits and safety:**
 
 - **Job sandbox.** See [The job sandbox](#the-job-sandbox) below.
-- **Output cap.** Each tool result is capped at 50,000 characters, and a turn's results at
-  about 1.2 MB, which keeps them under the 2 MB frame limit.
+- **Output cap.** Each tool result is capped at 50,000 characters, and a turn's text results at
+  about 1.2 MB. Images from `view_image` have their own budget of 5.5 million base64 characters
+  per turn (two full-size images); a later image in the same turn is left out, and its result
+  says so. Together they stay under the 8 MiB frame limit (`MAX_FRAME_BYTES`).
+- **Images in the conversation.** The Hub sends an image to the model as an image block inside
+  its tool result. Every image stays in the history and is sent again with each later turn, so a
+  conversation holds at most 20 images and 12 MB of them (`CONVERSATION_MAX_IMAGES`,
+  `CONVERSATION_MAX_IMAGE_BYTES`), well under the API's 32 MB request limit. Past that, the
+  result keeps its text and tells the model the image wasn't shown. The task transcript keeps
+  only the text (path, type, size), never the image data.
 - **Untrusted paths.** Every model-supplied path is checked twice. The schema forbids absolute
   paths, `..` and `.git`. The worker then resolves the real path (following symlinks) and
   rejects anything outside the checkout.
@@ -1097,7 +1106,7 @@ refuses tools and paths outside the policy. The Hub re-checks every branch befor
 
 | Role | Tools | Writable | System prompt focus |
 |---|---|---|---|
-| Architect | `list_files`, `read_file`, `search`, `submit_plan` | none | Explore, then split the requirement into independently testable tasks with explicit contracts and dependencies |
+| Architect | `list_files`, `read_file`, `search`, `view_image`, `submit_plan`, `ask_questions` | none | Explore, then split the requirement into independently testable tasks with explicit contracts and dependencies |
 | `backend` | explore + edit + `run_command` + `request_dependencies` + `finish` | any (minus protected files) | Data models, DB, API routes; prefers Prisma + PostgreSQL, Hono |
 | `frontend` | same | any (minus protected files) | UI; prefers Next.js App Router, Tailwind, shadcn/ui |
 | `qa` | same | test files and test config | Tests only; describes bugs instead of fixing feature code; prefers Vitest, Playwright |

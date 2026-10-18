@@ -5,6 +5,8 @@ import path from "node:path";
 import { promisify } from "node:util";
 import {
   AGENT_TOOLS,
+  IMAGE_MAX_BYTES,
+  IMAGE_MAX_SIDE,
   isAgentToolName,
   isProtectedPath,
   ROLE_POLICIES,
@@ -15,6 +17,7 @@ import {
 } from "@aso/shared";
 import { DependencyRejectedError, type DependencyRequest } from "../jobs.js";
 import type { CommandRunner } from "../sandbox.js";
+import { probeImage } from "./image.js";
 
 const exec = promisify(execFile);
 
@@ -41,6 +44,8 @@ export interface ToolResult {
   toolUseId: string;
   content: string;
   isError: boolean;
+  /** view_image: the image itself, base64-encoded, sent to the model with `content`. */
+  image?: { mediaType: "image/png" | "image/jpeg" | "image/gif" | "image/webp"; data: string };
 }
 
 export interface ToolHost {
@@ -94,6 +99,8 @@ export class AgentTools {
           return done(await this.readFile(parsed.data as AgentToolInput<"read_file">));
         case "search":
           return done(await this.search(parsed.data as AgentToolInput<"search">));
+        case "view_image":
+          return { ...done(""), ...(await this.viewImage(parsed.data as AgentToolInput<"view_image">)) };
         case "write_file":
           return done(await this.writeFile(parsed.data as AgentToolInput<"write_file">));
         case "edit_file":
@@ -158,6 +165,29 @@ export class AgentTools {
     const body = slice.map((l, i) => `${offset + i}\t${l}`).join("\n");
     const end = offset - 1 + slice.length;
     return end < lines.length ? `${body}\n… lines ${end + 1}-${lines.length} not shown (use offset)` : body || "(empty file)";
+  }
+
+  private async viewImage({ path: p }: AgentToolInput<"view_image">): Promise<Pick<ToolResult, "content" | "image">> {
+    const abs = await this.resolve(p);
+    const info = await stat(abs).catch(() => undefined);
+    if (!info) throw new ToolError(`${p} does not exist`);
+    if (info.isDirectory()) throw new ToolError(`${p} is a directory; use list_files`);
+    const kb = `${Math.ceil(info.size / 1000).toLocaleString("en-US")} KB`;
+    if (info.size > IMAGE_MAX_BYTES) {
+      throw new ToolError(`${p} is ${kb}, over the ${IMAGE_MAX_BYTES / 1_000_000} MB limit; screenshot a smaller area or at a lower device scale factor`);
+    }
+    const buf = await readFile(abs);
+    const image = probeImage(buf);
+    if (!image) throw new ToolError(`${p} is not a PNG, JPEG, GIF or WebP image`);
+    if (image.width < 1 || image.height < 1) throw new ToolError(`${p} has no pixels (${image.width}×${image.height})`);
+    if (Math.max(image.width, image.height) > IMAGE_MAX_SIDE) {
+      throw new ToolError(`${p} is ${image.width}×${image.height} pixels; the model takes at most ${IMAGE_MAX_SIDE} on a side`);
+    }
+    const type = image.mediaType.slice("image/".length).toUpperCase();
+    return {
+      content: `${p}: ${type}, ${image.width}×${image.height} pixels, ${kb}`,
+      image: { mediaType: image.mediaType, data: buf.toString("base64") },
+    };
   }
 
   private async search({ pattern, path: p, ignore_case }: AgentToolInput<"search">): Promise<string> {

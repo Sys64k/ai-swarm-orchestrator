@@ -29,6 +29,15 @@ describe("an implementing agent's instructions", () => {
     assert.match(systemPrompt("frontend"), /update those tests in this task, end-to-end specs included/);
   });
 
+  it("ask it to look at visual changes with view_image, keeping screenshots out of the commit, for every role", () => {
+    for (const role of ["backend", "frontend", "qa", "devops"] as const) {
+      const prompt = systemPrompt(role);
+      assert.match(prompt, /Look at visual changes \(layout, styling, drawings\) before you finish: tests can pass while something looks wrong/, role);
+      assert.match(prompt, /open it with view_image/, role);
+      assert.match(prompt, /where \.gitignore keeps them out of the commit \(e\.g\. test-results\/\), or delete them before finish/, role);
+    }
+  });
+
   it("name the answer size limit and how to stay under it, for every role", () => {
     for (const role of ["backend", "frontend", "qa", "devops"] as const) {
       const prompt = systemPrompt(role);

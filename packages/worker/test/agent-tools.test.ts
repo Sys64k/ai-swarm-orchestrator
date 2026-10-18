@@ -4,8 +4,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { agentToolDefinitions } from "@aso/shared";
-import { AgentTools, DependencyRejectedError, hostRunner, type ToolResult } from "@aso/worker";
+import { agentToolDefinitions, IMAGE_MAX_BYTES, MAX_FRAME_BYTES, TURN_IMAGE_BUDGET } from "@aso/shared";
+import { AgentTools, DependencyRejectedError, fitTurnResults, hostRunner, probeImage, type ToolResult } from "@aso/worker";
 
 process.env.ASO_LOG_LEVEL ??= "warn";
 
@@ -54,7 +54,7 @@ describe("agent tools", () => {
   it("publishes JSON schemas for every tool", () => {
     const defs = agentToolDefinitions();
     assert.deepEqual(defs.map((d) => d.name), [
-      "list_files", "read_file", "search", "write_file", "edit_file", "delete_file", "run_command", "request_dependencies", "set_package_scripts", "finish", "submit_plan", "ask_questions",
+      "list_files", "read_file", "search", "view_image", "write_file", "edit_file", "delete_file", "run_command", "request_dependencies", "set_package_scripts", "finish", "submit_plan", "ask_questions",
     ]);
     for (const d of defs) {
       assert.equal(d.input_schema.type, "object");
@@ -142,6 +142,79 @@ describe("agent tools", () => {
     assert.deepEqual(deps, ["zod", "react", "vitest", "scripts:test"]);
   });
 
+  it("shows an image to the model, with its type and size in words", async () => {
+    const png = pngHeader(1400, 900);
+    writeFileSync(path.join(repo, "shot.png"), png);
+    const r = await call("view_image", { path: "shot.png" });
+    assert.equal(ok(r), "shot.png: PNG, 1400×900 pixels, 1 KB");
+    assert.deepEqual(r.image, { mediaType: "image/png", data: png.toString("base64") });
+    // The type comes from the bytes, not the name.
+    writeFileSync(path.join(repo, "shot.jpg"), png);
+    assert.equal((await call("view_image", { path: "shot.jpg" })).image?.mediaType, "image/png");
+  });
+
+  it("refuses files that aren't images, are too big, or are outside the checkout", async () => {
+    err(await call("view_image", { path: "src/a.ts" }), /src\/a\.ts is not a PNG, JPEG, GIF or WebP image/);
+    err(await call("view_image", { path: "missing.png" }), /missing\.png does not exist/);
+    err(await call("view_image", { path: "src" }), /is a directory/);
+    err(await call("view_image", { path: "../secret.txt" }), /must not contain '\.\.'/);
+    symlinkSync(path.join(root, "secret.txt"), path.join(repo, "secret.png"));
+    err(await call("view_image", { path: "secret.png" }), /resolves outside the project/);
+    writeFileSync(path.join(repo, "huge.png"), Buffer.concat([pngHeader(800, 600), Buffer.alloc(2_000_001)]));
+    err(await call("view_image", { path: "huge.png" }), /huge\.png is 2,001 KB, over the 2 MB limit; screenshot a smaller area/);
+    writeFileSync(path.join(repo, "tall.png"), pngHeader(1000, 8001));
+    err(await call("view_image", { path: "tall.png" }), /1000×8001 pixels; the model takes at most 8000 on a side/);
+    writeFileSync(path.join(repo, "empty.png"), pngHeader(0, 10));
+    err(await call("view_image", { path: "empty.png" }), /has no pixels/);
+    assert.equal((await call("view_image", { path: "src/a.ts" })).image, undefined);
+  });
+
+  it("reads the type and size of PNG, JPEG, GIF and WebP headers", () => {
+    assert.deepEqual(probeImage(pngHeader(3, 4)), { mediaType: "image/png", width: 3, height: 4 });
+    // JPEG: SOI, an APP0 segment to skip, a fill byte, then a baseline frame header (SOF0).
+    const jpeg = Buffer.from([
+      0xff, 0xd8,
+      0xff, 0xe0, 0x00, 0x04, 0x00, 0x00,
+      0xff, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x01, 0x2c, 0x02, 0x58, 0x03,
+    ]);
+    assert.deepEqual(probeImage(jpeg), { mediaType: "image/jpeg", width: 600, height: 300 });
+    // Image data before any frame header: no size to read.
+    assert.equal(probeImage(Buffer.from([0xff, 0xd8, 0xff, 0xda, 0x00, 0x02])), undefined);
+    const gif = Buffer.concat([Buffer.from("GIF89a", "latin1"), Buffer.from([0x40, 0x01, 0xf0, 0x00])]);
+    assert.deepEqual(probeImage(gif), { mediaType: "image/gif", width: 320, height: 240 });
+    const webp = (chunk: string, body: number[]) => {
+      const b = Buffer.alloc(30);
+      b.write("RIFF", 0, "latin1");
+      b.write("WEBP", 8, "latin1");
+      b.write(chunk, 12, "latin1");
+      Buffer.from(body).copy(b, 20);
+      return b;
+    };
+    // Lossy: 14-bit sizes at bytes 26 and 28.
+    assert.deepEqual(probeImage(webp("VP8 ", [0, 0, 0, 0, 0, 0, 0x90, 0x01, 0xc8, 0x00])), { mediaType: "image/webp", width: 400, height: 200 });
+    // Lossless: (width-1) and (height-1) packed in 14 bits each from byte 21.
+    assert.deepEqual(probeImage(webp("VP8L", [0, 0x8f, 0x01, 0x32, 0x00])), { mediaType: "image/webp", width: 400, height: 201 });
+    // Extended: 24-bit (width-1) and (height-1) at bytes 24 and 27.
+    assert.deepEqual(probeImage(webp("VP8X", [0, 0, 0, 0, 0x8f, 0x01, 0x00, 0xc7, 0x00, 0x00])), { mediaType: "image/webp", width: 400, height: 200 });
+    assert.equal(probeImage(Buffer.from("not an image")), undefined);
+    assert.equal(probeImage(pngHeader(1, 1).subarray(0, 20)), undefined);
+  });
+
+  it("fits a turn's results into one frame, leaving out images past the turn's budget", () => {
+    const image = { mediaType: "image/png" as const, data: "A".repeat(Math.ceil(IMAGE_MAX_BYTES / 3) * 4) };
+    const shot = (id: string): ToolResult => ({ toolUseId: id, content: `${id}.png`, isError: false, image });
+    const text = (id: string, n: number): ToolResult => ({ toolUseId: id, content: "x".repeat(n), isError: false });
+    const fitted = fitTurnResults([shot("a"), text("t", 2_000_000), shot("b"), shot("c")]);
+    assert.deepEqual(fitted.map((r) => Boolean(r.image)), [true, false, true, false]);
+    assert.equal(fitted[3].isError, true);
+    assert.equal(fitted[3].content, "c.png\nImage not sent: this turn's images are over 4.1 MB together. View it again in a later turn.");
+    assert.match(fitted[1].content, /… truncated to fit this turn$/);
+    // Two full-size images and the text budget fit in a frame, with room for the envelope.
+    const frame = JSON.stringify({ type: "PROMPT_EXECUTION", payload: { toolResults: fitted } });
+    assert.ok(Buffer.byteLength(frame) < MAX_FRAME_BYTES - 500_000, `${Buffer.byteLength(frame)} bytes`);
+    assert.ok(2 * image.data.length <= TURN_IMAGE_BUDGET, "two full-size images fit in one turn");
+  });
+
   it("validates inputs and rejects unknown tools", async () => {
     err(await call("read_file", { path: "src/a.ts", extra: 1 }), /invalid input/);
     err(await call("rm_rf", {}), /unknown tool/);
@@ -181,3 +254,14 @@ describe("agent tools", () => {
     assert.deepEqual(ops, ["create test/a.test.js", "create .github/workflows/ci.yml"]);
   });
 });
+
+/** The first bytes of a PNG: signature and IHDR, which is all the tool reads. */
+function pngHeader(width: number, height: number): Buffer {
+  const b = Buffer.alloc(33);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(b, 0);
+  b.writeUInt32BE(13, 8);
+  b.write("IHDR", 12, "latin1");
+  b.writeUInt32BE(width, 16);
+  b.writeUInt32BE(height, 20);
+  return b;
+}

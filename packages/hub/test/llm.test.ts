@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { describe, it } from "node:test";
 import Anthropic from "@anthropic-ai/sdk";
-import { AnthropicApiAdapter, classify, CREDIT_MESSAGE, DEFAULT_PLAN_BUDGET_USD, describeCutOff, withCutOffNote, LlmError, priceUsage, taskPrompt, TURN_WARNING, withTurnWarning, type LlmRequest } from "@aso/hub";
-import { createMessage, type AgentMessage } from "@aso/shared";
+import { AnthropicApiAdapter, classify, CREDIT_MESSAGE, DEFAULT_PLAN_BUDGET_USD, describeCutOff, toolResultBlocks, withCutOffNote, LlmError, priceUsage, taskPrompt, TURN_WARNING, withTurnWarning, type LlmRequest } from "@aso/hub";
+import { CONVERSATION_MAX_IMAGE_BYTES, CONVERSATION_MAX_IMAGES, createMessage, type AgentMessage } from "@aso/shared";
 import { callModelWithRetry, startWorker, type ModelReply } from "@aso/worker";
 import {
   git,
@@ -338,6 +338,63 @@ describe("LLM gateway (Hub)", () => {
     assert.equal(DEFAULT_PLAN_BUDGET_USD, 3);
     assert.equal(await budget({ adapter: new ScriptedModel(() => reply([], "end_turn")) }), 3);
     assert.equal(await budget({ adapter: new ScriptedModel(() => reply([], "end_turn")), planBudgetUsd: 7.5 }), 7.5);
+  });
+
+  it("shows the model an image from view_image, and keeps the transcript to its description", () => {
+    const model = new ScriptedModel((_req, n) =>
+      n === 0 ? reply([toolUse("tu_img", "view_image", { path: "shot.png" })]) : reply([text("Looks right.")], "end_turn"),
+    );
+    return withHub(
+      async (ctx) => {
+        const w = await implementer(ctx, "dev", "greet");
+        const conv = crypto.randomUUID();
+        w.send(prompt("dev", conv, 0));
+        assert.equal(result(await w.next()).outcome, "ok");
+        const image = { mediaType: "image/png", data: "iVBORw0KGgo=" };
+        w.send(prompt("dev", conv, 1, [{ toolUseId: "tu_img", content: "shot.png: PNG, 1×1 pixels, 1 KB", image }]));
+        assert.equal(result(await w.next()).outcome, "ok");
+        assert.deepEqual(lastToolResults(model.requests[1]).tu_img, {
+          type: "tool_result",
+          tool_use_id: "tu_img",
+          is_error: false,
+          content: [
+            { type: "text", text: "shot.png: PNG, 1×1 pixels, 1 KB" },
+            { type: "image", source: { type: "base64", media_type: "image/png", data: "iVBORw0KGgo=" } },
+          ],
+        } as never);
+        const transcript = await (await fetch(`http://127.0.0.1:${ctx.port}/api/tasks/greet/transcript`, { headers: { authorization: `Bearer ${TOKEN}` } })).json() as { entries: Array<{ kind: string; content?: string }> };
+        const entry = transcript.entries.find((e) => e.kind === "result");
+        assert.equal(entry?.content, "shot.png: PNG, 1×1 pixels, 1 KB", "the transcript keeps the description, not the image data");
+        w.ws.close();
+      },
+      { llm: { adapter: model } },
+    );
+  });
+
+  it("stops adding images once a conversation holds as many, or as many bytes, as it may", () => {
+    const image = (bytes: number) => ({ mediaType: "image/png" as const, data: "A".repeat((bytes / 3) * 4) });
+    const result = (id: string, bytes: number) => ({ toolUseId: id, content: `${id}.png`, isError: false, image: image(bytes) });
+    const history = (count: number, bytes: number) => [
+      { role: "user" as const, content: "task" },
+      ...toolResultBlocks(Array.from({ length: count }, (_, i) => result(`old${i}`, bytes)), []).map((b) => ({ role: "user" as const, content: [b] })),
+    ];
+    const kinds = (b: ReturnType<typeof toolResultBlocks>[number]) => (typeof b.content === "string" ? "text only" : b.content!.map((p) => p.type).join("+"));
+
+    // Room for one more: the first image of the turn gets in, the second doesn't.
+    const [first, second] = toolResultBlocks([result("a", 3), result("b", 3)], history(CONVERSATION_MAX_IMAGES - 1, 3));
+    assert.equal(kinds(first), "text+image");
+    assert.equal(kinds(second), "text only");
+    assert.equal(second.is_error, true);
+    assert.match(second.content as string, new RegExp(`^b\\.png\\n\\[ASO\\] Image not shown: this conversation already holds ${CONVERSATION_MAX_IMAGES} images \\(0\\.0 MB\\), and it may hold at most ${CONVERSATION_MAX_IMAGES} images or 12 MB of images\\.`));
+
+    // The byte limit counts too: two 6 MB images fill it.
+    const big = CONVERSATION_MAX_IMAGE_BYTES / 2;
+    assert.equal(kinds(toolResultBlocks([result("c", 3)], history(2, big))[0]), "text only");
+    assert.equal(kinds(toolResultBlocks([result("c", 3)], history(1, big))[0]), "text+image");
+    // Results without an image are untouched.
+    assert.deepEqual(toolResultBlocks([{ toolUseId: "d", content: "ok", isError: false }], history(CONVERSATION_MAX_IMAGES, 3)), [
+      { type: "tool_result", tool_use_id: "d", is_error: false, content: "ok" },
+    ]);
   });
 
   it("warns the agent in its last turns, after the turn's tool results", () => {

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CONVERSATION_MAX_IMAGES, IMAGE_MAX_BYTES } from "./constants.js";
 import {
   MAX_PACKAGES_PER_REQUEST,
   NpmPackageNameSchema,
@@ -41,6 +42,14 @@ export const AGENT_TOOLS = {
       path: RepoPathSchema.optional().describe("Directory or file to restrict the search to"),
       ignore_case: z.boolean().optional(),
     }),
+  },
+  view_image: {
+    description:
+      "Look at an image file in the project (PNG, JPEG, GIF or WebP, up to " + IMAGE_MAX_BYTES / 1_000_000 + " MB), e.g. a screenshot " +
+      "you saved with run_command (a Playwright script or test that calls page.screenshot). Use it to check how a visual " +
+      "change looks. Every image stays in the conversation and costs input on each later turn, so screenshot just the part " +
+      "you need at normal scale; a conversation holds at most " + CONVERSATION_MAX_IMAGES + " images.",
+    input: z.strictObject({ path: RepoPathSchema }),
   },
   write_file: {
     description: "Create or overwrite a file with the given content. Parent directories are created.",
