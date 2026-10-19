@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { IMAGE_MAX_BYTES, QA_SCREENSHOTS_MAX, QA_SCREENSHOTS_MAX_BYTES } from "@aso/shared";
-import { collectScreenshots, hasScreenshotScript } from "@aso/worker";
+import { collectScreenshots, hasScreenshotScript, missingViews } from "@aso/worker";
 
 let dir: string;
 beforeEach(() => (dir = mkdtempSync(path.join(os.tmpdir(), "aso-shots-"))));
@@ -66,5 +66,23 @@ describe("QA screenshots (worker)", () => {
 
   it("returns nothing for a missing folder", async () => {
     assert.deepEqual(await collectScreenshots(path.join(dir, "missing")), { screenshots: [], skipped: [] });
+  });
+});
+
+describe("missingViews", () => {
+  const view = (name: string) => ({ name, path: "/" });
+
+  it("names the listed views without a saved <name>.png, in list order", () => {
+    const saved = [{ name: "review-dark.png" }, { name: "extra.png" }];
+    assert.deepEqual(missingViews([view("running-light"), view("review-dark"), view("running-dark")], saved), ["running-light", "running-dark"]);
+  });
+
+  it("is empty when every view was saved or none were listed", () => {
+    assert.deepEqual(missingViews([view("a")], [{ name: "a.png" }]), []);
+    assert.deepEqual(missingViews(undefined, [{ name: "a.png" }]), []);
+  });
+
+  it("does not count an image of another type as the view", () => {
+    assert.deepEqual(missingViews([view("a")], [{ name: "a.jpg" }]), ["a"]);
   });
 });

@@ -353,6 +353,7 @@ writeFileSync(path.join(dir, "notes.txt"), "not an image");
         const targets = [
           { name: "page-dark", path: "/tasks/t-1", theme: "dark" as const },
           { name: "page-phone", path: "/tasks/t-1", width: 412, selector: "#shots", state: "with-screenshots" },
+          { name: "page-broken", path: "/broken" },
         ];
         const executor: TaskExecutor = {
           async implement(_t, { repoDir }) {
@@ -373,6 +374,7 @@ writeFileSync(path.join(dir, "notes.txt"), "not an image");
           assert.deepEqual(record.screenshotTargets, targets);
           // The script saved one image per view, named after it: it got the list.
           assert.deepEqual(record.screenshots?.files.map((f) => f.name), ["page-dark.png", "page-phone.png"]);
+          assert.equal(record.qaSummary, "`npm test` passed; 2 screenshots, views not saved (1 of 3): page-broken");
         } finally {
           dev.stop();
           qa.stop();
@@ -387,7 +389,7 @@ writeFileSync(path.join(dir, "notes.txt"), "not an image");
 import { writeFileSync } from "node:fs";
 import path from "node:path";
 const targets = JSON.parse(process.env.ASO_SCREENSHOT_TARGETS ?? "[]");
-for (const t of targets) writeFileSync(path.join(process.env.ASO_SCREENSHOT_DIR, t.name + ".png"), Buffer.from("${"${PNG}"}", "base64"));
+for (const t of targets.filter((t) => t.path !== "/broken")) writeFileSync(path.join(process.env.ASO_SCREENSHOT_DIR, t.name + ".png"), Buffer.from("${"${PNG}"}", "base64"));
 `.replaceAll("${PNG}", PNG_1X1),
         },
       },

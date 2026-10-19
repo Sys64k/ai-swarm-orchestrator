@@ -785,7 +785,9 @@ views (`ScreenshotTarget`: `name`, `path`, optional `theme`, `width`, `height`, 
 `state`), which rides on `STATUS_UPDATE completed` as `screenshotTargets`. The Hub keeps it on the
 task, replacing it at each finish, because a rework may change something else, and sends it with
 `TEST_EXECUTION`. The worker passes it to the script as JSON in `ASO_SCREENSHOT_TARGETS`. Without a
-list, the variable is unset and the script takes its default views. The project's script decides
+list, the variable is unset and the script takes its default views. Listed views without a
+saved `<name>.png` are named in the QA summary (`missingViews`), and the script's output goes to the
+worker's log. The project's script decides
 how to start the app and show each view; the schema keeps names plain and paths app-relative.
 
 The Hub keeps one set per task in `<stateDir>/screenshots/<taskId>/` (`Screenshots`), and the

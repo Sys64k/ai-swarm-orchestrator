@@ -621,7 +621,8 @@ the result next to the diff:
    a screenshots script for a project with a UI that has none.
 3. **Limits.** QA keeps up to 12 PNG, JPEG, GIF or WebP files from the top of that folder, in
    name order: up to 2 MB each and 4 MB together. Names may use letters, digits and `._-`.
-   The QA summary says what was left out and why.
+   The QA summary says what was left out and why, and names the listed views the script did not
+   save (its output, with the reasons, is in the QA worker's log).
 4. **Never a failure.** A screenshots script that fails or times out (5 minutes) is noted in
    the QA summary; the tests passed, so QA still passes.
 5. **Where to see them.** The task's page in the console has a **Screenshots** tab. The pull

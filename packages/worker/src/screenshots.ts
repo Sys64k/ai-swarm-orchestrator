@@ -1,6 +1,14 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import { IMAGE_MAX_BYTES, QA_SCREENSHOTS_MAX, QA_SCREENSHOTS_MAX_BYTES, SCREENSHOT_SCRIPT, ScreenshotNameSchema, type MessageOf } from "@aso/shared";
+import {
+  IMAGE_MAX_BYTES,
+  QA_SCREENSHOTS_MAX,
+  QA_SCREENSHOTS_MAX_BYTES,
+  SCREENSHOT_SCRIPT,
+  ScreenshotNameSchema,
+  type MessageOf,
+  type ScreenshotTarget,
+} from "@aso/shared";
 import { probeImage } from "./agent/image.js";
 
 export type Screenshot = NonNullable<Extract<MessageOf<"FEEDBACK_LOOP">["payload"], { outcome: "pass" }>["screenshots"]>[number];
@@ -55,4 +63,13 @@ export async function collectScreenshots(dir: string): Promise<{ screenshots: Sc
     screenshots.push({ name, mediaType: image.mediaType, data: buf.toString("base64") });
   }
   return { screenshots, skipped };
+}
+
+/**
+ * The views the developer listed that the script did not save (no `<name>.png` among the kept
+ * screenshots), in list order, so the reviewer knows what is missing rather than just a count.
+ */
+export function missingViews(targets: readonly ScreenshotTarget[] | undefined, screenshots: readonly Pick<Screenshot, "name">[]): string[] {
+  const saved = new Set(screenshots.map((s) => s.name));
+  return (targets ?? []).map((t) => t.name).filter((name) => !saved.has(`${name}.png`));
 }
