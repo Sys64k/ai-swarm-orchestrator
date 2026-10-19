@@ -22,7 +22,7 @@ import { AgentGitClient } from "./git/agent-git-client.js";
 const AGENT_CUT_OFF = new Set(["ModelError", "AgentStoppedError"]);
 import { ModelChannel, type ModelReply, type ModelTurn } from "./model-channel.js";
 import { hostRunner, type CommandRunner } from "./sandbox.js";
-import { collectScreenshots, hasScreenshotScript, type Screenshot } from "./screenshots.js";
+import { collectScreenshots, hasScreenshotScript, missingViews, type Screenshot } from "./screenshots.js";
 
 const log = createLogger("jobs");
 
@@ -443,8 +443,14 @@ export class JobRunner {
         return { screenshots: [], note: `no screenshots: \`${label}\` ${why}` };
       }
       const { screenshots, skipped } = await collectScreenshots(dir);
-      const count = `${screenshots.length} screenshot${screenshots.length === 1 ? "" : "s"}`;
-      return { screenshots, note: skipped.length ? `${count}, left out: ${skipped.join(", ").slice(0, 1000)}` : count };
+      const missing = missingViews(targets, screenshots);
+      if (missing.length) log.warn(`${label} did not save ${missing.join(", ")}: ${result.output.slice(-2000)}`);
+      const note = [
+        `${screenshots.length} screenshot${screenshots.length === 1 ? "" : "s"}`,
+        ...(skipped.length ? [`left out: ${skipped.join(", ").slice(0, 1000)}`] : []),
+        ...(missing.length ? [`views not saved (${missing.length} of ${targets!.length}): ${missing.join(", ").slice(0, 1000)}`] : []),
+      ].join(", ");
+      return { screenshots, note };
     } catch (err) {
       return { screenshots: [], note: `no screenshots: ${(err as Error).message.slice(0, 500)}` };
     } finally {
