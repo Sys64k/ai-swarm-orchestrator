@@ -91,6 +91,8 @@ export interface TaskRecord {
   waitingReason?: string;
   routing?: { nodeId: string; score: number; reasons: string[] };
   detail?: string;
+  /** What the developer agent said it changed and how it checked it, at its last finish. */
+  summary?: string;
   history: Array<{ at: string; event: string }>;
 }
 
@@ -286,6 +288,7 @@ export class TaskManager {
     task.qaNodeId = undefined;
     task.commit = undefined;
     task.detail = undefined;
+    task.summary = undefined;
     task.review = undefined; // a cancelled task's pull request was closed; the next one is new
     task.conflicts = undefined;
     task.rework = { round: 1, reason: `Retried by a person; ${why}. Your branch may already contain that attempt.` };
@@ -561,6 +564,7 @@ export class TaskManager {
         task.commit = update.commit;
         // Each finish lists the views anew: a rework's change may show elsewhere.
         task.screenshotTargets = update.screenshotTargets;
+        task.summary = update.detail;
         this.note(task, `pushed ${update.commit!.slice(0, 8)}${update.detail ? `: ${update.detail}` : ""}`);
         void this.verify(task, update.commit!);
         this.kick();

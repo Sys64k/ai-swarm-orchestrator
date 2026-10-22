@@ -4,6 +4,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import {
+  AGENT_SUMMARY_MAX,
   PackageChangeSchema,
   SCREENSHOT_DIR_ENV,
   SCREENSHOT_SCRIPT,
@@ -299,7 +300,7 @@ export class JobRunner {
           state: "completed",
           taskId: task.taskId,
           commit: done.commit,
-          detail: result?.summary?.slice(0, 2000),
+          detail: result?.summary?.slice(0, AGENT_SUMMARY_MAX),
           ...(result?.screenshotTargets?.length ? { screenshotTargets: result.screenshotTargets } : {}),
         },
         job,

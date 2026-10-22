@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { describe, it } from "node:test";
 import {
+  AGENT_SUMMARY_MAX,
   AgentMessageSchema,
   IMAGE_MAX_BYTES,
   QA_SCREENSHOTS_MAX,
@@ -123,6 +124,10 @@ describe("AgentMessageSchema", () => {
     issuesOf(frame("STATUS_UPDATE", { state: "in_progress" }));
     issuesOf(frame("STATUS_UPDATE", { state: "completed", taskId: "t1" }));
     assert.ok(parseAgentMessage(frame("STATUS_UPDATE", { state: "completed", taskId: "t1", commit: SHA })).ok);
+    // A finish summary fits whole, up to what `finish` itself accepts.
+    const done = { state: "completed", taskId: "t1", commit: SHA };
+    assert.ok(parseAgentMessage(frame("STATUS_UPDATE", { ...done, detail: "x".repeat(AGENT_SUMMARY_MAX) })).ok);
+    issuesOf(frame("STATUS_UPDATE", { ...done, detail: "x".repeat(AGENT_SUMMARY_MAX + 1) }));
   });
 
   it("requires failures on a failing FEEDBACK_LOOP", () => {

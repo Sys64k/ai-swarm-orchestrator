@@ -1282,6 +1282,10 @@
           "detail": {
             "type": "string"
           },
+          "summary": {
+            "description": "What the developer agent said it changed and how it checked it, at its last finish",
+            "type": "string"
+          },
           "createdAt": {
             "type": "string",
             "description": "ISO 8601 time"

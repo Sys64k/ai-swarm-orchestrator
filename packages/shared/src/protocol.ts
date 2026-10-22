@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { IMAGE_MAX_BYTES, IMAGE_MEDIA_TYPES, QA_SCREENSHOTS_MAX, QA_SCREENSHOTS_MAX_BYTES } from "./constants.js";
+import { AGENT_SUMMARY_MAX, IMAGE_MAX_BYTES, IMAGE_MEDIA_TYPES, QA_SCREENSHOTS_MAX, QA_SCREENSHOTS_MAX_BYTES } from "./constants.js";
 
 // ---------------------------------------------------------------------------
 // Primitives
@@ -305,7 +305,8 @@ const StatusUpdatePayload = z
   .strictObject({
     state: z.enum(TASK_STATES),
     taskId: TaskIdSchema.optional(),
-    detail: z.string().max(2000).optional(),
+    /** With `completed`, the agent's summary of the change, so it holds a whole one. */
+    detail: z.string().max(AGENT_SUMMARY_MAX).optional(),
     /** Set with `completed`: the pushed head of `task/<id>`. */
     commit: CommitShaSchema.optional(),
     /** The job slot (desk) running the job, from 1; sent with `in_progress`. */

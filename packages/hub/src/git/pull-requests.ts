@@ -279,10 +279,12 @@ export function pullRequestBody(task: TaskRecord, consoleUrl?: string): string {
   const s = task.spec;
   const criteria = s.acceptanceCriteria.length ? ["", "**Acceptance criteria**", ...s.acceptanceCriteria.map((c) => `- ${c}`)] : [];
   const files = task.filesTouched.length ? ["", `**Files** (${task.filesTouched.length})`, ...task.filesTouched.slice(-30).map((f) => `- \`${f}\``)] : [];
+  const summary = task.summary?.trim() ? ["", "**What the agent did**", "", task.summary.trim()] : [];
   const rounds = roundsNote(task);
   return [
     s.description.trim(),
     ...criteria,
+    ...summary,
     ...files,
     "",
     `**QA:** ${task.qaSummary ?? "not run"}`,

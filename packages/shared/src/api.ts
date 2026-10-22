@@ -261,6 +261,7 @@ export const TaskSchema = z.object({
   waitingReason: z.string().optional().describe("Why a queued task is not running yet"),
   routing: z.object({ nodeId: z.string(), score: z.number(), reasons: z.array(z.string()) }).optional().describe("Why its worker was chosen"),
   detail: z.string().optional(),
+  summary: z.string().optional().describe("What the developer agent said it changed and how it checked it, at its last finish"),
   createdAt: Timestamp,
   updatedAt: Timestamp,
   history: HistorySchema,

@@ -237,12 +237,12 @@ function withGitHub(fn: (ctx: HubContext) => Promise<void>, opts: Record<string,
 }
 
 /** `dev` implements `taskId` with `files`, and `qa` passes it. */
-async function implementAndPass(ctx: HubContext, dev: TestClient, qa: TestClient, taskId: string, files: Record<string, string>): Promise<string> {
+async function implementAndPass(ctx: HubContext, dev: TestClient, qa: TestClient, taskId: string, files: Record<string, string>, summary?: string): Promise<string> {
   const assignment = await dev.next();
   assert.ok(assignment.type === "TASK_ASSIGNMENT" && assignment.payload.taskId === taskId, `assigned ${taskId}`);
   dev.send(createMessage("STATUS_UPDATE", "dev", { state: "in_progress", taskId }));
   const commit = await pushTaskBranch(ctx.gitUrl, taskId, files);
-  dev.send(createMessage("STATUS_UPDATE", "dev", { state: "completed", taskId, commit }));
+  dev.send(createMessage("STATUS_UPDATE", "dev", { state: "completed", taskId, commit, ...(summary ? { detail: summary } : {}) }));
   const run = await qa.next();
   assert.ok(run.type === "TEST_EXECUTION" && run.payload.commit === commit);
   qa.send(createMessage("STATUS_UPDATE", "qa", { state: "in_progress", taskId }));
@@ -297,15 +297,19 @@ describe("pull requests on GitHub", () => {
       const mainBefore = git(ctx.repoDir, "rev-parse", "main");
       await postTask(ctx.port, task("greet", { acceptanceCriteria: ["says hello"] }));
       await postTask(ctx.port, task("follow", { dependsOn: ["greet"] }));
-      const commit = await implementAndPass(ctx, dev, qa, "greet", { "greeting.txt": "hello\n" });
+      // Longer than the 2,000 characters a status update once held, ending in a marker.
+      const summary = `Added greeting.txt. ${"Checked it. ".repeat(250)}The end.`;
+      const commit = await implementAndPass(ctx, dev, qa, "greet", { "greeting.txt": "hello\n" }, summary);
 
       const t = await reviewed(ctx, "greet");
+      assert.equal(t.summary, summary, "the whole summary reached the Hub");
       assert.equal(git(ctx.originDir!, "rev-parse", "refs/heads/task/greet"), commit, "the branch is on GitHub");
       assert.equal(git(ctx.repoDir, "rev-parse", "main"), mainBefore, "nothing merged on the Hub");
       const pull = github.pulls.get(t.review!.pr!.number)!;
       assert.deepEqual([pull.title, pull.head, pull.base], ["Task greet", "task/greet", "main"]);
       assert.match(pull.body, /Build greet\./);
       assert.match(pull.body, /- says hello/);
+      assert.ok(pull.body.includes(`**What the agent did**\n\n${summary}\n`), "the agent's whole summary is in the pull request");
       assert.match(pull.body, /\*\*QA:\*\* 12 tests passed/);
       assert.match(pull.body, /requests changes\*\* \(on a pull request you opened yourself, GitHub only offers \*\*Comment\*\*/);
       assert.equal(t.review!.pr!.url, `https://github.com/me/shop/pull/${pull.number}`);
@@ -805,6 +809,9 @@ describe("pull request helpers", () => {
     assert.match(body, /^Do it\.\n\n\*\*Files\*\* \(1\)\n- `a\.ts`/);
     assert.match(body, /\*\*Task:\*\* `t1` \(frontend, implementation\), after 2 rework rounds and 1 review round; model cost about \$1\.23/);
     assert.doesNotMatch(body, /Acceptance criteria/);
+    assert.doesNotMatch(body, /What the agent did/, "no summary, no heading");
+    const told = pullRequestBody({ ...t, summary: "  Changed a.ts; tests pass.\n" } as TaskRecord);
+    assert.match(told, /^Do it\.\n\n\*\*What the agent did\*\*\n\nChanged a\.ts; tests pass\.\n\n\*\*Files\*\* \(1\)/);
   });
 });
 

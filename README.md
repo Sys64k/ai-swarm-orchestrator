@@ -566,7 +566,8 @@ Rules:
 
 When a project's `origin` is on GitHub and the Hub has a token (`ASO_GIT_TOKEN`, below), no
 task reaches `main` without you. After QA passes, the Hub pushes the task's branch and opens a
-pull request describing the task, its acceptance criteria, files, QA result and cost. Your
+pull request describing the task, its acceptance criteria, what the agent says it did (its whole
+summary), files, QA result and cost. Your
 phone gets a notification, and the task shows **Review** under *Needs you* in the console.
 
 **Review in the console.** The task's page opens on its **Changes**: every file it changes,

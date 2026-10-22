@@ -62,6 +62,8 @@ export const SCREENSHOT_DIR_ENV = "ASO_SCREENSHOT_DIR";
  * the views its change affects; unset otherwise (the script then takes its default views).
  */
 export const SCREENSHOT_TARGETS_ENV = "ASO_SCREENSHOT_TARGETS";
+/** The longest summary an agent may give at `finish`; it reaches the Hub whole, as the task's `summary`. */
+export const AGENT_SUMMARY_MAX = 5000;
 /** At most this many screenshots per QA run, together at most QA_SCREENSHOTS_MAX_BYTES (raw). */
 export const QA_SCREENSHOTS_MAX = 12;
 /** How long the screenshots script may run after the tests passed. */
