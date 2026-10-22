@@ -399,9 +399,11 @@ the same account. The console works from anywhere at `https://<machine>.<tailnet
 The Hub can notify your phone when:
 - a plan is ready for your approval, or the Architect has questions,
 - a task fails, or planning fails,
-- all of a plan's tasks are merged (or a task submitted on its own is merged).
+- all of a plan's tasks are merged (or a task submitted on its own is merged),
+- a worker machine has been offline for 10 minutes, and again when it is back. The Hub
+  remembers its machines across restarts, so one that never reconnects is still reported.
 
-Tapping a notification opens that plan or task in the console. To turn them on, open the console
+Tapping a notification opens that plan or task (or, for a worker, the home page) in the console. To turn them on, open the console
 at its **https** address (Tailscale, above), tap **Notifications** at the bottom of the home
 page, then **Turn on notifications**, and **Send a test**. Do this on each device you want
 notified.

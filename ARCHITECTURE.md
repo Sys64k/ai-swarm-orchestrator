@@ -133,7 +133,7 @@ flowchart LR
 | | `protocol.ts` | `AgentMessageSchema`, task and hardware schemas, `PROTECTED_FILENAMES`, `TASK_REF_PATTERN` |
 | | `hub-address.ts` | `resolveHubUrl` (ws URL), `hubGitUrl` (Git URL from the same host and port) |
 | `@aso/hub` | `dependencies.ts` | `DependencyManager` (ownership, allowlist, limits, dedup) and `npmInstaller` |
-| | `push/notifier.ts`, `push/web-push.ts` | `Notifier` (subscriptions, `notableChanges`) and Web Push delivery (RFC 8291 encryption, VAPID) with `node:crypto` |
+| | `push/notifier.ts`, `push/workers.ts`, `push/web-push.ts` | `Notifier` (subscriptions, `notableChanges`), `WorkerWatch` (worker machines offline and back) and Web Push delivery (RFC 8291 encryption, VAPID) with `node:crypto` |
 | | `server.ts` | HTTP API, WebSocket validation pipeline, Git route, liveness and reclaim sweep |
 | | `registry.ts` | `NodeRegistry`: connected nodes, heartbeats, the jobs each runs (up to its slots), drain/restart, automatic updates |
 | | `routing.ts` | `selectNode()`: a pure, deterministic routing function |
@@ -614,6 +614,14 @@ sequenceDiagram
   - a plan or task becomes `failed`
   - a task becomes `merged`, either as the last task of its plan ("plan done") or as a task
     that isn't part of any plan
+- **Worker machines going offline.** `WorkerWatch` (`hub/src/push/workers.ts`) follows
+  workers by hostname, since a worker gets a new node id on every connection. When a machine's
+  last worker has been gone for 10 minutes (`WORKER_OFFLINE_ALERT_MS`, long enough to ride out
+  restarts, self-updates and short sleeps), it sends "Worker <host> is offline" once; when a
+  worker from that host registers again, "Worker <host> is back" replaces it (same tag). The
+  sweep that times out stale nodes runs the check. Known hosts are kept in `workers.json`
+  beside `push.json`, so a machine that never reconnects after a Hub restart is still reported,
+  counted from the restart. A host gone 14 days (`WORKER_FORGET_MS`) is forgotten.
 - **No replays.** A record seen for the first time (Hub start, a restored task) never notifies,
   so restarts don't repeat old news.
 - **No push library.** `hub/src/push/web-push.ts` implements RFC 8291 payload encryption

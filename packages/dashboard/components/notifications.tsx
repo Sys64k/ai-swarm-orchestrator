@@ -96,8 +96,8 @@ export function Notifications() {
       <TopBar title="Notifications" back="/" />
       <main className="page">
         <p className="muted">
-          Get a notification on this device when a plan is ready for your approval, a task or plan fails, or all of a plan&apos;s
-          tasks are merged. Tapping it opens the plan or task.
+          Get a notification on this device when a plan is ready for your approval, a task or plan fails, all of a plan&apos;s
+          tasks are merged, or a worker machine goes offline and comes back. Tapping it opens the plan or task.
         </p>
         {error && <Banner tone="bad">{error}</Banner>}
         {!status && !error && <p className="muted">Checking this device…</p>}
