@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CONVERSATION_MAX_IMAGES, IMAGE_MAX_BYTES, QA_SCREENSHOTS_MAX } from "./constants.js";
+import { AGENT_SUMMARY_MAX, CONVERSATION_MAX_IMAGES, IMAGE_MAX_BYTES, QA_SCREENSHOTS_MAX } from "./constants.js";
 import {
   MAX_PACKAGES_PER_REQUEST,
   NpmPackageNameSchema,
@@ -117,7 +117,7 @@ export const AGENT_TOOLS = {
       "Call when the task is complete. Your changes are committed with commit_message and sent to QA. " +
       "Do not call it before the work is done and checked.",
     input: z.strictObject({
-      summary: z.string().min(1).max(5000).describe("What you changed and how you verified it"),
+      summary: z.string().min(1).max(AGENT_SUMMARY_MAX).describe("What you changed and how you verified it"),
       commit_message: z.string().min(1).max(500).describe("Conventional, imperative commit message"),
       screenshots: ScreenshotTargetsSchema.optional().describe(
         "Only when the project has a \"screenshots\" npm script and your change shows in the UI: the views that show it " +
