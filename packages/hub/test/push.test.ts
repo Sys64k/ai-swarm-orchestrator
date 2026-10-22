@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, wri
 import path from "node:path";
 import { describe, it } from "node:test";
 import {
+  duration,
   encryptPayload,
   generateVapidKeys,
   MAX_PAYLOAD_BYTES,
@@ -12,7 +13,11 @@ import {
   sendPush,
   startHub,
   vapidAuthorization,
+  WorkerWatch,
+  WORKER_FORGET_MS,
+  WORKER_OFFLINE_ALERT_MS,
   type PlanRecord,
+  type Registration,
   type PushNotification,
   type PushResult,
   type TaskRecord,
@@ -246,6 +251,106 @@ describe("Notifier", () => {
   });
 });
 
+describe("WorkerWatch", () => {
+  const MIN = 60_000;
+  const on = (hostname: string) => ({ nodeKind: "worker", hardware: { hostname } }) as unknown as Registration;
+  const t0 = Date.parse("2026-10-22T08:00:00Z");
+
+  it("alerts once when a machine stays gone, and says when it is back", async () => {
+    const w = await WorkerWatch.open({ now: t0 });
+    assert.equal(w.registered("avalon-1", on("avalon"), t0), undefined, "a first connection is not news");
+    w.dropped("avalon-1", on("avalon"), t0 + MIN);
+    assert.deepEqual(w.check(t0 + 10 * MIN), [], "not gone long enough");
+    const [alert, ...rest] = w.check(t0 + 11 * MIN);
+    assert.equal(rest.length, 0);
+    assert.deepEqual(alert, {
+      title: "Worker avalon is offline",
+      body: "Last seen 10 min ago. Its tasks wait for another worker. On avalon, `aso service status` shows why.",
+      url: "/",
+      tag: "worker-avalon",
+    });
+    assert.deepEqual(w.check(t0 + 60 * MIN), [], "one alert per outage");
+    assert.deepEqual(w.registered("avalon-2", on("avalon"), t0 + 3 * 60 * MIN), {
+      title: "Worker avalon is back",
+      body: "It was offline for 3 h.",
+      url: "/",
+      tag: "worker-avalon",
+    });
+    w.dropped("avalon-2", on("avalon"), t0 + 4 * 60 * MIN);
+    assert.equal(w.check(t0 + 4 * 60 * MIN + 10 * MIN).length, 1, "a new outage alerts again");
+  });
+
+  it("stays quiet through a quick reconnect, including one that overlaps the old connection", async () => {
+    const w = await WorkerWatch.open({ now: t0 });
+    w.registered("avalon-1", on("avalon"), t0);
+    w.registered("avalon-2", on("avalon"), t0 + MIN); // the new connection arrives before the old one times out
+    w.dropped("avalon-1", on("avalon"), t0 + 2 * MIN);
+    assert.deepEqual(w.check(t0 + 60 * MIN), [], "a worker from avalon is still connected");
+    w.dropped("avalon-2", on("avalon"), t0 + 61 * MIN);
+    assert.equal(w.registered("avalon-3", on("avalon"), t0 + 65 * MIN), undefined, "back before any alert: nothing to say");
+    assert.deepEqual(w.check(t0 + 120 * MIN), []);
+    w.dropped("unknown-node", on("avalon"), t0 + 121 * MIN);
+    assert.deepEqual(w.check(t0 + 240 * MIN), [], "a node it never saw changes nothing");
+    assert.equal(w.registered("arch", { nodeKind: "architect" } as Registration, t0), undefined, "the Architect is not a worker machine");
+  });
+
+  it("remembers machines across Hub restarts, alerting once for one that never comes back", async () => {
+    const dir = tempDir("aso-workers-");
+    try {
+      const first = await WorkerWatch.open({ dir, now: t0 });
+      first.registered("canfod-1", on("canfod"), t0);
+      first.registered("avalon-1", on("avalon"), t0);
+      first.dropped("canfod-1", on("canfod"), t0 + MIN);
+      await new Promise((r) => setTimeout(r, 50)); // let the save land
+      const restart = t0 + 2 * MIN;
+      const second = await WorkerWatch.open({ dir, now: restart });
+      assert.deepEqual(second.check(restart + 9 * MIN), [], "counted from the restart: workers get time to reconnect");
+      second.registered("avalon-2", on("avalon"), restart + 5 * MIN);
+      const alerts = second.check(restart + 10 * MIN);
+      assert.deepEqual(alerts.map((n) => n.title), ["Worker canfod is offline"]);
+      assert.match(alerts[0].body, /^Last seen 11 min ago\./);
+      await new Promise((r) => setTimeout(r, 50));
+      const third = await WorkerWatch.open({ dir, now: restart + 20 * MIN });
+      third.registered("avalon-3", on("avalon"), restart + 21 * MIN);
+      assert.deepEqual(third.check(restart + 40 * MIN), [], "already announced before the restart");
+      assert.equal(third.registered("canfod-2", on("canfod"), restart + 50 * MIN)?.title, "Worker canfod is back");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("forgets a machine gone for weeks, and starts afresh on an unreadable file", async () => {
+    const dir = tempDir("aso-workers-");
+    try {
+      const w = await WorkerWatch.open({ dir, now: t0 });
+      w.registered("old-1", on("old"), t0);
+      w.dropped("old-1", on("old"), t0);
+      assert.equal(w.check(t0 + WORKER_OFFLINE_ALERT_MS).length, 1);
+      assert.deepEqual(w.check(t0 + WORKER_FORGET_MS), []);
+      await new Promise((r) => setTimeout(r, 50));
+      assert.deepEqual(JSON.parse(readFileSync(path.join(dir, "workers.json"), "utf8")), {}, "forgotten for good");
+
+      writeFileSync(path.join(dir, "workers.json"), "{not json");
+      const fresh = await WorkerWatch.open({ dir, now: t0 });
+      assert.deepEqual(fresh.check(t0 + WORKER_FORGET_MS - 1), []);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("words durations briefly", () => {
+    assert.deepEqual([0, 59_000, 59 * 60_000, 60 * 60_000, 47 * 3_600_000, 48 * 3_600_000, 70 * 3_600_000].map(duration), [
+      "1 min",
+      "1 min",
+      "59 min",
+      "1 h",
+      "47 h",
+      "2 days",
+      "3 days",
+    ]);
+  });
+});
+
 describe("push notifications from the Hub", () => {
   const call = (port: number, route: string, body?: unknown) =>
     fetch(`http://127.0.0.1:${port}${route}`, {
@@ -310,6 +415,32 @@ describe("push notifications from the Hub", () => {
 
       assert.deepEqual((await call(hub.port, "/api/push/subscriptions/delete", { endpoint: phone.sub.endpoint })).body, { removed: true, devices: 0 });
       assert.ok(existsSync(path.join(root, ".aso", "push.json")), "keys live with the Hub-wide state");
+    } finally {
+      await hub.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("tells the phone when a worker machine goes offline and when it is back", async () => {
+    const root = tempDir("aso-root-");
+    const repo = makeTargetRepo();
+    git(root, "clone", "--quiet", repo, "shop");
+    rmSync(repo, { recursive: true, force: true });
+    const sent: PushNotification[] = [];
+    const send = (async (_s: PushSubscriptionJson, n: PushNotification) => (sent.push(n), { ok: true })) as unknown as typeof sendPush;
+    const hub = await startHub({ projectsRoot: root, port: 0, host: "127.0.0.1", token: TOKEN, sync: { enabled: false }, push: { send, workerOfflineMs: 150 } });
+    try {
+      await call(hub.port, "/api/push/subscriptions", browser().sub);
+      const first = await worker(hub.port, "avalon-1", { hostname: "avalon" });
+      first.ws.close();
+      const offline = await waitFor(() => sent.find((n) => n.tag === "worker-avalon"), 5_000, "offline alert");
+      assert.equal(offline.title, "Worker avalon is offline");
+      const again = await worker(hub.port, "avalon-2", { hostname: "avalon" });
+      const back = await waitFor(() => sent.find((n) => n.title === "Worker avalon is back"), 5_000, "back notification");
+      assert.equal(back.url, "/");
+      assert.equal(sent.filter((n) => n.tag === "worker-avalon").length, 2, "one alert and one all-clear");
+      again.ws.close();
+      assert.ok(existsSync(path.join(root, ".aso", "workers.json")), "known machines live with the Hub-wide state");
     } finally {
       await hub.close();
       rmSync(root, { recursive: true, force: true });

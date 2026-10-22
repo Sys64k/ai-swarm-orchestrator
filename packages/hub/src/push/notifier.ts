@@ -1,7 +1,8 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { readFile, rename } from "node:fs/promises";
 import path from "node:path";
 import { createLogger, PushSubscriptionSchema, type PushSubscriptionJson } from "@aso/shared";
 import { notableChanges, type ProjectState, type PushNotification } from "./changes.js";
+import { JsonFileWriter } from "./json-file.js";
 import { generateVapidKeys, sendPush, type PushResult, type VapidKeys } from "./web-push.js";
 
 const log = createLogger("push");
@@ -21,7 +22,7 @@ const DEFAULT_SUBJECT = "https://github.com/vaisajuh/ai-swarm-orchestrator";
 /** The message "Send a test" delivers. */
 export const TEST_NOTIFICATION: PushNotification = {
   title: "ASO notifications work",
-  body: "You'll hear about plans to approve, failed tasks and finished plans.",
+  body: "You'll hear about plans to approve, failed tasks, finished plans and workers that go offline.",
   url: "/",
   tag: "test",
 };
@@ -44,13 +45,16 @@ export interface NotifierOptions {
  * gone (uninstalled app, revoked permission) is dropped.
  */
 export class Notifier {
-  private saving: Promise<unknown> = Promise.resolve();
   private readonly seen = new Map<string, string>();
+  /** The file holds the private key, so only the owner can read it. */
+  private readonly writer?: JsonFileWriter;
 
   private constructor(
     private readonly data: PushFile,
     private readonly opts: NotifierOptions,
-  ) {}
+  ) {
+    if (opts.dir) this.writer = new JsonFileWriter(path.join(opts.dir, "push.json"), 0o600);
+  }
 
   static async open(opts: NotifierOptions = {}): Promise<Notifier> {
     const file = opts.dir && path.join(opts.dir, "push.json");
@@ -129,22 +133,8 @@ export class Notifier {
     return { sent: results.filter((r) => r.ok).length, failed };
   }
 
-  /** Writes are serialised and atomic; the file holds the private key, so only the owner can read it. */
   private save(): Promise<unknown> {
-    const dir = this.opts.dir;
-    if (!dir) return Promise.resolve();
-    const file = path.join(dir, "push.json");
-    const json = JSON.stringify(this.data, null, 2);
-    this.saving = this.saving.then(async () => {
-      try {
-        await mkdir(dir, { recursive: true });
-        await writeFile(`${file}.tmp`, json, { mode: 0o600 });
-        await rename(`${file}.tmp`, file);
-      } catch (err) {
-        log.warn(`could not save ${file}: ${(err as Error).message}`);
-      }
-    });
-    return this.saving;
+    return this.writer?.write(this.data) ?? Promise.resolve();
   }
 }
 

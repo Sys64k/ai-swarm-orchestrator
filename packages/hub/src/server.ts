@@ -47,6 +47,7 @@ import { ProjectError, ProjectSet, type Project } from "./projects.js";
 import { isOutdated, NodeError, NodeRegistry, type NodeEntry, type NodeTransport, type Registration } from "./registry.js";
 import type { RoutingPolicies } from "./routing.js";
 import { Notifier, TEST_NOTIFICATION } from "./push/notifier.js";
+import { WorkerWatch } from "./push/workers.js";
 import type { sendPush } from "./push/web-push.js";
 import { SignInCodes } from "./sign-in-codes.js";
 import { StateStore } from "./state-store.js";
@@ -115,7 +116,12 @@ export interface HubOptions {
     gitUrl?: (slug: { owner: string; repo: string }) => string;
   };
   /** Push notifications. `send` replaces real delivery (tests); the contact defaults to ASO_PUSH_CONTACT. */
-  push?: { send?: typeof sendPush; contact?: string };
+  push?: {
+    send?: typeof sendPush;
+    contact?: string;
+    /** How long a worker machine may be gone before the alert (tests). */
+    workerOfflineMs?: number;
+  };
   llm?: {
     /** Defaults to the Anthropic API adapter when ANTHROPIC_API_KEY is set; otherwise no LLM. */
     adapter?: LlmAdapter;
@@ -189,6 +195,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   notifier = await Notifier.open({ dir: conversationDir, subject: opts.push?.contact ?? (process.env.ASO_PUSH_CONTACT || undefined), send: opts.push?.send });
   // Remember every record's current state, so only what changes from now on notifies.
   for (const p of projects.list()) notifier.observe({ id: p.id, tasks: p.tasks.list(), plans: p.plans.list() });
+  const workerWatch = await WorkerWatch.open({ dir: conversationDir, alertMs: opts.push?.workerOfflineMs });
   const llm = opts.llm ?? {};
   const model = llm.model ?? "claude-opus-5-5";
   const anthropic = (id: string) =>
@@ -220,7 +227,9 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
 
   /** Idempotent: safe to call from both the timeout sweep and the socket close event. */
   const dropNode = (nodeId: string, transport: NodeTransport) => {
-    if (!registry.unregister(nodeId, transport)) return;
+    const gone = registry.unregister(nodeId, transport);
+    if (!gone) return;
+    workerWatch.dropped(nodeId, gone.registration);
     for (const p of projects.list()) {
       p.tasks.handleNodeGone(nodeId);
       p.plans.handleNodeGone(nodeId);
@@ -272,6 +281,8 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
           : `architect ${msg.from} registered`,
       );
       registry.send(msg.from, "REGISTRATION_ACK", { nodeId: msg.from });
+      const back = workerWatch.registered(msg.from, p);
+      if (back) void notifier.send(back);
       for (const project of projects.list()) project.tasks.nodeRegistered(msg.from, runningJobsOf(p));
       // After the jobs it still runs are handed back: an update waits for them.
       checkVersion(msg.from, p);
@@ -747,7 +758,9 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     }
     for (const p of projects.list()) p.tasks.sweepDetached();
     conversations.sweep();
-  }, Math.min(15_000, nodeTimeoutMs, opts.reclaimGraceMs ?? Infinity));
+    for (const n of workerWatch.check()) void notifier.send(n);
+    // Often enough for whichever of these delays is shortest (tests shorten them).
+  }, Math.min(15_000, nodeTimeoutMs, opts.reclaimGraceMs ?? Infinity, opts.push?.workerOfflineMs ?? Infinity));
   sweep.unref();
 
   return {
