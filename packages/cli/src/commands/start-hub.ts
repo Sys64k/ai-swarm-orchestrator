@@ -4,6 +4,7 @@ import path from "node:path";
 import { ARCHITECT_TMUX_SESSION, createLogger, resolveToken } from "@aso/shared";
 import { startHub, type Effort } from "@aso/hub";
 import { gitBuildId, layout } from "../layout.js";
+import { startDeployRunner, type DeployRunner } from "../deploy-runner.js";
 import { runsAsSystemdService } from "../service.js";
 
 const log = createLogger("cli");
@@ -55,6 +56,8 @@ export async function startHubCommand(opts: StartHubOptions): Promise<void> {
     allowDependencies: parseList(opts.allowDeps),
     dist: { version: () => layout.distVersion(), tarball: () => layout.distTarball() },
     autoUpdate: process.env.ASO_AUTO_UPDATE !== "0",
+    // In a container (`--docker`), deploy commands run on the host by the CLI that started it.
+    deploy: process.env.ASO_DEPLOY_RUNNER === "host" ? { runner: "host" } : undefined,
     llm: {
       model: opts.model,
       agentModel: opts.agentModel,
@@ -118,19 +121,22 @@ async function startHubInDocker(root: string, opts: StartHubOptions, token: stri
       ASO_PLAN_BUDGET: String(opts.planBudget),
       ASO_MAX_TURNS: String(opts.maxTurns),
       ASO_LLM_CONCURRENCY: String(opts.llmConcurrency),
+      ASO_DEPLOY_RUNNER: "host",
     },
   });
   const exited = new Promise<number>((resolve) => compose.on("exit", (code) => resolve(code ?? 1)));
   log.info(`starting Hub container (first run builds the image; this can take a few minutes)`);
 
   let architect: Architect | undefined;
-  if (opts.architect) {
-    const healthy = await waitForHealth(`http://127.0.0.1:${opts.port}/api/health`, exited);
-    if (healthy) architect = launchArchitect(opts.port);
+  let deploys: DeployRunner | undefined;
+  if (await waitForHealth(`http://127.0.0.1:${opts.port}/api/health`, exited)) {
+    if (opts.architect) architect = launchArchitect(opts.port);
+    deploys = startDeployRunner({ hubUrl: `http://127.0.0.1:${opts.port}`, token, root });
   }
 
   onShutdown(async (signal) => {
     architect?.stop();
+    deploys?.stop();
     // Ctrl+C already reached compose via the terminal's process group; a second SIGINT would
     // make compose force-kill the container. Only forward signals that came from elsewhere.
     if (signal !== "SIGINT") compose.kill(signal);
@@ -138,6 +144,7 @@ async function startHubInDocker(root: string, opts: StartHubOptions, token: stri
   });
   const code = await exited;
   architect?.stop();
+  deploys?.stop();
   process.exit(code);
 }
 

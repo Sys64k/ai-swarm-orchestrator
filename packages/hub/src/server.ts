@@ -28,6 +28,7 @@ import {
   CreatePlanBodySchema,
   CreateProjectBodySchema,
   CreateTaskBodySchema,
+  DeployResultBodySchema,
   PlanReplyBodySchema,
   RedeemSignInCodeBodySchema,
   RequestChangesBodySchema,
@@ -48,7 +49,7 @@ import { isOutdated, NodeError, NodeRegistry, type NodeEntry, type NodeTransport
 import type { RoutingPolicies } from "./routing.js";
 import { Notifier, TEST_NOTIFICATION } from "./push/notifier.js";
 import { WorkerWatch } from "./push/workers.js";
-import { Deployer, deployNotification } from "./deploy.js";
+import { Deployer, deployNotification, HostDeployQueue } from "./deploy.js";
 import type { sendPush } from "./push/web-push.js";
 import { SignInCodes } from "./sign-in-codes.js";
 import { StateStore } from "./state-store.js";
@@ -117,6 +118,8 @@ export interface HubOptions {
     gitUrl?: (slug: { owner: string; repo: string }) => string;
   };
   /** Push notifications. `send` replaces real delivery (tests); the contact defaults to ASO_PUSH_CONTACT. */
+  /** `host`: a Hub in a container hands deploy commands to the `aso start-hub --docker` process on the host. */
+  deploy?: { runner: "host"; /** Shorter waits (tests). */ queue?: { pickupMs?: number; graceMs?: number } };
   push?: {
     send?: typeof sendPush;
     contact?: string;
@@ -173,6 +176,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   // Set once the Hub-wide state folder is known; changes made while projects load notify nobody.
   let notifier: Notifier | undefined;
   let deployer: Deployer | undefined;
+  const hostDeploys = opts.deploy?.runner === "host" ? new HostDeployQueue(opts.deploy.queue) : undefined;
   const projects = await ProjectSet.open(registry, {
     root: opts.projectsRoot,
     single: opts.targetDir,
@@ -200,7 +204,11 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   for (const p of projects.list()) notifier.observe({ id: p.id, tasks: p.tasks.list(), plans: p.plans.list() });
   const workerWatch = await WorkerWatch.open({ dir: conversationDir, alertMs: opts.push?.workerOfflineMs });
   if (conversationDir) {
-    deployer = new Deployer({ dir: conversationDir, onResult: (project, status) => void notifier?.send(deployNotification(project, status)) });
+    deployer = new Deployer({
+      dir: conversationDir,
+      onResult: (project, status) => void notifier?.send(deployNotification(project, status)),
+      run: hostDeploys?.run,
+    });
     await deployer.load();
   }
   const llm = opts.llm ?? {};
@@ -565,6 +573,16 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     if (!deployer.configured(p.id)) return c.json({ error: `${p.id} has no deploy command in ${shown(deployer.file)}` }, 409);
     deployer.request(p);
     return c.json({ deploying: true }, 202);
+  });
+  app.get("/api/deploys/next", (c) => {
+    if (!hostDeploys) return c.json({ error: "this Hub runs deploys itself" }, 404);
+    return c.json({ job: hostDeploys.next() ?? null });
+  });
+  app.post("/api/deploys/:id/result", async (c) => {
+    const req = await parsed(c, DeployResultBodySchema);
+    if (!req.ok) return c.json({ error: req.error }, 400);
+    if (!hostDeploys?.complete(c.req.param("id"), req.data)) return c.json({ error: "no such deploy job waiting for a result" }, 404);
+    return c.json({ accepted: true });
   });
   app.post("/api/projects", async (c) => {
     const req = await parsed(c, CreateProjectBodySchema);

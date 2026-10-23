@@ -805,7 +805,9 @@ on the Hub machine:
   the console, or a merge on the Hub), and on `POST /api/projects/<id>/deploy`. One deploy per
   project at a time; merges that land meanwhile are deployed together when it ends.
 - **Where it runs.** On the Hub machine, with `sh -c`, in a clean export of `main` at the merged
-  commit (`<projects root>/.aso/deploy/<id>/`, no `.git`). `ASO_DEPLOY_PROJECT`,
+  commit (`<projects root>/.aso/deploy/<id>/`, no `.git`). With `aso start-hub --docker`, the
+  container has no Docker or host tools, so the `aso start-hub` process on the host runs the
+  command: it takes jobs from the Hub (`GET /api/deploys/next`) and reports the result back. `ASO_DEPLOY_PROJECT`,
   `ASO_DEPLOY_COMMIT` and `ASO_DEPLOY_SHORT` (7 characters) say what it is deploying.
 - **What it sees.** Only a few variables of the Hub's environment (`PATH`, `HOME`, `USER`,
   locale, `TMPDIR`, `XDG_RUNTIME_DIR`, `DOCKER_HOST`, `DOCKER_CONFIG`) plus the entry's own
@@ -844,6 +846,8 @@ Answers can gain fields over time: clients should ignore fields they don't know.
 | `GET` | `/api/version` | Version and SHA-256 of the `aso` package this Hub serves (public) |
 | `GET` | `/api/openapi.json` | This API as an OpenAPI 3.1 document (public) |
 | `GET` | `/dist/aso.tgz` | The `aso` package for installing/updating machines (public; contains no secrets) |
+| `GET` | `/api/deploys/next` | For the host runner of a Hub in Docker: take the next deploy job (404 when the Hub runs deploys itself) |
+| `POST` | `/api/deploys/{id}/result` | For the host runner: report how a deploy job went |
 | `POST` | `/api/projects/{id}/deploy` | Deploy the project's `main` now with its command from `deploy.json` (409 without one) |
 | `GET` / `POST` | `/api/sync` | Push status / retry the push of `main` to `origin` |
 | `GET` | `/api/llm` | LLM status: the Architect's and the agents' models, queue, calls and estimated spend since start |

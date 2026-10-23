@@ -151,6 +151,24 @@ export const DeployStatusSchema = z.object({
 
 export const DeployStartedSchema = z.object({ deploying: z.literal(true) });
 
+export const DeployJobSchema = z.object({
+  id: z.string(),
+  project: ProjectIdSchema,
+  commit: z.string(),
+  command: z.object({
+    command: z.string(),
+    timeoutSec: z.number().int().optional(),
+    env: z.record(z.string(), z.string()).optional(),
+  }),
+});
+export const DeployNextSchema = z.object({ job: DeployJobSchema.nullable().describe("The oldest job nobody has taken, or null") });
+export const DeployResultBodySchema = z.strictObject({
+  ok: z.boolean(),
+  error: z.string().max(2000).optional(),
+  output: z.string().max(20_000),
+});
+export const DeployResultAcceptedSchema = z.object({ accepted: z.literal(true) });
+
 export const ProjectSchema = z.object({
   id: ProjectIdSchema,
   dir: z.string(),

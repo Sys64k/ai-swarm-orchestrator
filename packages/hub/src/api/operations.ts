@@ -4,6 +4,9 @@ import {
   CreatePlanBodySchema,
   CreateProjectBodySchema,
   CreateTaskBodySchema,
+  DeployNextSchema,
+  DeployResultAcceptedSchema,
+  DeployResultBodySchema,
   DeployStartedSchema,
   IMAGE_MEDIA_TYPES,
   HealthSchema,
@@ -42,6 +45,7 @@ export const REQUEST_SCHEMAS = {
   ApproveTask: ApproveTaskBodySchema,
   RequestChanges: RequestChangesBodySchema,
   Sync: SyncBodySchema,
+  DeployResult: DeployResultBodySchema,
   RedeemSignInCode: RedeemSignInCodeBodySchema,
   PushSubscription: PushSubscriptionSchema,
   PushEndpoint: PushEndpointSchema,
@@ -57,6 +61,8 @@ export const ANSWER_SCHEMAS = {
   Project: ProjectSchema,
   SyncStatus: SyncStatusSchema,
   DeployStarted: DeployStartedSchema,
+  DeployNext: DeployNextSchema,
+  DeployResultAccepted: DeployResultAcceptedSchema,
   Task: TaskSchema,
   TaskDiff: TaskDiffSchema,
   ReviewChecks: ReviewChecksSchema,
@@ -130,6 +136,14 @@ const PROJECTS: ApiOperation[] = [
   {
     method: "post", path: "/api/projects/{id}/deploy", tag: "Projects", summary: "Deploy the project's main now with its command from the Hub's deploy.json",
     responses: { 202: ok("DeployStarted", "Deploying (or queued after the deploy in progress)"), ...notFound("project"), 409: err("No deploy command for this project") },
+  },
+  {
+    method: "get", path: "/api/deploys/next", tag: "Projects", summary: "For the host runner of a Hub in a container: take the next deploy job",
+    responses: { 200: ok("DeployNext"), 404: err("This Hub runs deploys itself") },
+  },
+  {
+    method: "post", path: "/api/deploys/{id}/result", tag: "Projects", summary: "For the host runner: report how a deploy job it took went", body: "DeployResult",
+    responses: { 200: ok("DeployResultAccepted"), 400: err("Invalid body"), 404: err("No such job waiting for a result") },
   },
   { method: "get", path: "/api/sync", tag: "Projects", summary: "Push status of a project's main", query: projectQuery, responses: { 200: ok("SyncStatus"), ...noProject } },
   {

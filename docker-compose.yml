@@ -33,6 +33,8 @@ services:
       ASO_PLAN_BUDGET: "${ASO_PLAN_BUDGET:-3}"
       ASO_MAX_TURNS: "${ASO_MAX_TURNS:-80}"
       ASO_LLM_CONCURRENCY: "${ASO_LLM_CONCURRENCY:-4}"
+      # `host`: deploy commands are handed to `aso start-hub --docker` on the host (the container has no Docker).
+      ASO_DEPLOY_RUNNER: "${ASO_DEPLOY_RUNNER:-}"
       # Read from the environment of `aso start-hub --docker`; never baked into the image.
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
       ASO_TOKEN: "${ASO_TOKEN:?the CLI passes the Hub token}"

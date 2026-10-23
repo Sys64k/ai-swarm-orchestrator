@@ -1,4 +1,5 @@
 import { execFile, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
@@ -44,10 +45,34 @@ export interface DeployTarget {
   repo: { mainHead(): Promise<string> };
 }
 
+export interface DeployJob {
+  project: string;
+  commit: string;
+  command: DeployCommand;
+}
+
+export interface RunResult {
+  ok: boolean;
+  error?: string;
+  output: string;
+}
+
+/** Runs a job's command in `cwd`, the export of its commit. */
+export type RunDeploy = (job: DeployJob, cwd: string) => Promise<RunResult>;
+
+/** Runs the command here, in the Hub's own process (a Hub that is not in a container). */
+export const runHere: RunDeploy = (job, cwd) =>
+  runCommand(job.command.command, { cwd, env: deployEnv(job.command, job.project, job.commit), timeoutSec: job.command.timeoutSec ?? DEPLOY_TIMEOUT_SEC });
+
+/** Where a job's export is, under the folder that holds `deploy.json`. */
+export const deployWorkDir = (stateDir: string, project: string) => path.join(stateDir, "deploy", project);
+
 export interface DeployerOptions {
   /** Holds `deploy.json`, and `deploy/` for the exports and logs. */
   dir: string;
   onResult?: (project: string, status: DeployStatus) => void;
+  /** Default: `runHere`. A Hub in a container hands jobs to the host instead (`HostDeployQueue`). */
+  run?: RunDeploy;
 }
 
 /**
@@ -138,7 +163,7 @@ export class Deployer {
     if (this.configError) return finish({ state: "failed", error: this.configError });
     if (!status.commit) return finish({ state: "failed", error: "could not read the project's main" });
 
-    const work = path.join(this.opts.dir, "deploy", project.id);
+    const work = deployWorkDir(this.opts.dir, project.id);
     const logFile = `${work}.log`;
     try {
       await exportCommit(project.dir, status.commit, work);
@@ -146,8 +171,7 @@ export class Deployer {
       return finish({ state: "failed", error: `could not export ${short(status.commit)}: ${(err as Error).message}` });
     }
     log.info(`${project.id} @ ${short(status.commit)}: deploying`);
-    const env = deployEnv(command, project.id, status.commit);
-    const result = await runCommand(command.command, { cwd: work, env, timeoutSec: command.timeoutSec ?? DEPLOY_TIMEOUT_SEC });
+    const result = await (this.opts.run ?? runHere)({ project: project.id, commit: status.commit, command }, work);
     await writeFile(logFile, result.output).catch(() => undefined);
     finish(result.ok ? { state: "succeeded", output: result.output } : { state: "failed", error: result.error, output: result.output });
   }
@@ -176,7 +200,7 @@ function exec(file: string, args: string[]): Promise<void> {
 export function runCommand(
   command: string,
   opts: { cwd: string; env: NodeJS.ProcessEnv; timeoutSec: number },
-): Promise<{ ok: boolean; error?: string; output: string }> {
+): Promise<RunResult> {
   return new Promise((resolve) => {
     let output = "";
     const keep = (chunk: Buffer) => {
@@ -220,4 +244,64 @@ export function deployNotification(project: string, status: DeployStatus): PushN
   const lastLines = (status.output ?? "").trim().split("\n").slice(-3).join("\n");
   const body = [`${commit ? `${commit}: ` : ""}${status.error ?? "failed"}`, lastLines].filter(Boolean).join("\n");
   return { ...base, title: `${project}: deploy failed`, body: body.length > 600 ? `${body.slice(0, 599)}…` : body };
+}
+
+/** How long a queued job waits for the host to take it before it fails. */
+export const HOST_PICKUP_MS = 60_000;
+/** How much longer than the command's own timeout the Hub waits for the host's result. */
+const HOST_REPORT_GRACE_MS = 60_000;
+
+interface Pending {
+  job: DeployJob;
+  resolve: (r: RunResult) => void;
+  timer: NodeJS.Timeout;
+}
+
+/**
+ * Deploy jobs for a Hub in a container, which has no Docker or host tools of its own: the
+ * `aso start-hub --docker` process on the host takes them (`GET /api/deploys/next`), runs the
+ * command in the same export (the projects folder is shared) and reports back. A job nobody
+ * takes, or whose result never comes, fails instead of waiting forever.
+ */
+export class HostDeployQueue {
+  private readonly waiting = new Map<string, Pending>();
+  private readonly taken = new Map<string, Pending>();
+
+  constructor(private readonly opts: { pickupMs?: number; graceMs?: number } = {}) {}
+
+  readonly run: RunDeploy = (job) =>
+    new Promise((resolve) => {
+      const id = randomUUID();
+      const timer = setTimeout(() => {
+        this.waiting.delete(id);
+        resolve({ ok: false, error: "no host runner took the job: is `aso start-hub --docker` running on the Hub machine?", output: "" });
+      }, this.opts.pickupMs ?? HOST_PICKUP_MS);
+      this.waiting.set(id, { job, resolve, timer });
+    });
+
+  /** The oldest job nobody has taken yet; taking it starts the wait for its result. */
+  next(): (DeployJob & { id: string }) | undefined {
+    const first = this.waiting.entries().next();
+    if (first.done) return undefined;
+    const [id, pending] = first.value;
+    this.waiting.delete(id);
+    clearTimeout(pending.timer);
+    const waitMs = (pending.job.command.timeoutSec ?? DEPLOY_TIMEOUT_SEC) * 1000 + (this.opts.graceMs ?? HOST_REPORT_GRACE_MS);
+    pending.timer = setTimeout(() => {
+      this.taken.delete(id);
+      pending.resolve({ ok: false, error: "the host runner took the job but never reported a result", output: "" });
+    }, waitMs);
+    this.taken.set(id, pending);
+    return { id, ...pending.job };
+  }
+
+  /** The host's result for a job it took. False for a job this Hub doesn't know (e.g. from before a restart). */
+  complete(id: string, result: RunResult): boolean {
+    const pending = this.taken.get(id);
+    if (!pending) return false;
+    this.taken.delete(id);
+    clearTimeout(pending.timer);
+    pending.resolve(result);
+    return true;
+  }
 }

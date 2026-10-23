@@ -853,6 +853,14 @@ for pull requests merged on GitHub), and on `POST /api/projects/{id}/deploy`.
 - **Reduced environment.** `sh -c` in its own process group, with an allowlist of the Hub's
   environment (`PASSED_ENV`) plus the entry's `env` and `ASO_DEPLOY_*`. The GitHub and Anthropic
   tokens stay with the Hub. On timeout the whole group gets SIGTERM, then SIGKILL.
+- **Hub in a container.** `aso start-hub --docker` sets `ASO_DEPLOY_RUNNER=host`. The Hub
+  still exports and reports, but hands each command to a `HostDeployQueue` instead of running
+  it: the `aso start-hub` process on the host (`cli/src/deploy-runner.ts`, next to the
+  Architect) polls `GET /api/deploys/next` every 3 s, runs the command in the same export
+  (the projects folder is mounted, so `/projects/.aso/deploy/<id>` is `<root>/.aso/deploy/<id>`)
+  with the host's environment allowlist, and posts the result. A job not taken within 60 s, or
+  whose result doesn't come within its timeout plus 60 s, fails with the reason. The container
+  never gets the Docker socket.
 - **Reporting.** The latest result per project is in memory (`deploy.last` on the project), the
   end of the output in `deploy/<id>.log`, and a push notification says deployed or failed
   (tag `deploy-<id>`).
