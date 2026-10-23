@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
-import { Deployer, deployEnv, deployNotification, runCommand, type DeployStatus } from "@aso/hub";
+import { Deployer, deployEnv, deployNotification, HostDeployQueue, runCommand, type DeployStatus } from "@aso/hub";
 import { createMessage } from "@aso/shared";
 import { git, makeTargetRepo, postTask, pushTaskBranch, tempDir, TOKEN, waitFor, withHub, worker } from "./helpers.ts";
 
@@ -143,6 +143,35 @@ describe("Deployer", () => {
   });
 });
 
+describe("HostDeployQueue", () => {
+  const job = { project: "shop", commit: "c".repeat(40), command: { command: "true", timeoutSec: 10 } };
+
+  it("hands jobs out oldest first and resolves each with the host's result", async () => {
+    const q = new HostDeployQueue();
+    assert.equal(q.next(), undefined);
+    const first = q.run(job, "/x");
+    const second = q.run({ ...job, project: "blog" }, "/y");
+    const a = q.next()!;
+    const b = q.next()!;
+    assert.deepEqual([a.project, b.project], ["shop", "blog"]);
+    assert.equal(q.next(), undefined, "each job is taken once");
+    assert.equal(q.complete("unknown", { ok: true, output: "" }), false);
+    assert.ok(q.complete(b.id, { ok: false, error: "exited with code 1", output: "boom" }));
+    assert.ok(q.complete(a.id, { ok: true, output: "done" }));
+    assert.equal(q.complete(a.id, { ok: true, output: "again" }), false, "a result counts once");
+    assert.deepEqual(await first, { ok: true, output: "done" });
+    assert.deepEqual(await second, { ok: false, error: "exited with code 1", output: "boom" });
+  });
+
+  it("fails a job nobody takes, and one whose result never comes", async () => {
+    const q = new HostDeployQueue({ pickupMs: 50, graceMs: 50 });
+    assert.match((await q.run(job, "/x")).error!, /no host runner took the job/);
+    const lost = q.run({ ...job, command: { command: "true", timeoutSec: 0 } }, "/x");
+    assert.ok(q.next());
+    assert.match((await lost).error!, /never reported a result/);
+  });
+});
+
 describe("deploying from the Hub", () => {
   const call = (port: number, route: string, method = "GET") =>
     fetch(`http://127.0.0.1:${port}${route}`, { method, headers: { authorization: `Bearer ${TOKEN}` } }).then(async (r) => ({ status: r.status, body: (await r.json()) as any }));
@@ -184,5 +213,40 @@ describe("deploying from the Hub", () => {
       } finally {
         rmSync(out, { recursive: true, force: true });
       }
+    }));
+
+  it("hands deploys to the host when it runs in a container", () =>
+    withHub(
+      async (ctx) => {
+        const stateDir = path.join(ctx.repoDir, ".git", "aso");
+        mkdirSync(stateDir, { recursive: true });
+        writeFileSync(path.join(stateDir, "deploy.json"), JSON.stringify({ project: { command: "ls", timeoutSec: 30 } }));
+        assert.deepEqual((await call(ctx.port, "/api/deploys/next")).body, { job: null });
+        assert.equal((await call(ctx.port, "/api/projects/project/deploy", "POST")).status, 202);
+        const job = await waitFor(async () => (await call(ctx.port, "/api/deploys/next")).body.job, 5_000, "a job for the host");
+        assert.deepEqual([job.project, job.commit, job.command], ["project", git(ctx.repoDir, "rev-parse", "main"), { command: "ls", timeoutSec: 30 }]);
+        assert.ok(existsSync(path.join(stateDir, "deploy", "project", "README.md")), "the export is ready in the shared folder");
+
+        const post = (body: unknown, id = job.id) =>
+          fetch(`http://127.0.0.1:${ctx.port}/api/deploys/${id}/result`, {
+            method: "POST",
+            headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+            body: JSON.stringify(body),
+          });
+        assert.equal((await post({ ok: true })).status, 400, "output is required");
+        assert.equal((await post({ ok: true, output: "" }, "nope")).status, 404);
+        assert.equal((await post({ ok: true, output: "README.md\n" })).status, 200);
+        const last = await waitFor(async () => {
+          const d = (await call(ctx.port, "/api/projects/project")).body.deploy.last;
+          return d?.state === "succeeded" && d;
+        });
+        assert.equal(last.output, "README.md\n");
+      },
+      { deploy: { runner: "host" } },
+    ));
+
+  it("tells a host runner that a Hub outside a container runs deploys itself", () =>
+    withHub(async (ctx) => {
+      assert.equal((await call(ctx.port, "/api/deploys/next")).status, 404);
     }));
 });
