@@ -77,6 +77,8 @@ export interface ProjectSetOptions {
   };
   /** Called after any task or plan of a project changed (notifications). */
   onChange?: (project: Project) => void;
+  /** Called after a task was merged into a project's main (deploys). */
+  onMerged?: (project: Project) => void;
 }
 
 /**
@@ -313,6 +315,7 @@ export class ProjectSet {
       onDispatchNeeded: () => this.dispatchAll(),
       isIdTaken: (taskId) => !!this.taskOwner(taskId),
       onMerged: (task) => {
+        this.opts.onMerged?.(project);
         if (!sync.status().enabled) return;
         unpushed.add(task.spec.taskId);
         void sync.requestPush();

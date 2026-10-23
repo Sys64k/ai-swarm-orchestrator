@@ -4,6 +4,7 @@ import {
   CreatePlanBodySchema,
   CreateProjectBodySchema,
   CreateTaskBodySchema,
+  DeployStartedSchema,
   IMAGE_MEDIA_TYPES,
   HealthSchema,
   LlmStatusSchema,
@@ -55,6 +56,7 @@ export const ANSWER_SCHEMAS = {
   Node: NodeSchema,
   Project: ProjectSchema,
   SyncStatus: SyncStatusSchema,
+  DeployStarted: DeployStartedSchema,
   Task: TaskSchema,
   TaskDiff: TaskDiffSchema,
   ReviewChecks: ReviewChecksSchema,
@@ -124,6 +126,10 @@ const PROJECTS: ApiOperation[] = [
   {
     method: "post", path: "/api/projects", tag: "Projects", summary: "Create an empty project (a git repository with one commit)", body: "CreateProject",
     responses: { 201: ok("Project", "Created"), 400: err("Invalid name, or the Hub has no projects root"), 409: err("It exists already") },
+  },
+  {
+    method: "post", path: "/api/projects/{id}/deploy", tag: "Projects", summary: "Deploy the project's main now with its command from the Hub's deploy.json",
+    responses: { 202: ok("DeployStarted", "Deploying (or queued after the deploy in progress)"), ...notFound("project"), 409: err("No deploy command for this project") },
   },
   { method: "get", path: "/api/sync", tag: "Projects", summary: "Push status of a project's main", query: projectQuery, responses: { 200: ok("SyncStatus"), ...noProject } },
   {

@@ -400,6 +400,7 @@ The Hub can notify your phone when:
 - a plan is ready for your approval, or the Architect has questions,
 - a task fails, or planning fails,
 - all of a plan's tasks are merged (or a task submitted on its own is merged),
+- a project deployed, or its deploy failed (see [Deploying after a merge](#deploying-after-a-merge)),
 - a worker machine has been offline for 10 minutes, and again when it is back. The Hub
   remembers its machines across restarts, so one that never reconnects is still reported.
 
@@ -785,6 +786,38 @@ Options:
 - `--hub <address>`: the Hub to update from (default `ASO_HUB` or `127.0.0.1`).
 - `--spec <npm spec>`: install that npm spec instead.
 
+### Deploying after a merge
+
+The Hub can deploy a project each time work is merged into its `main`, so a merged change goes
+live without anyone running a build. Give the project a command in `<projects root>/.aso/deploy.json`
+on the Hub machine:
+
+```json
+{
+  "aso-ui": {
+    "command": "docker build -q -t aso-ui:$ASO_DEPLOY_SHORT . && docker rm -f aso-ui && docker run -d --name aso-ui --restart unless-stopped --network host -e PORT=7422 -e HOSTNAME=127.0.0.1 -e ASO_HUB_URL=http://127.0.0.1:7420 aso-ui:$ASO_DEPLOY_SHORT",
+    "timeoutSec": 900
+  }
+}
+```
+
+- **When it runs.** After each merge into `main` (a pull request merged on GitHub or from
+  the console, or a merge on the Hub), and on `POST /api/projects/<id>/deploy`. One deploy per
+  project at a time; merges that land meanwhile are deployed together when it ends.
+- **Where it runs.** On the Hub machine, with `sh -c`, in a clean export of `main` at the merged
+  commit (`<projects root>/.aso/deploy/<id>/`, no `.git`). `ASO_DEPLOY_PROJECT`,
+  `ASO_DEPLOY_COMMIT` and `ASO_DEPLOY_SHORT` (7 characters) say what it is deploying.
+- **What it sees.** Only a few variables of the Hub's environment (`PATH`, `HOME`, `USER`,
+  locale, `TMPDIR`, `XDG_RUNTIME_DIR`, `DOCKER_HOST`, `DOCKER_CONFIG`) plus the entry's own
+  `env`. The Hub's GitHub and Anthropic tokens are not passed on.
+- **Limits.** `timeoutSec` 10–3600, default 900; on timeout the command and its children
+  are stopped.
+- **Results.** Your phone gets *"aso-ui: deployed"* or *"aso-ui: deploy failed"* with the last
+  lines of output. `GET /api/projects/<id>` shows the latest deploy under `deploy.last`, and
+  `<projects root>/.aso/deploy/<id>.log` has the end of its output.
+- **Edits apply at once.** The file is read on every deploy; no Hub restart needed. Without
+  an entry, a project doesn't deploy.
+
 ## Hub endpoints
 
 The full description is **OpenAPI 3.1**: every Hub serves it at `/api/openapi.json` (no token
@@ -811,6 +844,7 @@ Answers can gain fields over time: clients should ignore fields they don't know.
 | `GET` | `/api/version` | Version and SHA-256 of the `aso` package this Hub serves (public) |
 | `GET` | `/api/openapi.json` | This API as an OpenAPI 3.1 document (public) |
 | `GET` | `/dist/aso.tgz` | The `aso` package for installing/updating machines (public; contains no secrets) |
+| `POST` | `/api/projects/{id}/deploy` | Deploy the project's `main` now with its command from `deploy.json` (409 without one) |
 | `GET` / `POST` | `/api/sync` | Push status / retry the push of `main` to `origin` |
 | `GET` | `/api/llm` | LLM status: the Architect's and the agents' models, queue, calls and estimated spend since start |
 | `GET` | `/api/nodes` | Registered nodes with hardware, latest heartbeat, current task, the aso build each runs (`version`), `outdated` (a different build than the Hub serves), `supervisor`, `updates` (`package`: it can update itself), `draining`, `restart`, `updateTo` (the build a pending or running update installs), `updateError` (why the Hub stopped updating that machine) and `actions` (what the console may do now, with `why` for a refusal) |
@@ -920,6 +954,11 @@ For the scoring formula, see [ARCHITECTURE.md](ARCHITECTURE.md#6-hardware-aware-
   on the workers.
 - **Push restrictions.** The Git endpoint refuses pushes to `main`, tags, deletions, and
   anything outside `refs/heads/task/<id>`. Only the Hub writes `main`.
+- **Deploy commands run on the Hub machine.** Only the operator sets them, in
+  `<projects root>/.aso/deploy.json`, never a project's repository, which agents change. The code
+  they build is the agents' merged work, so it runs after your review when pull requests are on.
+  A deploy sees a reduced environment without the Hub's tokens. Prefer commands that build in
+  containers (`docker build`) over running project scripts directly on the host.
 - **Checks on both sides.** Workers' `AgentGitClient` refuses to commit `package.json` or
   lockfiles. The Hub checks again before QA, so a misbehaving worker can't get around it.
 - **Dependency installs.** On the Hub they never execute package code

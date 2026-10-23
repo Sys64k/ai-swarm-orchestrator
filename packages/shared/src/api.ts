@@ -140,6 +140,17 @@ export const PullRequestStatusSchema = z.object({
   reason: z.string().optional().describe("Why work is merged on the Hub instead"),
 });
 
+export const DeployStatusSchema = z.object({
+  state: z.enum(["running", "succeeded", "failed"]),
+  commit: z.string().describe("The main commit being deployed"),
+  startedAt: Timestamp,
+  finishedAt: Timestamp.optional(),
+  error: z.string().optional(),
+  output: z.string().optional().describe("The end of the command's output"),
+});
+
+export const DeployStartedSchema = z.object({ deploying: z.literal(true) });
+
 export const ProjectSchema = z.object({
   id: ProjectIdSchema,
   dir: z.string(),
@@ -156,6 +167,10 @@ export const ProjectSchema = z.object({
   }),
   plansAwaitingApproval: z.number().int(),
   plansWithQuestions: z.number().int(),
+  deploy: z.object({
+    configured: z.boolean().describe("Whether the operator gave this project a command in the Hub's deploy.json"),
+    last: DeployStatusSchema.optional().describe("The latest deploy since the Hub started"),
+  }),
 });
 
 const ActionsSchema = z.object({
