@@ -717,6 +717,58 @@
             "type": "integer",
             "minimum": -9007199254740991,
             "maximum": 9007199254740991
+          },
+          "deploy": {
+            "type": "object",
+            "properties": {
+              "configured": {
+                "type": "boolean",
+                "description": "Whether the operator gave this project a command in the Hub's deploy.json"
+              },
+              "last": {
+                "description": "The latest deploy since the Hub started",
+                "type": "object",
+                "properties": {
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "running",
+                      "succeeded",
+                      "failed"
+                    ]
+                  },
+                  "commit": {
+                    "type": "string",
+                    "description": "The main commit being deployed"
+                  },
+                  "startedAt": {
+                    "type": "string",
+                    "description": "ISO 8601 time"
+                  },
+                  "finishedAt": {
+                    "type": "string",
+                    "description": "ISO 8601 time"
+                  },
+                  "error": {
+                    "type": "string"
+                  },
+                  "output": {
+                    "description": "The end of the command's output",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "state",
+                  "commit",
+                  "startedAt"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "configured"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [
@@ -727,7 +779,8 @@
           "pullRequests",
           "tasks",
           "plansAwaitingApproval",
-          "plansWithQuestions"
+          "plansWithQuestions",
+          "deploy"
         ],
         "additionalProperties": false
       },
@@ -775,6 +828,19 @@
           "remote",
           "url",
           "state"
+        ],
+        "additionalProperties": false
+      },
+      "DeployStarted": {
+        "type": "object",
+        "properties": {
+          "deploying": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "required": [
+          "deploying"
         ],
         "additionalProperties": false
       },
@@ -2816,6 +2882,60 @@
           },
           "404": {
             "description": "No such project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/deploy": {
+      "post": {
+        "operationId": "postProjectDeploy",
+        "tags": [
+          "Projects"
+        ],
+        "summary": "Deploy the project's main now with its command from the Hub's deploy.json",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Deploying (or queued after the deploy in progress)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeployStarted"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "No such project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "No deploy command for this project",
             "content": {
               "application/json": {
                 "schema": {

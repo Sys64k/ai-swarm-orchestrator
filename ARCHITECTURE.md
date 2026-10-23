@@ -134,6 +134,7 @@ flowchart LR
 | | `hub-address.ts` | `resolveHubUrl` (ws URL), `hubGitUrl` (Git URL from the same host and port) |
 | `@aso/hub` | `dependencies.ts` | `DependencyManager` (ownership, allowlist, limits, dedup) and `npmInstaller` |
 | | `push/notifier.ts`, `push/workers.ts`, `push/web-push.ts` | `Notifier` (subscriptions, `notableChanges`), `WorkerWatch` (worker machines offline and back) and Web Push delivery (RFC 8291 encryption, VAPID) with `node:crypto` |
+| | `deploy.ts` | `Deployer`: runs the operator's deploy command from `deploy.json` after each merge, one at a time per project, in a clean export with a reduced environment |
 | | `server.ts` | HTTP API, WebSocket validation pipeline, Git route, liveness and reclaim sweep |
 | | `registry.ts` | `NodeRegistry`: connected nodes, heartbeats, the jobs each runs (up to its slots), drain/restart, automatic updates |
 | | `routing.ts` | `selectNode()`: a pure, deterministic routing function |
@@ -834,6 +835,32 @@ flowchart TD
   instead of hanging.
 - **Clean URLs:** remote URLs are shown with userinfo stripped.
 
+### Deploying after a merge
+
+`Deployer` (`hub/src/deploy.ts`) runs the operator's deploy command for a project after each
+merge into its `main` (`TaskManager.onMerged`, called once the Hub's `main` has the merge, also
+for pull requests merged on GitHub), and on `POST /api/projects/{id}/deploy`.
+
+- **Configuration outside the repository.** Commands live in `<root>/.aso/deploy.json`, beside
+  the other Hub-wide state, not in the project: agents change the repository, and a command from
+  it would run on the Hub host. The file is re-read on every deploy. An invalid or unreadable
+  one keeps the last good commands in memory and fails the deploys of those projects with the
+  reason; projects without a command never hear of it.
+- **Clean input.** `git archive` of the merged commit into `<root>/.aso/deploy/<id>/`, replaced
+  each time, so nothing left by an earlier deploy or the Hub's checkout leaks in.
+- **One at a time, coalesced.** A merge during a deploy marks the project to deploy again; the
+  next run takes `main` as it is then, so a burst of merges is one more deploy.
+- **Reduced environment.** `sh -c` in its own process group, with an allowlist of the Hub's
+  environment (`PASSED_ENV`) plus the entry's `env` and `ASO_DEPLOY_*`. The GitHub and Anthropic
+  tokens stay with the Hub. On timeout the whole group gets SIGTERM, then SIGKILL.
+- **Reporting.** The latest result per project is in memory (`deploy.last` on the project), the
+  end of the output in `deploy/<id>.log`, and a push notification says deployed or failed
+  (tag `deploy-<id>`).
+
+This is the one place the Hub runs project code (see
+[Why the Hub never runs package code](#why-the-hub-never-runs-package-code)): only with a
+command the operator wrote, and only for merged work.
+
 ## 9. Package changes (dependencies and scripts)
 
 Task branches may never change `package.json` or lockfiles. Both the worker and the Hub
@@ -905,6 +932,9 @@ repository be bootstrapped entirely by agents.
 lockfile without creating `node_modules`. `--ignore-scripts` additionally guarantees no
 lifecycle scripts run. Without this, an agent asking for a malicious package would get code
 execution on the Hub, which holds the canonical repository and the GitHub credentials.
+
+The one exception is a deploy command the operator configured (see
+[Deploying after a merge](#deploying-after-a-merge)).
 
 Workers install for real with `npm ci`, which never modifies the lockfile. They already execute
 project code, so running install scripts there doesn't widen what an agent can do.

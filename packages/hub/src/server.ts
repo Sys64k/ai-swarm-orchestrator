@@ -48,6 +48,7 @@ import { isOutdated, NodeError, NodeRegistry, type NodeEntry, type NodeTransport
 import type { RoutingPolicies } from "./routing.js";
 import { Notifier, TEST_NOTIFICATION } from "./push/notifier.js";
 import { WorkerWatch } from "./push/workers.js";
+import { Deployer, deployNotification } from "./deploy.js";
 import type { sendPush } from "./push/web-push.js";
 import { SignInCodes } from "./sign-in-codes.js";
 import { StateStore } from "./state-store.js";
@@ -171,6 +172,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   const registry = new NodeRegistry();
   // Set once the Hub-wide state folder is known; changes made while projects load notify nobody.
   let notifier: Notifier | undefined;
+  let deployer: Deployer | undefined;
   const projects = await ProjectSet.open(registry, {
     root: opts.projectsRoot,
     single: opts.targetDir,
@@ -181,6 +183,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     sync: { enabled: opts.sync?.enabled, remote: opts.sync?.remote, token: opts.sync?.token, retryMs: opts.sync?.retryMs },
     pullRequests: opts.pullRequests,
     onChange: (p) => notifier?.observe({ id: p.id, tasks: p.tasks.list(), plans: p.plans.list() }),
+    onMerged: (p) => deployer?.request(p),
   });
   const tasks = projects.tasks;
   const plans = projects.plans;
@@ -196,6 +199,10 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   // Remember every record's current state, so only what changes from now on notifies.
   for (const p of projects.list()) notifier.observe({ id: p.id, tasks: p.tasks.list(), plans: p.plans.list() });
   const workerWatch = await WorkerWatch.open({ dir: conversationDir, alertMs: opts.push?.workerOfflineMs });
+  if (conversationDir) {
+    deployer = new Deployer({ dir: conversationDir, onResult: (project, status) => void notifier?.send(deployNotification(project, status)) });
+    await deployer.load();
+  }
   const llm = opts.llm ?? {};
   const model = llm.model ?? "claude-opus-5-5";
   const anthropic = (id: string) =>
@@ -542,12 +549,22 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       },
       plansAwaitingApproval: p.plans.list().filter((pl) => pl.state === "proposed").length,
       plansWithQuestions: p.plans.list().filter((pl) => pl.state === "awaiting_input").length,
+      deploy: deployer?.view(p.id) ?? { configured: false },
     };
   };
   app.get("/api/projects", (c) => c.json(projects.list().map(projectView)));
   app.get("/api/projects/:id", (c) => {
     const p = projects.get(c.req.param("id"));
     return p ? c.json(projectView(p)) : c.json({ error: "not found" }, 404);
+  });
+  app.post("/api/projects/:id/deploy", async (c) => {
+    const p = projects.get(c.req.param("id"));
+    if (!p) return c.json({ error: "not found" }, 404);
+    if (!deployer) return c.json({ error: "this Hub keeps no state, so it has no deploy.json" }, 409);
+    await deployer.load(); // to answer 409 from the file as it is now, not as of the last deploy
+    if (!deployer.configured(p.id)) return c.json({ error: `${p.id} has no deploy command in ${shown(deployer.file)}` }, 409);
+    deployer.request(p);
+    return c.json({ deploying: true }, 202);
   });
   app.post("/api/projects", async (c) => {
     const req = await parsed(c, CreateProjectBodySchema);
