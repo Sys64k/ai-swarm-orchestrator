@@ -5,12 +5,15 @@ import path from "node:path";
 import { z } from "zod";
 import { createLogger, type DeployStatusSchema } from "@aso/shared";
 import type { PushNotification } from "./push/changes.js";
+import { JsonFileWriter } from "./push/json-file.js";
 
 const log = createLogger("deploy");
 
 /** The operator's deploy commands, in the Hub-wide state folder: never from a project's repository, which agents change. */
 export const DEPLOY_FILE = "deploy.json";
 export const DEPLOY_TIMEOUT_SEC = 900;
+/** The commit each project last deployed successfully, beside `deploy.json`, so a restart knows what is live. */
+export const DEPLOYED_FILE = "deployed.json";
 /** Characters of a deploy's output kept (the end, where errors are): in `DeployStatus.output` and `deploy/<id>.log`. */
 const OUTPUT_TAIL = 20_000;
 /** The Hub's environment a deploy command sees; the rest (GitHub and model API tokens) stays with the Hub. */
@@ -68,7 +71,7 @@ export const runHere: RunDeploy = (job, cwd) =>
 export const deployWorkDir = (stateDir: string, project: string) => path.join(stateDir, "deploy", project);
 
 export interface DeployerOptions {
-  /** Holds `deploy.json`, and `deploy/` for the exports and logs. */
+  /** Holds `deploy.json`, `deployed.json`, and `deploy/` for the exports and logs. */
   dir: string;
   onResult?: (project: string, status: DeployStatus) => void;
   /** Default: `runHere`. A Hub in a container hands jobs to the host instead (`HostDeployQueue`). */
@@ -86,10 +89,30 @@ export class Deployer {
   /** One more deploy after the running one, and whether any request for it was forced. */
   private readonly again = new Map<string, boolean>();
   private readonly lastDeployedCommit = new Map<string, string>();
+  private readonly deployedPath: string;
+  private readonly deployedFile: JsonFileWriter;
   private config: Record<string, DeployCommand> = {};
   private configError?: string;
 
-  constructor(private readonly opts: DeployerOptions) {}
+  constructor(private readonly opts: DeployerOptions) {
+    this.deployedPath = path.join(opts.dir, DEPLOYED_FILE);
+    this.deployedFile = new JsonFileWriter(this.deployedPath);
+  }
+
+  /**
+   * Read which commit each project last deployed. With it, requesting every project when the Hub
+   * starts deploys only what changed while it was down, or what a restart cut off.
+   */
+  async restore(): Promise<void> {
+    try {
+      const parsed = z.record(z.string(), z.string()).safeParse(JSON.parse(await readFile(this.deployedPath, "utf8")));
+      if (!parsed.success) throw new Error("not a map of project to commit");
+      for (const [project, commit] of Object.entries(parsed.data)) this.lastDeployedCommit.set(project, commit);
+    } catch (err) {
+      // Without it, each project deploys once more: safe, a deploy replaces what runs.
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") log.warn(`${this.deployedPath} is invalid or unreadable, ignored: ${(err as Error).message}`);
+    }
+  }
 
   get file(): string {
     return path.join(this.opts.dir, DEPLOY_FILE);
@@ -191,7 +214,10 @@ export class Deployer {
     log.info(`${project.id} @ ${short(status.commit)}: deploying`);
     const result = await (this.opts.run ?? runHere)({ project: project.id, commit: status.commit, command }, work);
     await writeFile(logFile, result.output).catch(() => undefined);
-    if (result.ok) this.lastDeployedCommit.set(project.id, status.commit);
+    if (result.ok) {
+      this.lastDeployedCommit.set(project.id, status.commit);
+      await this.deployedFile.write(Object.fromEntries(this.lastDeployedCommit));
+    }
     finish(result.ok ? { state: "succeeded", output: result.output } : { state: "failed", error: result.error, output: result.output });
   }
 }

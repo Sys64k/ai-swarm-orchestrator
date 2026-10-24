@@ -850,6 +850,9 @@ commits on `origin`), and on `POST /api/projects/{id}/deploy`.
 
 - **Each commit once.** A merge can be reported twice (by its task and by catching up), so an
   automatic deploy skips the commit last deployed successfully; `POST .../deploy` forces one.
+- **Restart-safe.** That commit per project is saved in `deployed.json` beside `deploy.json`.
+  On start the Hub requests a deploy of every project, which deploys only those whose `main`
+  isn't live: merged while the Hub was down, cut off by a restart, or failed last time.
 
 - **Configuration outside the repository.** Commands live in `<root>/.aso/deploy.json`, beside
   the other Hub-wide state, not in the project: agents change the repository, and a command from

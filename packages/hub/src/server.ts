@@ -214,6 +214,10 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       run: hostDeploys?.run,
     });
     await deployer.load();
+    await deployer.restore();
+    // Deploy what was merged while the Hub was down, or whose deploy a restart cut off; projects
+    // already live at their main are skipped.
+    for (const p of projects.list()) deployer.request(p);
   }
   const llm = opts.llm ?? {};
   const model = llm.model ?? "claude-opus-5-5";

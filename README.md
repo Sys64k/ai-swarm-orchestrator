@@ -808,7 +808,9 @@ on the Hub machine:
   the console, a merge on the Hub, or anything else that reached GitHub's `main`, picked up
   within 2 minutes), and on `POST /api/projects/<id>/deploy`. One deploy per project at a time;
   merges that land meanwhile are deployed together when it ends. A merge never deploys a commit
-  that is already live; `POST /api/projects/<id>/deploy` does.
+  that is already live; `POST /api/projects/<id>/deploy` does. The Hub remembers what is live
+  (`<projects root>/.aso/deployed.json`), so when it starts it deploys what was merged while it
+  was down, or a deploy a restart cut off, and nothing else.
 - **Where it runs.** On the Hub machine, with `sh -c`, in a clean export of `main` at the merged
   commit (`<projects root>/.aso/deploy/<id>/`, no `.git`). With `aso start-hub --docker`, the
   container has no Docker or host tools, so the `aso start-hub` process on the host runs the
