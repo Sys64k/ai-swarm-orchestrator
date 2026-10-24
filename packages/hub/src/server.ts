@@ -29,6 +29,8 @@ import {
   CreateProjectBodySchema,
   CreateTaskBodySchema,
   DeployResultBodySchema,
+  HubUpdateReportBodySchema,
+  type HubUpdate,
   PlanReplyBodySchema,
   RedeemSignInCodeBodySchema,
   RequestChangesBodySchema,
@@ -50,6 +52,7 @@ import type { RoutingPolicies } from "./routing.js";
 import { Notifier, TEST_NOTIFICATION } from "./push/notifier.js";
 import { WorkerWatch } from "./push/workers.js";
 import { Deployer, deployNotification, HostDeployQueue } from "./deploy.js";
+import { hubUpdateNotification } from "./hub-update.js";
 import type { sendPush } from "./push/web-push.js";
 import { SignInCodes } from "./sign-in-codes.js";
 import { StateStore } from "./state-store.js";
@@ -591,6 +594,19 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     if (!req.ok) return c.json({ error: req.error }, 400);
     if (!hostDeploys?.complete(c.req.param("id"), req.data)) return c.json({ error: "no such deploy job waiting for a result" }, 404);
     return c.json({ accepted: true });
+  });
+  /** The Hub's own update, as the updater on its machine last reported it (`off` until it does). */
+  const running = opts.dist?.version() ?? UNKNOWN_VERSION;
+  let hubUpdate: HubUpdate = { state: "off", current: running };
+  app.get("/api/hub/update", (c) => c.json(hubUpdate));
+  app.post("/api/hub/update", async (c) => {
+    const req = await parsed(c, HubUpdateReportBodySchema);
+    if (!req.ok) return c.json({ error: req.error }, 400);
+    const next: HubUpdate = { ...req.data, current: running, at: new Date().toISOString() };
+    const notification = hubUpdateNotification(hubUpdate, next);
+    hubUpdate = next;
+    if (notification) void notifier.send(notification);
+    return c.json(hubUpdate);
   });
   app.post("/api/projects", async (c) => {
     const req = await parsed(c, CreateProjectBodySchema);

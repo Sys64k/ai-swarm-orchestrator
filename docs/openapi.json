@@ -922,6 +922,43 @@
         ],
         "additionalProperties": false
       },
+      "HubUpdate": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "off",
+              "current",
+              "building",
+              "waiting",
+              "restarting",
+              "updated",
+              "failed"
+            ]
+          },
+          "current": {
+            "type": "string",
+            "description": "The aso build this Hub runs (its own, whatever was reported)"
+          },
+          "target": {
+            "description": "The commit being installed, or the one that failed",
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "at": {
+            "description": "ISO 8601 time the updater reported this state",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "current"
+        ],
+        "additionalProperties": false
+      },
       "Task": {
         "type": "object",
         "properties": {
@@ -2653,6 +2690,36 @@
         ],
         "additionalProperties": false
       },
+      "HubUpdateReport": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "current",
+              "building",
+              "waiting",
+              "restarting",
+              "updated",
+              "failed"
+            ]
+          },
+          "target": {
+            "description": "The commit being installed, or the one that failed",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "error": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "additionalProperties": false
+      },
       "RedeemSignInCode": {
         "type": "object",
         "properties": {
@@ -2771,6 +2838,72 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/hub/update": {
+      "get": {
+        "operationId": "getHubUpdate",
+        "tags": [
+          "Hub"
+        ],
+        "summary": "Where the Hub's own update from its repository stands",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HubUpdate"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postHubUpdate",
+        "tags": [
+          "Hub"
+        ],
+        "summary": "For the updater on the Hub machine: report where the Hub's update stands",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HubUpdateReport"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HubUpdate"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
           }
         }
       }

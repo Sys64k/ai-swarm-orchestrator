@@ -6,6 +6,8 @@ import {
   CreateTaskBodySchema,
   DeployNextSchema,
   DeployResultAcceptedSchema,
+  HubUpdateReportBodySchema,
+  HubUpdateSchema,
   DeployResultBodySchema,
   DeployStartedSchema,
   IMAGE_MEDIA_TYPES,
@@ -46,6 +48,7 @@ export const REQUEST_SCHEMAS = {
   RequestChanges: RequestChangesBodySchema,
   Sync: SyncBodySchema,
   DeployResult: DeployResultBodySchema,
+  HubUpdateReport: HubUpdateReportBodySchema,
   RedeemSignInCode: RedeemSignInCodeBodySchema,
   PushSubscription: PushSubscriptionSchema,
   PushEndpoint: PushEndpointSchema,
@@ -63,6 +66,7 @@ export const ANSWER_SCHEMAS = {
   DeployStarted: DeployStartedSchema,
   DeployNext: DeployNextSchema,
   DeployResultAccepted: DeployResultAcceptedSchema,
+  HubUpdate: HubUpdateSchema,
   Task: TaskSchema,
   TaskDiff: TaskDiffSchema,
   ReviewChecks: ReviewChecksSchema,
@@ -117,6 +121,11 @@ const noProject = { 400: err("Several projects and none named"), ...notFound("pr
 
 const HUB: ApiOperation[] = [
   { method: "get", path: "/api/version", tag: "Hub", public: true, summary: "The aso build this Hub serves to other machines", responses: { 200: ok("Version") } },
+  { method: "get", path: "/api/hub/update", tag: "Hub", summary: "Where the Hub's own update from its repository stands", responses: { 200: ok("HubUpdate") } },
+  {
+    method: "post", path: "/api/hub/update", tag: "Hub", summary: "For the updater on the Hub machine: report where the Hub's update stands", body: "HubUpdateReport",
+    responses: { 200: ok("HubUpdate"), 400: err("Invalid body") },
+  },
   {
     method: "get", path: "/dist/aso.tgz", tag: "Hub", id: "getPackage", public: true, summary: "The aso package, for installing and updating machines",
     responses: { 200: { description: "The npm package (gzipped tarball)", binary: ["application/gzip"] }, 404: err("This Hub serves no package") },

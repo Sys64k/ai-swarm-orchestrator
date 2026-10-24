@@ -38,3 +38,4 @@ export { Deployer, deployEnv, deployNotification, deployWorkDir, HostDeployQueue
 export { duration, WorkerWatch, WORKER_FORGET_MS, WORKER_OFFLINE_ALERT_MS } from "./push/workers.js";
 export { notableChanges, type ProjectState, type PushNotification } from "./push/changes.js";
 export { encryptPayload, generateVapidKeys, sendPush, vapidAuthorization, MAX_PAYLOAD_BYTES, type PushResult, type VapidKeys } from "./push/web-push.js";
+export { hubUpdateNotification } from "./hub-update.js";

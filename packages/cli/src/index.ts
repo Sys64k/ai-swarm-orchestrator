@@ -32,11 +32,22 @@ import {
 } from "./commands/service.js";
 import { startWorkerCommand } from "./commands/start-worker.js";
 import { updateCommand } from "./commands/update.js";
+import { rollbackUnconfirmed, updatePaths } from "./self-update.js";
+import { userTool } from "./systemd.js";
+import { HUB_SERVICE } from "./service.js";
 
 // Settings such as ANTHROPIC_API_KEY can live in a .env file (see layout.envFiles(): ASO_ENV_FILE,
 // ~/.config/aso/.env, or the source checkout's .env). Shell variables take precedence, then the
 // files in order.
-for (const file of layout.envFiles()) if (existsSync(file)) process.loadEnvFile(file);
+for (const file of layout.envFiles()) {
+  if (!existsSync(file)) continue;
+  try {
+    process.loadEnvFile(file);
+  } catch (err) {
+    // A broken file must not stop every command, the update watchdog's rollback included.
+    console.error(`aso: could not read ${file}: ${(err as Error).message}`);
+  }
+}
 
 function parsePort(value: string): number {
   const n = Number(value);
@@ -117,7 +128,12 @@ function hubOptions(cmd: Command): Command {
     .option("--task-budget <usd>", "estimated LLM spend cap per task", parseUsd, Number(process.env.ASO_TASK_BUDGET) || 5)
     .option("--plan-budget <usd>", "estimated LLM spend cap per planning round", parseUsd, Number(process.env.ASO_PLAN_BUDGET) || 3)
     .option("--max-turns <n>", "model turns per agent round (task attempt or planning round)", parsePort, Number(process.env.ASO_MAX_TURNS) || 80)
-    .option("--llm-concurrency <n>", "concurrent model requests", parsePort, Number(process.env.ASO_LLM_CONCURRENCY) || 4);
+    .option("--llm-concurrency <n>", "concurrent model requests", parsePort, Number(process.env.ASO_LLM_CONCURRENCY) || 4)
+    .option(
+      "--update-from <git-url>",
+      "keep this Hub on that ASO repository's main: build and test each new commit, install it when the swarm is idle, roll back if it doesn't come up (an installed package run as the Hub service)",
+      process.env.ASO_UPDATE_FROM || undefined,
+    );
 }
 
 hubOptions(program.command("start-hub").description("Start the Hub: API/WebSocket server, dashboard and Architect"))
@@ -153,6 +169,17 @@ hubOptions(hubServiceCmd.command("install").description("Install and start the H
   installHubServiceCommand,
 );
 hubServiceCmd.command("uninstall").description("Stop and remove the Hub service").action(uninstallHubServiceCommand);
+// Run by the watchdog an update arms (from the version before it): roll back an update that never confirmed.
+program
+  .command("hub-update-check", { hidden: true })
+  .option("--id <id>", "the update the timer was armed for")
+  .option("--at-start", "run before the service starts: roll back only an update past its deadline", false)
+  .action(async (opts: { id?: string; atStart: boolean }) => {
+    await rollbackUnconfirmed(updatePaths(), opts, () => {
+      const r = userTool("systemctl", ["restart", HUB_SERVICE]);
+      if (!r.ok) throw new Error(`could not restart ${HUB_SERVICE}: ${r.output}`);
+    });
+  });
 hubServiceCmd.command("status").description("Show whether the Hub service is running").action(statusHubServiceCommand);
 hubServiceCmd.command("restart").description("Restart the Hub service (after rebuilding or updating aso)").action(restartHubServiceCommand);
 hubServiceCmd

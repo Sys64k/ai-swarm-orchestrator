@@ -30,6 +30,24 @@ export const TaskStateSchema = z.enum([
 ]);
 export type TaskState = z.infer<typeof TaskStateSchema>;
 
+/**
+ * Whether someone is at work on a task in each state (a worker, QA, the Hub merging it), so a
+ * Hub restart would interrupt it. A map over every state: a new state must say.
+ */
+export const TASK_AT_WORK: Readonly<Record<TaskState, boolean>> = {
+  pending: false,
+  assigned: true,
+  in_progress: true,
+  verifying: true,
+  awaiting_qa: true,
+  testing: true,
+  merging: true,
+  awaiting_review: false,
+  merged: false,
+  failed: false,
+  cancelled: false,
+};
+
 export const PlanStateSchema = z.enum(["pending", "planning", "awaiting_input", "proposed", "approved", "rejected", "failed"]);
 export type PlanState = z.infer<typeof PlanStateSchema>;
 
@@ -168,6 +186,27 @@ export const DeployResultBodySchema = z.strictObject({
   output: z.string().max(20_000),
 });
 export const DeployResultAcceptedSchema = z.object({ accepted: z.literal(true) });
+
+/**
+ * The Hub's own update (`aso start-hub --update-from`), as the updater on the Hub machine reports
+ * it: `off` without one, `current` when the Hub runs the remote's main, then `building` (and
+ * testing) a newer commit, `waiting` for the swarm to be idle, `restarting` onto it, and
+ * `updated` or `failed` (a failed build, or a new version that didn't come up and was rolled back).
+ */
+export const HubUpdateStateSchema = z.enum(["off", "current", "building", "waiting", "restarting", "updated", "failed"]);
+export const HubUpdateReportBodySchema = z.strictObject({
+  state: HubUpdateStateSchema.exclude(["off"]),
+  target: z.string().min(1).max(100).optional().describe("The commit being installed, or the one that failed"),
+  error: z.string().max(2000).optional(),
+});
+export const HubUpdateSchema = z.object({
+  state: HubUpdateStateSchema,
+  current: z.string().describe("The aso build this Hub runs (its own, whatever was reported)"),
+  target: z.string().optional().describe("The commit being installed, or the one that failed"),
+  error: z.string().optional(),
+  at: z.string().optional().describe("ISO 8601 time the updater reported this state"),
+});
+export type HubUpdate = z.infer<typeof HubUpdateSchema>;
 
 export const ProjectSchema = z.object({
   id: ProjectIdSchema,
