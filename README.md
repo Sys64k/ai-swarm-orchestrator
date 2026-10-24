@@ -391,10 +391,15 @@ and it works on a laptop too. On a phone, use **Add to Home Screen** to open it 
 - **Home.**
   - **Needs you** comes first: plans waiting for approval and failed tasks, across all
     projects.
-  - Then your **projects** (with what each needs), work running anywhere, and the workers.
+  - Then your **projects** (with what each needs, a failed deploy included), work running
+    anywhere, and the workers.
+  - **The Hub's version and update**, for a Hub that updates itself: up to date, testing or
+    waiting to install an update, restarting, updated, or why an update failed (also as a banner).
   - It refreshes every few seconds while the screen is on.
 - **Project.**
   - That project's plans, running and queued tasks, and finished work.
+  - **Deploy**, for a project with a deploy command: the last deploy (running, deployed, or
+    failed with the reason and its output) and **Deploy now**.
   - **New plan** from here plans for this project.
   - **+ New project** on the home screen creates a new repository in the projects folder.
     The name is checked as you type, and the folder it will create is shown.
@@ -827,6 +832,20 @@ browser. The link works once, within 10 minutes.
 | `--dashboard-port <port>` | `7421` | Console port, used to find the address |
 | `--no-qr` | | Print only the link |
 | `--hub <address>` | `127.0.0.1` | Hub that issues the code |
+
+### `aso status`
+
+The Hub at a glance in a terminal: the version it runs and where its own update stands, the
+workers and what they do, and each project's work and last deploy. Exits with 1 when the Hub's
+update or a project's last deploy failed, so scripts can check it. `--hub <address>` for another
+machine's Hub.
+
+### `aso deploy <project>`
+
+Deploys the project's `main` now with its command from the Hub's `deploy.json`, follows it to
+the end, and prints how it went: the commit and how long it took, or the reason and the last 30
+lines of output (exit code 1). `--no-wait` only starts it. A project without a deploy command is
+refused with the reason.
 
 ### `aso sync`
 

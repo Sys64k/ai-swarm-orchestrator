@@ -1,4 +1,4 @@
-import type { CheckState, DiffFile, HubNode, Plan, PlannedTask, Project, ReviewChecks, Task, TaskDiff, TaskState, TranscriptEntry } from "./types.ts";
+import type { CheckState, DeployStatus, DiffFile, HubNode, HubUpdate, Plan, PlannedTask, Project, ReviewChecks, Task, TaskDiff, TaskState, TranscriptEntry } from "./types.ts";
 
 /** Colour family of a state badge. */
 export type Tone = "active" | "waiting" | "good" | "bad" | "muted";
@@ -594,8 +594,93 @@ export function projectSummary(p: Project): { text: string; needsYou: boolean } 
     p.tasks.running ? `${p.tasks.running} running` : "",
     p.tasks.queued ? `${p.tasks.queued} queued` : "",
   ].filter(Boolean);
+  const deployFailed = p.deploy?.last?.state === "failed";
+  if (deployFailed) parts.unshift("deploy failed");
   const idle = p.tasks.total ? `${p.tasks.merged} of ${p.tasks.total} tasks merged` : "No tasks yet";
-  return { text: parts.join(" · ") || idle, needsYou: p.plansAwaitingApproval > 0 || questions > 0 || p.tasks.failed > 0 };
+  return { text: parts.join(" · ") || idle, needsYou: p.plansAwaitingApproval > 0 || questions > 0 || p.tasks.failed > 0 || deployFailed };
+}
+
+/** A commit's or a version's short form: `0.1.0+a914b89` → `a914b89`, a sha → its first 7 characters. */
+export function shortCommit(versionOrSha: string): string {
+  return buildOf(versionOrSha).slice(0, 7);
+}
+
+/** A duration the way the console says it: `less than a second`, `42 s`, `3 min 12 s`, `1 h 5 min`. */
+export function formatDuration(ms: number): string {
+  if (!(ms >= 1000)) return "less than a second"; // also an invalid or negative time
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s} s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return s % 60 ? `${m} min ${s % 60} s` : `${m} min`;
+  const h = Math.floor(m / 60);
+  return m % 60 ? `${h} h ${m % 60} min` : `${h} h`;
+}
+
+export interface DeployView {
+  label: string;
+  tone: Tone;
+  detail?: string;
+  /** The end of a failed deploy's output, to show collapsed. */
+  output?: string;
+  /** Whether "Deploy now" may be pressed (not while one runs). */
+  canDeploy: boolean;
+}
+
+/** A project's deploy section, or undefined when the operator gave it no deploy command. */
+export function deployView(deploy: Project["deploy"], now = Date.now()): DeployView | undefined {
+  if (!deploy?.configured) return undefined;
+  const last: DeployStatus | undefined = deploy.last;
+  if (!last) return { label: "No deploy since the Hub started", tone: "muted", canDeploy: true };
+  const commit = shortCommit(last.commit);
+  const took = last.finishedAt ? formatDuration(Date.parse(last.finishedAt) - Date.parse(last.startedAt)) : undefined;
+  if (last.state === "running") return { label: `Deploying ${commit}…`, tone: "active", detail: `started ${timeAgo(last.startedAt, now)}`, canDeploy: false };
+  if (last.state === "succeeded") {
+    return { label: `Deployed ${commit}`, tone: "good", detail: [last.finishedAt && timeAgo(last.finishedAt, now), took && `took ${took}`].filter(Boolean).join(", "), canDeploy: true };
+  }
+  return {
+    label: `Deploy of ${commit} failed`,
+    tone: "bad",
+    detail: [last.error, last.finishedAt && timeAgo(last.finishedAt, now)].filter(Boolean).join(" · "),
+    output: last.output?.trim() || undefined,
+    canDeploy: true,
+  };
+}
+
+export interface HubUpdateView {
+  label: string;
+  tone: Tone;
+  detail?: string;
+  /** Shown as a banner too (a failed update), with its detail there rather than beside the badge. */
+  banner: boolean;
+}
+
+/** The Hub's own update, for the home page: what it runs and whether it is updating, or why that failed. */
+export function hubUpdateView(update: HubUpdate | undefined, now = Date.now()): HubUpdateView | undefined {
+  if (!update) return undefined;
+  const view = hubUpdateText(update, now);
+  return { ...view, banner: update.state === "failed" };
+}
+
+function hubUpdateText(update: HubUpdate, now: number): Omit<HubUpdateView, "banner"> {
+  const runs = shortCommit(update.current);
+  const target = update.target ? shortCommit(update.target) : "a new version";
+  const when = update.at ? timeAgo(update.at, now) : undefined;
+  switch (update.state) {
+    case "off":
+      return { label: `Hub ${runs}`, tone: "muted", detail: "doesn't update itself" };
+    case "current":
+      return { label: `Hub ${runs}`, tone: "good", detail: "up to date" };
+    case "building":
+      return { label: `Testing update ${target}…`, tone: "active", detail: `Hub runs ${runs}` };
+    case "waiting":
+      return { label: `Update ${target} ready`, tone: "waiting", detail: "waits until no task, deploy or planning would be interrupted" };
+    case "restarting":
+      return { label: `Restarting onto ${target}…`, tone: "active" };
+    case "updated":
+      return { label: `Updated to ${runs}`, tone: "good", detail: when };
+    case "failed":
+      return { label: update.target ? `Update ${target} failed` : "Update failed", tone: "bad", detail: [update.error, `Hub still runs ${runs}`].filter(Boolean).join(" · ") };
+  }
 }
 
 export function formatUsd(usd: number): string {

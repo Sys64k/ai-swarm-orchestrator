@@ -1,6 +1,10 @@
 import type { WorkerAction } from "./hub-routes.ts";
 
-/** The parts of the Hub's API responses the console uses. */
+/**
+ * The parts of the Hub's API responses the console uses, copied rather than imported: the console
+ * is built and served on its own, without the shared package. Keep them in step with
+ * `shared/src/api.ts` (the OpenAPI description, `docs/openapi.json`, is the contract).
+ */
 
 export type TaskState =
   | "pending"
@@ -134,6 +138,30 @@ export interface Project {
   plansAwaitingApproval: number;
   /** Plans whose Architect is waiting for answers (absent from Hubs before plan conversations). */
   plansWithQuestions?: number;
+  /** Deploys after merges (absent from Hubs before deploys). */
+  deploy?: { configured: boolean; last?: DeployStatus };
+}
+
+/** The latest deploy of a project since the Hub started. */
+export interface DeployStatus {
+  state: "running" | "succeeded" | "failed";
+  commit: string;
+  startedAt: string;
+  finishedAt?: string;
+  error?: string;
+  /** The end of the command's output. */
+  output?: string;
+}
+
+/** The Hub's own update from its repository (`GET /api/hub/update`). */
+export interface HubUpdate {
+  state: "off" | "current" | "building" | "waiting" | "restarting" | "updated" | "failed";
+  /** The aso build the Hub runs. */
+  current: string;
+  /** The commit being installed, or the one that failed. */
+  target?: string;
+  error?: string;
+  at?: string;
 }
 
 export interface Health {

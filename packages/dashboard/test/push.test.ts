@@ -48,6 +48,10 @@ describe("push keys", () => {
 describe("console access to push", () => {
   it("lets the console reach only the push endpoints it uses", () => {
     assert.equal(hubPath("GET", ["push"]), "/api/push");
+    assert.equal(hubPath("POST", ["projects", "shop", "deploy"]), "/api/projects/shop/deploy");
+    assert.equal(hubPath("GET", ["projects", "shop", "deploy"]), undefined);
+    assert.equal(hubPath("GET", ["hub", "update"]), "/api/hub/update");
+    assert.equal(hubPath("POST", ["hub", "update"]), undefined, "only the updater on the Hub machine reports");
     for (const p of ["subscriptions", "subscriptions/check", "subscriptions/delete", "test"]) assert.equal(hubPath("POST", ["push", ...p.split("/")]), `/api/push/${p}`);
     assert.equal(hubPath("POST", ["push"]), undefined);
     assert.equal(hubPath("GET", ["push", "subscriptions"]), undefined);

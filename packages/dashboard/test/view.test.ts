@@ -9,6 +9,10 @@ import {
   previewBody,
   projectNameProblem,
   projectSummary,
+  deployView,
+  formatDuration,
+  hubUpdateView,
+  shortCommit,
   planBadge,
   planThread,
   replyMode,
@@ -512,5 +516,59 @@ describe("plan conversation", () => {
     const project: Project = { id: "blog", dir: "/x", tasks: { total: 0, running: 0, queued: 0, failed: 0, merged: 0 }, plansAwaitingApproval: 0, plansWithQuestions: 1 };
     assert.deepEqual(projectSummary(project), { text: "1 with questions", needsYou: true });
     assert.deepEqual(projectSummary({ ...project, plansWithQuestions: undefined }), { text: "No tasks yet", needsYou: false }, "older Hubs");
+    const failedDeploy = { configured: true, last: { state: "failed" as const, commit: "a".repeat(40), startedAt: "2026-10-24T10:00:00Z" } };
+    assert.deepEqual(projectSummary({ ...project, plansWithQuestions: 0, deploy: failedDeploy }), { text: "deploy failed", needsYou: true });
+  });
+});
+
+describe("deploys and the Hub's own update", () => {
+  const now = Date.parse("2026-10-24T12:00:00Z");
+  const sha = "a18d17b".padEnd(40, "0");
+
+  it("shortens commits and versions, and says durations", () => {
+    assert.equal(shortCommit("0.1.0+a914b89"), "a914b89");
+    assert.equal(shortCommit(sha), "a18d17b");
+    assert.deepEqual([500, 42_000, 192_000, 180_000, 3_900_000].map(formatDuration), ["less than a second", "42 s", "3 min 12 s", "3 min", "1 h 5 min"]);
+    assert.equal(formatDuration(Number.NaN), "less than a second", "a broken time");
+  });
+
+  it("shows a project's deploy only when it has a command, and what the last one did", () => {
+    assert.equal(deployView(undefined, now), undefined, "an older Hub");
+    assert.equal(deployView({ configured: false }, now), undefined);
+    assert.deepEqual(deployView({ configured: true }, now), { label: "No deploy since the Hub started", tone: "muted", canDeploy: true });
+    assert.deepEqual(deployView({ configured: true, last: { state: "running", commit: sha, startedAt: "2026-10-24T11:59:30Z" } }, now), {
+      label: "Deploying a18d17b…",
+      tone: "active",
+      detail: "started just now",
+      canDeploy: false,
+    });
+    assert.deepEqual(deployView({ configured: true, last: { state: "succeeded", commit: sha, startedAt: "2026-10-24T11:50:00Z", finishedAt: "2026-10-24T11:50:45Z" } }, now), {
+      label: "Deployed a18d17b",
+      tone: "good",
+      detail: "9 min ago, took 45 s",
+      canDeploy: true,
+    });
+    const failed = deployView({ configured: true, last: { state: "failed", commit: sha, startedAt: "2026-10-24T11:00:00Z", finishedAt: "2026-10-24T11:01:00Z", error: "exited with code 1", output: "\nnpm error boom\n" } }, now)!;
+    assert.deepEqual(failed, { label: "Deploy of a18d17b failed", tone: "bad", detail: "exited with code 1 · 59 min ago", output: "npm error boom", canDeploy: true });
+  });
+
+  it("says what the Hub runs and where its update stands", () => {
+    const at = "2026-10-24T11:58:00Z";
+    const view = (state: "off" | "current" | "building" | "waiting" | "restarting" | "updated" | "failed", extra = {}) =>
+      hubUpdateView({ state, current: "0.1.0+a914b89", target: "5147fe7".padEnd(40, "1"), at, ...extra }, now);
+    assert.equal(hubUpdateView(undefined, now), undefined, "an older Hub");
+    assert.deepEqual(view("off"), { label: "Hub a914b89", tone: "muted", detail: "doesn't update itself", banner: false });
+    assert.deepEqual(view("current"), { label: "Hub a914b89", tone: "good", detail: "up to date", banner: false });
+    assert.deepEqual(view("building"), { label: "Testing update 5147fe7…", tone: "active", detail: "Hub runs a914b89", banner: false });
+    assert.equal(view("waiting")?.label, "Update 5147fe7 ready");
+    assert.deepEqual(view("restarting"), { label: "Restarting onto 5147fe7…", tone: "active", banner: false });
+    assert.deepEqual(view("updated"), { label: "Updated to a914b89", tone: "good", detail: "2 min ago", banner: false });
+    assert.deepEqual(view("failed", { error: "build or tests failed: npm test exited with code 1" }), {
+      label: "Update 5147fe7 failed",
+      tone: "bad",
+      detail: "build or tests failed: npm test exited with code 1 · Hub still runs a914b89",
+      banner: true,
+    });
+    assert.equal(view("failed", { target: undefined, error: "could not read the repository's main" })?.label, "Update failed");
   });
 });

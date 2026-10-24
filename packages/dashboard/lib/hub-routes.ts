@@ -19,6 +19,8 @@ const RULES: ReadonlyArray<{ method: "GET" | "POST"; pattern: RegExp }> = [
   { method: "GET", pattern: /^projects$/ },
   { method: "POST", pattern: /^projects$/ },
   { method: "GET", pattern: new RegExp(`^projects/${ID}$`) },
+  { method: "POST", pattern: new RegExp(`^projects/${ID}/deploy$`) },
+  { method: "GET", pattern: /^hub\/update$/ },
   { method: "GET", pattern: /^llm$/ },
   { method: "GET", pattern: /^nodes$/ },
   { method: "POST", pattern: new RegExp(`^nodes/${NODE_ID}/(${WORKER_ACTIONS.join("|")})$`) },

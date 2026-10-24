@@ -4,8 +4,8 @@ import Link from "next/link";
 import { usePoll } from "./use-poll.ts";
 import { Badge, Banner, Row, Section, TopBar } from "./ui.tsx";
 import { NeedsYou, WorkLists } from "./work-lists.tsx";
-import type { HubNode, Llm, Plan, Project, Task } from "../lib/types.ts";
-import { formatUsd, projectSummary, workerViews } from "../lib/view.ts";
+import type { HubNode, HubUpdate, Llm, Plan, Project, Task } from "../lib/types.ts";
+import { formatUsd, hubUpdateView, projectSummary, workerViews } from "../lib/view.ts";
 
 /** Everything at a glance: what needs you, the projects, what's running, the workers. */
 export function Home() {
@@ -14,6 +14,9 @@ export function Home() {
   const projects = usePoll<Project[]>("projects", 5000);
   const nodes = usePoll<HubNode[]>("nodes", 5000);
   const llm = usePoll<Llm>("llm", 10_000);
+  const update = usePoll<HubUpdate>("hub/update", 10_000);
+  // An older Hub has no update status: then nothing is shown.
+  const hub = hubUpdateView(update.data);
 
   const workers = workerViews(nodes.data ?? []);
   const architect = nodes.data?.some((n) => n.nodeKind === "architect");
@@ -27,6 +30,11 @@ export function Home() {
       <main className="page">
         {error && <Banner tone="bad">Hub unreachable: {error}</Banner>}
         {llm.data && !llm.data.configured && <Banner tone="waiting">No model configured on the Hub: set ANTHROPIC_API_KEY.</Banner>}
+        {hub?.banner && (
+          <Banner tone="bad">
+            {hub.label}: {hub.detail}
+          </Banner>
+        )}
         {!ready && !error && <p className="muted">Loading…</p>}
 
         {ready && <NeedsYou tasks={tasks.data!} plans={plans.data!} showProject={several} />}
@@ -46,6 +54,13 @@ export function Home() {
         )}
 
         {ready && <WorkLists tasks={tasks.data!} plans={plans.data!} showProject={several} sections={["running"]} />}
+
+        {hub && (
+          <p className="small hub-status">
+            <Badge label={hub.label} tone={hub.tone} />
+            {hub.detail && !hub.banner && <span className="muted"> {hub.detail}</span>}
+          </p>
+        )}
 
         <Section title="Workers" count={workers.length}>
           {workers.length === 0 ? (
