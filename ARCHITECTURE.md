@@ -813,6 +813,11 @@ pull request body lists them and, with `--console-url`, links to the task's page
 
 - **Coalesced pushes.** A burst of merges becomes one push.
 - **Shared lock.** Pushes share the main lock with merges and dependency installs.
+- **Following origin.** Merges made outside ASO (a pull request merged by hand, a push) reach
+  `main` through `ProjectSet.follow`: `GitSync.catchUp` every `FOLLOW_MS` (2 min), and before
+  `POST /api/plans` and plan approval (waiting at most `FOLLOW_WAIT_MS`, 15 s), since the
+  Architect reads `main` and tasks branch from it. A `main` that moved counts as a merge
+  (`onMerged`: deploys). One pass at a time per project; a lasting failure is logged once.
 
 ```mermaid
 flowchart TD
@@ -840,7 +845,11 @@ flowchart TD
 
 `Deployer` (`hub/src/deploy.ts`) runs the operator's deploy command for a project after each
 merge into its `main` (`TaskManager.onMerged`, called once the Hub's `main` has the merge, also
-for pull requests merged on GitHub), and on `POST /api/projects/{id}/deploy`.
+for pull requests merged on GitHub, and `ProjectSet.follow` when `main` caught up with other
+commits on `origin`), and on `POST /api/projects/{id}/deploy`.
+
+- **Each commit once.** A merge can be reported twice (by its task and by catching up), so an
+  automatic deploy skips the commit last deployed successfully; `POST .../deploy` forces one.
 
 - **Configuration outside the repository.** Commands live in `<root>/.aso/deploy.json`, beside
   the other Hub-wide state, not in the project: agents change the repository, and a command from

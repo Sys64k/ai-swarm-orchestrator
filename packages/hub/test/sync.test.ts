@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { describe, it } from "node:test";
 import { sanitizeUrl } from "@aso/hub";
 import { createMessage } from "@aso/shared";
-import { git, postTask, pushTaskBranch, tempDir, waitFor, withHub, worker, writeFiles, type HubContext } from "./helpers.ts";
+import { git, postTask, pushTaskBranch, tempDir, TOKEN, waitFor, withHub, worker, writeFiles, type HubContext } from "./helpers.ts";
 
 /** Fake implementer: push files to task/<id> and report completion (QA is off in these tests). */
 async function deliver(ctx: HubContext, taskId: string, files: Record<string, string>) {
@@ -125,4 +126,67 @@ describe("pushing main to origin", () => {
     assert.equal(sanitizeUrl("https://x-access-token:abc@github.com/me/app.git"), "https://github.com/me/app.git");
     assert.equal(sanitizeUrl("git@github.com:me/app.git"), "git@github.com:me/app.git");
   });
+});
+
+describe("following merges made on origin", () => {
+  it("catches up on its own and deploys what was merged, once", () =>
+    withHub(
+      async (ctx) => {
+        const stateDir = path.join(ctx.repoDir, ".git", "aso");
+        const out = tempDir("aso-follow-out-");
+        try {
+          mkdirSync(stateDir, { recursive: true });
+          writeFileSync(path.join(stateDir, "deploy.json"), JSON.stringify({ project: { command: `echo "$ASO_DEPLOY_COMMIT" >> "${path.join(out, "commits")}"` } }));
+          const theirs = pushToOrigin(ctx.originDir!, { "merged.md": "merged by hand\n" }, "merge a pull request on GitHub");
+          await waitFor(() => git(ctx.repoDir, "rev-parse", "main") === theirs, 5000, "main caught up");
+          const deployed = () => readFileSync(path.join(out, "commits"), "utf8").split("\n").filter(Boolean);
+          await waitFor(() => { try { return deployed().length === 1; } catch { return false; } }, 5000, "deployed");
+          assert.deepEqual(deployed(), [theirs]);
+          await new Promise((r) => setTimeout(r, 500)); // several more passes, nothing new on origin
+          assert.deepEqual(deployed(), [theirs], "an unchanged main deploys nothing");
+        } finally {
+          rmSync(out, { recursive: true, force: true });
+        }
+      },
+      { origin: true, qa: { enabled: false }, sync: { followMs: 50 } },
+    ));
+
+  it("catches up before the Architect plans", () =>
+    withHub(
+      async (ctx) => {
+        const theirs = pushToOrigin(ctx.originDir!, { "api.json": "{}\n" }, "sync the API description");
+        const res = await fetch(`http://127.0.0.1:${ctx.port}/api/plans`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+          body: JSON.stringify({ requirement: "Use the new API" }),
+        });
+        assert.equal(res.status, 201);
+        assert.equal(git(ctx.repoDir, "rev-parse", "main"), theirs);
+      },
+      { origin: true, qa: { enabled: false }, sync: { followMs: 0 } },
+    ));
+
+  it("goes on with main as it is when origin can't be reached", () =>
+    withHub(
+      async (ctx) => {
+        const before = git(ctx.repoDir, "rev-parse", "main");
+        git(ctx.repoDir, "remote", "set-url", "origin", path.join(ctx.originDir!, "missing"));
+        const project = ctx.hub.projects.resolve(undefined);
+        await ctx.hub.projects.follow(project);
+        await ctx.hub.projects.follow(project, 1000);
+        assert.equal(git(ctx.repoDir, "rev-parse", "main"), before);
+      },
+      { origin: true, qa: { enabled: false }, sync: { followMs: 0 } },
+    ));
+
+  it("never reaches for a remote when pushing is off", () =>
+    withHub(
+      async (ctx) => {
+        const before = git(ctx.repoDir, "rev-parse", "main");
+        pushToOrigin(ctx.originDir!, { "x.md": "x\n" }, "elsewhere");
+        await ctx.hub.projects.follow(ctx.hub.projects.resolve(undefined));
+        assert.equal(git(ctx.repoDir, "rev-parse", "main"), before);
+      },
+      { origin: true, qa: { enabled: false }, sync: { enabled: false, followMs: 50 } },
+    ));
 });

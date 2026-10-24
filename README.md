@@ -647,6 +647,7 @@ failure), and so do the dashboard and `aso sync`.
 |---|---|
 | Push succeeds | Done; status `idle` with the last pushed commit |
 | Someone pushed to GitHub's `main` meanwhile | Merges `origin/main` into `main` (merge commit) and pushes again |
+| A pull request merged by hand on GitHub, or any push to its `main` | The Hub catches up within 2 minutes, and before the Architect plans or a plan is approved, so planning and new tasks start from it. The project then deploys it, as after any merge |
 | That merge conflicts | Stops pushing (status `conflict`) and leaves both sides untouched. Resolve it in the Hub's checkout, then run `aso sync` |
 | Network/auth error | Retries every 5 minutes and after the next merge; `aso sync` retries now |
 | No `origin` remote, or `--no-push` | Merges stay local |
@@ -804,8 +805,10 @@ on the Hub machine:
 ```
 
 - **When it runs.** After each merge into `main` (a pull request merged on GitHub or from
-  the console, or a merge on the Hub), and on `POST /api/projects/<id>/deploy`. One deploy per
-  project at a time; merges that land meanwhile are deployed together when it ends.
+  the console, a merge on the Hub, or anything else that reached GitHub's `main`, picked up
+  within 2 minutes), and on `POST /api/projects/<id>/deploy`. One deploy per project at a time;
+  merges that land meanwhile are deployed together when it ends. A merge never deploys a commit
+  that is already live; `POST /api/projects/<id>/deploy` does.
 - **Where it runs.** On the Hub machine, with `sh -c`, in a clean export of `main` at the merged
   commit (`<projects root>/.aso/deploy/<id>/`, no `.git`). With `aso start-hub --docker`, the
   container has no Docker or host tools, so the `aso start-hub` process on the host runs the

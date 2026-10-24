@@ -17,6 +17,24 @@ import { Transcripts, type TranscriptInput, type TranscriptSubject } from "./tra
 import { Screenshots } from "./screenshots.js";
 
 const log = createLogger("projects");
+
+/** How often a project's main catches up with its remote's, for merges made outside ASO. */
+export const FOLLOW_MS = 2 * 60_000;
+/** How long planning or approving waits for that catch-up before going ahead with main as it is. */
+export const FOLLOW_WAIT_MS = 15_000;
+
+interface FollowState {
+  timer?: NodeJS.Timeout;
+  running?: Promise<void>;
+  error?: string;
+}
+
+/** Wait for `promise`, but no longer than `ms` (it keeps running). */
+async function waitAtMost(promise: Promise<void>, ms: number): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  await Promise.race([promise, new Promise<void>((resolve) => (timer = setTimeout(resolve, ms)))]);
+  clearTimeout(timer);
+}
 const exec = promisify(execFile);
 
 async function initRepo(dir: string, branch: string): Promise<void> {
@@ -77,8 +95,10 @@ export interface ProjectSetOptions {
   };
   /** Called after any task or plan of a project changed (notifications). */
   onChange?: (project: Project) => void;
-  /** Called after a task was merged into a project's main (deploys). */
+  /** Called after a task was merged into a project's main, or main caught up with the remote's (deploys). */
   onMerged?: (project: Project) => void;
+  /** How often each pushing project's main catches up with its remote's. Default FOLLOW_MS; 0: only before planning and approving. */
+  followMs?: number;
 }
 
 /**
@@ -88,6 +108,8 @@ export interface ProjectSetOptions {
 export class ProjectSet {
   private readonly projects = new Map<string, Project>();
   private readonly reviewers = new Map<string, PullRequests>();
+  /** Per project: its catch-up timer, the catch-up in progress (shared by everyone who asks meanwhile), and why the last one failed. */
+  private readonly follows = new Map<string, FollowState>();
   /** Rotates which project dispatches first, so one busy project can't starve the others. */
   private dispatchOffset = 0;
 
@@ -274,8 +296,52 @@ export class ProjectSet {
     if (project) await this.reviewers.get(projectId)?.check(project.tasks);
   }
 
+  /**
+   * Bring a project's main up to its remote's, for what was merged outside ASO (a pull request
+   * merged by hand, a push to GitHub); a main that moved counts as a merge. Never throws.
+   * `maxWaitMs` stops waiting, not the catch-up, so a slow remote can't hold up a request.
+   */
+  async follow(project: Project, maxWaitMs?: number): Promise<void> {
+    if (!project.sync.status().enabled) return;
+    const state = this.followState(project.id);
+    state.running ??= this.catchUpOnce(project, state).finally(() => (state.running = undefined));
+    await (maxWaitMs === undefined ? state.running : waitAtMost(state.running, maxWaitMs));
+  }
+
+  /** Catch up before planning or approving: the Architect reads main, and tasks branch from it. */
+  followForPlanning(project: Project): Promise<void> {
+    return this.follow(project, FOLLOW_WAIT_MS);
+  }
+
+  private followState(id: string): FollowState {
+    let state = this.follows.get(id);
+    if (!state) this.follows.set(id, (state = {}));
+    return state;
+  }
+
+  private async catchUpOnce(project: Project, state: FollowState): Promise<void> {
+    const before = await project.repo.mainHead().catch(() => undefined);
+    const result = await project.sync.catchUp().catch((err: Error) => ({ ok: false as const, reason: err.message }));
+    this.noteFollowError(project, state, result.ok ? undefined : result.reason);
+    if (!result.ok) return;
+    const after = await project.repo.mainHead().catch(() => undefined);
+    if (after && after !== before) {
+      log.info(`project ${project.id}: ${project.repo.mainBranch} caught up with ${project.sync.status().remote} @ ${after.slice(0, 8)}`);
+      this.opts.onMerged?.(project);
+    }
+  }
+
+  /** Log a catch-up failure when it starts or changes, and the recovery, not every pass. */
+  private noteFollowError(project: Project, state: FollowState, reason: string | undefined): void {
+    const remote = project.sync.status().remote;
+    if (reason && reason !== state.error) log.warn(`project ${project.id}: could not catch up with ${remote}: ${reason}`);
+    if (!reason && state.error) log.info(`project ${project.id}: catching up with ${remote} works again`);
+    state.error = reason;
+  }
+
   /** Write pending state and transcripts; later changes stay in memory (the Hub is stopping). */
   async close(): Promise<void> {
+    for (const state of this.follows.values()) clearInterval(state.timer);
     for (const p of this.list()) {
       p.sync.stop();
       this.reviewers.get(p.id)?.stopPolling();
@@ -347,6 +413,12 @@ export class ProjectSet {
     if (gate) {
       this.reviewers.set(id, gate);
       gate.startPolling(project.tasks);
+    }
+    const followMs = this.opts.followMs ?? FOLLOW_MS;
+    if (sync.status().enabled && followMs > 0) {
+      const state = this.followState(id);
+      state.timer = setInterval(() => void this.follow(project), followMs);
+      state.timer.unref();
     }
     log.info(`project ${id}: ${dir}${store ? ` (state in ${store.dir})` : ""}`);
     return project;

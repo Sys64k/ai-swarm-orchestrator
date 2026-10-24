@@ -101,8 +101,11 @@ export interface HubOptions {
   autoUpdate?: boolean;
   /** The `aso` package this Hub serves to other machines (`aso update`, first installs). */
   dist?: { version: () => string | undefined; tarball: () => string | undefined };
-  /** Push main to the target repo's remote after merges. Default: on when an `origin` remote exists. */
-  sync?: { enabled?: boolean; remote?: string; token?: string; retryMs?: number };
+  /**
+   * Push main to the target repo's remote after merges, and catch up with what was merged there
+   * (`followMs`: see ProjectSetOptions). Default: on when an `origin` remote exists.
+   */
+  sync?: { enabled?: boolean; remote?: string; token?: string; retryMs?: number; followMs?: number };
   /**
    * QA-approved work as GitHub pull requests that a person merges, when the remote is on GitHub
    * and `sync.token` is set. Default on; `enabled: false` merges on the Hub instead.
@@ -188,6 +191,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     pullRequests: opts.pullRequests,
     onChange: (p) => notifier?.observe({ id: p.id, tasks: p.tasks.list(), plans: p.plans.list() }),
     onMerged: (p) => deployer?.request(p),
+    followMs: opts.sync?.followMs,
   });
   const tasks = projects.tasks;
   const plans = projects.plans;
@@ -571,7 +575,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     if (!deployer) return c.json({ error: "this Hub keeps no state, so it has no deploy.json" }, 409);
     await deployer.load(); // to answer 409 from the file as it is now, not as of the last deploy
     if (!deployer.configured(p.id)) return c.json({ error: `${p.id} has no deploy command in ${shown(deployer.file)}` }, 409);
-    deployer.request(p);
+    deployer.request(p, { force: true });
     return c.json({ deploying: true }, 202);
   });
   app.get("/api/deploys/next", (c) => {
@@ -631,7 +635,9 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     const req = await parsed(c, CreatePlanBodySchema);
     if (!req.ok) return c.json({ error: req.error }, 400);
     try {
-      return c.json(projects.resolve(req.data.project).plans.create(req.data.requirement), 201);
+      const p = projects.resolve(req.data.project);
+      await projects.followForPlanning(p); // never throws
+      return c.json(p.plans.create(req.data.requirement), 201);
     } catch (err) {
       return fail(c, err);
     }
@@ -647,7 +653,11 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       return fail(c, err);
     }
   };
-  app.post("/api/plans/:id/approve", (c) => planAction(c, (p, id) => p.plans.approve(id)));
+  app.post("/api/plans/:id/approve", async (c) => {
+    const owner = projects.planOwner(c.req.param("id"));
+    if (owner) await projects.followForPlanning(owner); // planAction answers 404 without one
+    return planAction(c, (p, id) => p.plans.approve(id));
+  });
   app.post("/api/plans/:id/reject", (c) => planAction(c, (p, id) => p.plans.reject(id)));
   app.post("/api/plans/:id/reply", async (c) => {
     // The plan's own checks come first (a plan that takes no reply is a 409 whatever the body).
