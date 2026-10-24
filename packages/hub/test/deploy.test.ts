@@ -73,11 +73,58 @@ describe("Deployer", () => {
     try {
       writeFileSync(path.join(s.dir, "deploy.json"), JSON.stringify({ shop: { command: `sleep 0.3; echo run >> "${path.join(s.out, "runs")}"` } }));
       s.deployer.request(s.target);
+      await waitFor(() => s.deployer.view("shop").last?.state === "running");
+      git(s.repoDir, "commit", "--quiet", "--allow-empty", "-m", "merged meanwhile");
       s.deployer.request(s.target);
       s.deployer.request(s.target);
       await waitFor(() => s.results.length === 2 && s.results);
       await new Promise((r) => setTimeout(r, 500));
       assert.equal(readFileSync(path.join(s.out, "runs"), "utf8"), "run\nrun\n", "one deploy, then one for everything that came meanwhile");
+      assert.equal(s.results[1].status.commit, s.head());
+    } finally {
+      s.cleanup();
+    }
+  });
+
+  it("skips a commit that is already live unless forced, and retries one that failed", async () => {
+    const s = setup();
+    try {
+      const flag = path.join(s.out, "fail");
+      writeFileSync(path.join(s.dir, "deploy.json"), JSON.stringify({ shop: { command: `echo run >> "${path.join(s.out, "runs")}"; test ! -e "${flag}"` } }));
+      const runs = () => readFileSync(path.join(s.out, "runs"), "utf8").split("\n").filter(Boolean).length;
+      s.deployer.request(s.target);
+      await waitFor(() => s.results.length === 1);
+      s.deployer.request(s.target); // the same merge, reported again
+      await new Promise((r) => setTimeout(r, 300));
+      assert.equal(runs(), 1, "already deployed");
+      s.deployer.request(s.target, { force: true }); // "Deploy now"
+      await waitFor(() => s.results.length === 2);
+      assert.equal(runs(), 2);
+      writeFileSync(flag, "");
+      git(s.repoDir, "commit", "--quiet", "--allow-empty", "-m", "next");
+      s.deployer.request(s.target);
+      await waitFor(() => s.results.length === 3);
+      assert.equal(s.results[2].status.state, "failed");
+      rmSync(flag);
+      s.deployer.request(s.target); // a failed commit isn't live: deploy it again
+      await waitFor(() => s.results.length === 4);
+      assert.equal(s.results[3].status.state, "succeeded");
+    } finally {
+      s.cleanup();
+    }
+  });
+
+  it("forgets a forced request that deployed nothing", async () => {
+    const s = setup();
+    try {
+      s.deployer.request(s.target, { force: true }); // no command yet
+      await new Promise((r) => setTimeout(r, 200));
+      writeFileSync(path.join(s.dir, "deploy.json"), JSON.stringify({ shop: { command: `echo run >> "${path.join(s.out, "runs")}"` } }));
+      s.deployer.request(s.target);
+      await waitFor(() => s.results.length === 1);
+      s.deployer.request(s.target);
+      await new Promise((r) => setTimeout(r, 300));
+      assert.equal(readFileSync(path.join(s.out, "runs"), "utf8"), "run\n", "the second, automatic request is not forced");
     } finally {
       s.cleanup();
     }

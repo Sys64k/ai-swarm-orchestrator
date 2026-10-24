@@ -83,7 +83,9 @@ export interface DeployerOptions {
 export class Deployer {
   private readonly last = new Map<string, DeployStatus>();
   private readonly running = new Set<string>();
-  private readonly again = new Set<string>();
+  /** One more deploy after the running one, and whether any request for it was forced. */
+  private readonly again = new Map<string, boolean>();
+  private readonly lastDeployedCommit = new Map<string, string>();
   private config: Record<string, DeployCommand> = {};
   private configError?: string;
 
@@ -125,10 +127,15 @@ export class Deployer {
     return { configured: this.configured(project), ...(last ? { last } : {}) };
   }
 
-  /** Deploy the project's main now, or right after the deploy in progress. Nothing happens for a project without a command. */
-  request(project: DeployTarget): void {
+  /**
+   * Deploy the project's main now, or right after the deploy in progress. Nothing happens for a
+   * project without a command, or when main is the commit it last deployed, unless `force`: a
+   * merge can be reported twice (by ASO and by catching up with GitHub), "Deploy now" means it.
+   */
+  request(project: DeployTarget, opts: { force?: boolean } = {}): void {
+    const force = opts.force ?? false;
     if (this.running.has(project.id)) {
-      this.again.add(project.id);
+      this.again.set(project.id, force || (this.again.get(project.id) ?? false));
       return;
     }
     this.running.add(project.id);
@@ -136,21 +143,32 @@ export class Deployer {
       try {
         // A request during a deploy sets `again`; clearing it before each run makes any number of
         // them one more deploy, of main as it is by then.
-        do {
+        let next: boolean | undefined = force;
+        while (next !== undefined) {
           this.again.delete(project.id);
-          await this.deploy(project);
-        } while (this.again.has(project.id));
+          await this.deploy(project, next);
+          next = this.again.get(project.id);
+        }
       } finally {
         this.running.delete(project.id);
       }
     })();
   }
 
-  private async deploy(project: DeployTarget): Promise<void> {
+  private alreadyDeployed(project: string, commit: string): boolean {
+    return commit !== "" && this.lastDeployedCommit.get(project) === commit;
+  }
+
+  private async deploy(project: DeployTarget, force: boolean): Promise<void> {
     await this.load();
     const command = this.config[project.id];
     if (!command) return;
-    const status: DeployStatus = { state: "running", commit: await project.repo.mainHead().catch(() => ""), startedAt: new Date().toISOString() };
+    const commit = await project.repo.mainHead().catch(() => "");
+    if (!force && this.alreadyDeployed(project.id, commit)) {
+      log.debug(`${project.id} @ ${short(commit)}: already deployed`);
+      return;
+    }
+    const status: DeployStatus = { state: "running", commit, startedAt: new Date().toISOString() };
     this.last.set(project.id, status);
     const finish = (result: Pick<DeployStatus, "state" | "error" | "output">) => {
       Object.assign(status, result, { finishedAt: new Date().toISOString() });
@@ -173,6 +191,7 @@ export class Deployer {
     log.info(`${project.id} @ ${short(status.commit)}: deploying`);
     const result = await (this.opts.run ?? runHere)({ project: project.id, commit: status.commit, command }, work);
     await writeFile(logFile, result.output).catch(() => undefined);
+    if (result.ok) this.lastDeployedCommit.set(project.id, status.commit);
     finish(result.ok ? { state: "succeeded", output: result.output } : { state: "failed", error: result.error, output: result.output });
   }
 }
