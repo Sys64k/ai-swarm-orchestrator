@@ -781,7 +781,7 @@ The QA worker distinguishes two kinds of failure:
 - **Code problems** (non-zero exit, timeout): `FEEDBACK_LOOP fail`, which starts a rework
   round.
 
-**Screenshots.** After the tests pass, if the checkout's `package.json` has a `screenshots`
+**Screenshots.** After the tests pass, if the developer listed views (below) and the checkout's `package.json` has a `screenshots`
 script, the worker runs `npm run screenshots` with `ASO_SCREENSHOT_DIR` pointing at an empty
 `.aso-screenshots/` folder in the QA checkout (inside the job sandbox's mount, removed after).
 `collectScreenshots` takes the images at the top of that folder in name order. It reads each
@@ -794,7 +794,8 @@ views (`ScreenshotTarget`: `name`, `path`, optional `theme`, `width`, `height`, 
 `state`), which rides on `STATUS_UPDATE completed` as `screenshotTargets`. The Hub keeps it on the
 task, replacing it at each finish, because a rework may change something else, and sends it with
 `TEST_EXECUTION`. The worker passes it to the script as JSON in `ASO_SCREENSHOT_TARGETS`. Without a
-list, the variable is unset and the script takes its default views. Listed views without a
+list the worker doesn't run the script: the change shows nowhere in the UI, and the script's
+default views would only repeat the same unrelated pages on every pull request. Listed views without a
 saved `<name>.png` are named in the QA summary (`missingViews`), and the script's output goes to the
 worker's log. The project's script decides
 how to start the app and show each view; the schema keeps names plain and paths app-relative.
