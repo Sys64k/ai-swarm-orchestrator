@@ -100,7 +100,7 @@ const EFFORTS: Effort[] = ["low", "medium", "high", "xhigh", "max"];
 
 const program = new Command()
   .name("aso")
-  .description("AI Swarm Orchestrator - local-network multi-agent development swarm")
+  .description("Skynet (AI Swarm Orchestrator) - local-network multi-agent development swarm")
   .version(layout.version());
 
 /** Options shared by `start-hub` and `hub-service install` (the service runs start-hub with the ones given). */

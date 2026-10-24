@@ -2,7 +2,7 @@ import { LinkSignIn } from "../../components/link-sign-in.tsx";
 import { TokenInput } from "../../components/token-input.tsx";
 import { safeNext } from "../../lib/auth.ts";
 
-export const metadata = { title: "Sign in · ASO" };
+export const metadata = { title: "Sign in · Skynet" };
 
 export default async function Page({ searchParams }: { searchParams: Promise<{ next?: string; error?: string; code?: string }> }) {
   const { next, error, code } = await searchParams;
@@ -12,7 +12,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ n
       <div className="login-mark" aria-hidden>
         ◆
       </div>
-      <h1 className="login-title">AI Swarm Orchestrator</h1>
+      <h1 className="login-title">Skynet</h1>
       {code && !error ? (
         <LinkSignIn code={code} next={safeNext(next)} />
       ) : (

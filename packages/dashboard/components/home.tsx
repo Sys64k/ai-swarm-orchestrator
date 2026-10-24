@@ -26,7 +26,7 @@ export function Home() {
 
   return (
     <>
-      <TopBar title="ASO" right={llm.data && <span className="topbar-meta">{formatUsd(llm.data.totals.costUsd)}</span>} />
+      <TopBar title="Skynet" right={llm.data && <span className="topbar-meta">{formatUsd(llm.data.totals.costUsd)}</span>} />
       <main className="page">
         {error && <Banner tone="bad">Hub unreachable: {error}</Banner>}
         {llm.data && !llm.data.configured && <Banner tone="waiting">No model configured on the Hub: set ANTHROPIC_API_KEY.</Banner>}
