@@ -1,4 +1,4 @@
-import type { CheckState, DeployStatus, DiffFile, HubNode, HubUpdate, Plan, PlannedTask, Project, ReviewChecks, Task, TaskDiff, TaskState, TranscriptEntry } from "./types.ts";
+import type { CheckState, DeployStatus, DiffFile, HubNode, HubUpdate, WorkerKey, Plan, PlannedTask, Project, ReviewChecks, Task, TaskDiff, TaskState, TranscriptEntry } from "./types.ts";
 
 /** Colour family of a state badge. */
 export type Tone = "active" | "waiting" | "good" | "bad" | "muted";
@@ -417,7 +417,7 @@ export function workerView(n: HubNode): WorkerView {
     nodeId: n.nodeId,
     name,
     taskIds,
-    detail: [size, slots > 1 ? `${slots} job slots` : undefined, cpu, build].filter(Boolean).join(" · "),
+    detail: [size, slots > 1 ? `${slots} job slots` : undefined, cpu, build, workerAccess(n)].filter(Boolean).join(" · "),
     outdated: n.outdated === true,
     updateNote: updateNote(n, taskIds.length),
     status: workerStatus(n, taskIds.length, slots),
@@ -746,3 +746,29 @@ export const REPLY_COPY: Record<ReplyMode, { label: string; placeholder: string;
   changes: { label: "What should change", placeholder: "What should change? e.g. Use SQLite instead, and split the UI into its own task", button: "Ask for changes", rows: 3, primary: false },
   review: { label: "What should change", placeholder: "What should change? The agent gets this as written, e.g. Make the button bigger and test the empty list", button: "Ask for changes", rows: 3, primary: false },
 };
+
+/**
+ * The commands that install aso on a new machine and join it to the Hub with `code`. `hubHost` is
+ * the Hub's name as the new machine reaches it: the console's own host, which on Tailscale is the
+ * Hub machine's name in the tailnet.
+ */
+export function joinCommands(hubHost: string, code: string, sha256?: string | null, port = 7420): string[] {
+  const hub = hubHost.includes(":") ? `[${hubHost}]` : hubHost;
+  // The checksum comes from the Hub over the console's own connection: a package swapped on the
+  // way isn't installed. A fresh private folder: no other user can swap the file after the check.
+  const check = sha256 ? ` && echo "${sha256}  $d/aso.tgz" | sha256sum -c -` : "";
+  return [`d=$(mktemp -d) && curl -fo "$d/aso.tgz" http://${hub}:${port}/dist/aso.tgz${check} && npm install -g "$d/aso.tgz"`, `aso service install --hub ${hub} --join ${code}`];
+}
+
+/** A worker key's state, for the machines page. */
+export function workerKeyBadge(k: Pick<WorkerKey, "revokedAt" | "connected" | "lastUsedAt">, now = Date.now()): { label: string; tone: Tone; detail?: string } {
+  if (k.revokedAt) return { label: "Revoked", tone: "muted", detail: timeAgo(k.revokedAt, now) };
+  if (k.connected) return { label: "Connected", tone: "good" };
+  return { label: "Not connected", tone: "waiting", detail: k.lastUsedAt ? `last seen ${timeAgo(k.lastUsedAt, now)}` : "never joined" };
+}
+
+/** How a worker connected: its own key, or the Hub's main token (which can do everything). */
+export function workerAccess(node: Pick<HubNode, "workerKey">): string | undefined {
+  if (node.workerKey === undefined) return undefined; // an older Hub
+  return node.workerKey ? `key "${node.workerKey.name}"` : "the Hub's main token";
+}

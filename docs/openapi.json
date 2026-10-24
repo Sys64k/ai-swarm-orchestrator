@@ -384,6 +384,30 @@
               }
             ]
           },
+          "workerKey": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "name"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The worker key it connected with; null for the Hub's own token"
+          },
           "actions": {
             "type": "object",
             "properties": {
@@ -580,6 +604,7 @@
           "restart",
           "updateTo",
           "updateError",
+          "workerKey",
           "actions"
         ],
         "additionalProperties": false
@@ -2500,6 +2525,73 @@
         ],
         "additionalProperties": false
       },
+      "JoinCode": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "description": "A name for the machine's key (default: the hostname it reports when it joins)",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "additionalProperties": false
+      },
+      "WorkerKeyJoined": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string",
+            "description": "The machine's worker key: shown this once; the Hub keeps only its hash"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "key"
+        ],
+        "additionalProperties": false
+      },
+      "WorkerKey": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "description": "ISO 8601 time"
+          },
+          "lastUsedAt": {
+            "type": "string",
+            "description": "ISO 8601 time"
+          },
+          "revokedAt": {
+            "type": "string",
+            "description": "ISO 8601 time"
+          },
+          "connected": {
+            "type": "boolean",
+            "description": "Whether a worker is connected with it now"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "createdAt",
+          "connected"
+        ],
+        "additionalProperties": false
+      },
       "SignedIn": {
         "type": "object",
         "properties": {
@@ -2732,6 +2824,27 @@
         "required": [
           "code"
         ]
+      },
+      "Join": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "The one-time join code"
+          },
+          "machine": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$",
+            "description": "The joining machine's hostname"
+          }
+        },
+        "required": [
+          "code",
+          "machine"
+        ],
+        "additionalProperties": false
       },
       "PushSubscription": {
         "type": "object",
@@ -4594,6 +4707,183 @@
           },
           "409": {
             "description": "Not allowed now (e.g. started by hand)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/worker-keys/join-codes": {
+      "post": {
+        "operationId": "postWorkerKeysJoinCodes",
+        "tags": [
+          "Workers"
+        ],
+        "summary": "A one-time code (30 min) a new worker machine trades for its own key",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JoinCode"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JoinCode"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          }
+        }
+      }
+    },
+    "/api/worker-keys/join": {
+      "post": {
+        "operationId": "postWorkerKeysJoin",
+        "tags": [
+          "Workers"
+        ],
+        "summary": "For a joining machine: trade a join code for a worker key (worker work only: /ws and Git)",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Join"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Joined",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerKeyJoined"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Unknown, used or expired code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many failed attempts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/worker-keys": {
+      "get": {
+        "operationId": "getWorkerKeys",
+        "tags": [
+          "Workers"
+        ],
+        "summary": "The worker keys, revoked ones included",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/WorkerKey"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          }
+        }
+      }
+    },
+    "/api/worker-keys/{id}/revoke": {
+      "post": {
+        "operationId": "postWorkerKeyRevoke",
+        "tags": [
+          "Workers"
+        ],
+        "summary": "Revoke a worker key: its machine is disconnected and can't come back with it",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerKey"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "No such key",
             "content": {
               "application/json": {
                 "schema": {

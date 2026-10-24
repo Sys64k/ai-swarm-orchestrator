@@ -28,6 +28,7 @@ describe("worker service unit", () => {
       ["start-worker", "--hub", "hub.lan", "--port", "9000", "--work-dir", "/srv/aso", "--slots", "3", "--sandbox", "none", "--sandbox-image", "img:1", "--sandbox-network", "none"],
     );
     assert.ok(workerArgs({ hub: "h", workDir: "rel/dir" }, 7420).at(-1)!.startsWith("/"), "relative work dirs become absolute");
+    assert.deepEqual(workerArgs({ hub: "h", allowInsecure: true }, 7420), ["start-worker", "--hub", "h", "--allow-insecure"]);
   });
 
   it("quotes words for systemd, escaping specifiers and variables", () => {
@@ -71,10 +72,12 @@ describe("worker service unit", () => {
 
   it("gives the service its own token file only when the worker can't find the token itself", () => {
     const file = "/home/me/.config/aso/token";
-    assert.equal(needsTokenEnvFile({ token: "aso_a", source: file }, file, []), false, "token file");
-    assert.equal(needsTokenEnvFile({ token: "aso_a", source: "ASO_TOKEN" }, file, ["ASO_TOKEN=aso_a"]), false, ".env");
-    assert.equal(needsTokenEnvFile({ token: "aso_a", source: "ASO_TOKEN" }, file, []), true, "shell variable only");
-    assert.equal(needsTokenEnvFile({ token: "aso_b", source: "--token" }, file, ["ASO_TOKEN=aso_a"]), true, "--token differs from .env");
+    const key = "/home/me/.config/aso/worker-key";
+    assert.equal(needsTokenEnvFile({ token: "aso_a", source: file }, [file, key], []), false, "token file");
+    assert.equal(needsTokenEnvFile({ token: "asow_a", source: key }, [file, key], []), false, "worker key");
+    assert.equal(needsTokenEnvFile({ token: "aso_a", source: "ASO_TOKEN" }, [file, key], ["ASO_TOKEN=aso_a"]), false, ".env");
+    assert.equal(needsTokenEnvFile({ token: "aso_a", source: "ASO_TOKEN" }, [file, key], []), true, "shell variable only");
+    assert.equal(needsTokenEnvFile({ token: "aso_b", source: "--token" }, [file, key], ["ASO_TOKEN=aso_a"]), true, "--token differs from .env");
   });
 
   it("lives in the user's systemd directory", () => {

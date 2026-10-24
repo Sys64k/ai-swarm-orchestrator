@@ -2,7 +2,8 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import os from "node:os";
 import path from "node:path";
 import type { Command } from "commander";
-import { configDir, createLogger, DEFAULT_HUB_PORT, resolveToken, tokenFile } from "@aso/shared";
+import { configDir, createLogger, DEFAULT_HUB_PORT, resolveWorkerToken, tokenFile, workerKeyFile } from "@aso/shared";
+import { checkTransport, joinHub } from "../join.js";
 import { execCommand } from "../exec.js";
 import { HubVersions } from "../hub-versions.js";
 import { HUB_HOME_ENV, updatePaths } from "../self-update.js";
@@ -41,10 +42,13 @@ export interface HubServiceOptions {
   updateFrom?: string;
 }
 
-export function installServiceCommand(opts: WorkerServiceOptions & { token?: string }): void {
+export async function installServiceCommand(opts: WorkerServiceOptions & { token?: string; join?: string }): Promise<void> {
   requireSystemd();
-  const token = opts.token ? { token: opts.token, source: "--token" } : resolveToken();
-  if (!token) throw new Error("no ASO token: pass --token or set ASO_TOKEN (run `aso token` on the Hub machine to see it)");
+  const port = opts.port ?? DEFAULT_HUB_PORT;
+  await checkTransport(opts.hub, port, opts.allowInsecure ?? false);
+  if (opts.join) await joinHub(opts.hub, port, opts.join);
+  const token = opts.token ? { token: opts.token, source: "--token" } : resolveWorkerToken();
+  if (!token) throw new Error("no worker key: pass --join <code> (from `aso worker-key new` on the Hub), or --token");
   install(WORKER, `ASO worker (Hub ${opts.hub})`, workerArgs(opts, DEFAULT_HUB_PORT), syncTokenEnvFile(token));
 }
 
@@ -160,7 +164,7 @@ function envFilesSet(name: string): boolean {
 /** Write the service's private token file when it needs one (else remove a stale one). Returns its path if used. */
 function syncTokenEnvFile(token: { token: string; source: string }): string | undefined {
   const file = workerEnvFile();
-  if (!needsTokenEnvFile(token, tokenFile(), envFileContents())) {
+  if (!needsTokenEnvFile(token, [tokenFile(), workerKeyFile()], envFileContents())) {
     if (existsSync(file)) rmSync(file);
     return undefined;
   }

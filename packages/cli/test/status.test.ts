@@ -28,9 +28,9 @@ describe("aso status lines", () => {
 
   it("sums up a worker and a project with its deploy", () => {
     const node = { nodeId: "avalon-1", nodeKind: "worker", hardware: { hostname: "avalon" }, currentTaskIds: ["t1"], slots: 4, draining: false, outdated: false, version: "0.1.0+a" } as unknown as ApiNode;
-    assert.equal(workerLine(node), "avalon: working (1 of 4 jobs)");
-    assert.equal(workerLine({ ...node, currentTaskIds: [], draining: true }), "avalon: draining");
-    assert.equal(workerLine({ ...node, currentTaskIds: [], outdated: true }), "avalon: idle, runs 0.1.0+a (updates when idle)");
+    assert.equal(workerLine(node), "avalon: working (1 of 4 jobs) · the Hub's main token");
+    assert.equal(workerLine({ ...node, currentTaskIds: [], draining: true, workerKey: { id: "k1", name: "avalon" } }), 'avalon: draining · key "avalon"');
+    assert.equal(workerLine({ ...node, currentTaskIds: [], outdated: true }), "avalon: idle, runs 0.1.0+a (updates when idle) · the Hub's main token");
 
     assert.equal(deployLine({ configured: false }), undefined);
     assert.equal(deployLine({ configured: true }), "no deploy since the Hub started");

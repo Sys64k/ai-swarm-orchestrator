@@ -86,7 +86,8 @@ export class PullRequests implements ReviewGate {
 
   async open(task: TaskRecord): Promise<PullRef> {
     const branch = taskBranchName(task.spec.taskId);
-    await this.sync.pushBranch(branch);
+    if (!task.commit) throw new Error(`task ${task.spec.taskId} has no tested commit to open a pull request for`);
+    await this.sync.pushBranch(branch, task.commit);
     const body = pullRequestBody(task, this.consoleUrl);
     const existing = task.review?.pr ?? (await this.api.findOpenPull(branch));
     if (existing && (await this.api.getPull(existing.number)).state === "open") {

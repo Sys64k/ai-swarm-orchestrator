@@ -97,10 +97,13 @@ export class GitSync {
     return (await simpleGit(this.repo.dir).raw(["remote", "get-url", this.remote]).catch(() => "")).trim() || undefined;
   }
 
-  /** Push a branch to the remote as it is on the Hub (forced: the Hub's copy is the task's truth). */
-  async pushBranch(branch: string): Promise<void> {
+  /**
+   * Put `commit` on the remote's `branch` (forced: the Hub decides what the task is). The commit,
+   * not the Hub's branch: that is what QA passed, whatever was pushed to the branch since.
+   */
+  async pushBranch(branch: string, commit: string): Promise<void> {
     const git = await this.client();
-    await git.raw(["push", "--force", this.remote, `refs/heads/${branch}:refs/heads/${branch}`]).catch((err: Error) => {
+    await git.raw(["push", "--force", this.remote, `${commit}:refs/heads/${branch}`]).catch((err: Error) => {
       throw new Error(`push of ${branch} to ${this.remote} failed: ${firstLine(err.message)}`);
     });
   }

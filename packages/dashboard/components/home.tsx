@@ -79,6 +79,9 @@ export function Home() {
             </p>
           )}
           {nodes.data && !architect && <p className="muted small">The Architect is not connected, so new plans will wait.</p>}
+          <p className="small">
+            <Link href="/machines">Worker machines and their keys</Link>
+          </p>
         </Section>
 
         <p className="footer-links">

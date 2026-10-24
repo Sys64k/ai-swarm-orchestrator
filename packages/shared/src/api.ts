@@ -104,6 +104,16 @@ export const PlanReplyBodySchema = z.object({ message: z.string().min(1).max(MAX
 export const CreateTaskBodySchema = TaskSpecInputSchema.extend({ project: ProjectIdSchema.optional() });
 export const SyncBodySchema = z.object({ project: ProjectIdSchema.optional() });
 export const RedeemSignInCodeBodySchema = z.object({ code: z.string().min(1).max(200) });
+export const JoinCodeBodySchema = z.strictObject({
+  name: z.string().min(1).max(64).optional().describe("A name for the machine's key (default: the hostname it reports when it joins)"),
+});
+export const JoinBodySchema = z.strictObject({
+  code: z.string().min(1).max(200).describe("The one-time join code"),
+  machine: z
+    .string()
+    .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/, "a hostname: letters, digits, . _ -")
+    .describe("The joining machine's hostname"),
+});
 export const ApproveTaskBodySchema = z.object({
   force: z.boolean().optional().describe("Merge even when the pull request's checks are failing, still running or can't be read"),
 });
@@ -257,6 +267,7 @@ export const NodeSchema = z.object({
   restart: z.enum(["pending", "sent"]).nullable(),
   updateTo: z.string().nullable(),
   updateError: z.object({ version: z.string(), reason: z.string() }).nullable(),
+  workerKey: z.object({ id: z.string(), name: z.string() }).nullable().describe("The worker key it connected with; null for the Hub's own token"),
   actions: ActionsSchema,
   /** Workers only. */
   hardware: HardwareProfileSchema.optional(),
@@ -441,4 +452,18 @@ export const PushCheckSchema = z.object({ subscribed: z.boolean() });
 export const PushRemovedSchema = z.object({ removed: z.boolean(), devices: z.number().int() });
 export const PushTestResultSchema = z.object({ sent: z.number().int().describe("Devices that took it"), failed: z.array(z.string()) });
 export const SignInCodeSchema = z.object({ code: z.string(), expiresAt: Timestamp });
+export const JoinCodeSchema = z.object({ code: z.string(), expiresAt: Timestamp });
+export const WorkerKeyJoinedSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  key: z.string().describe("The machine's worker key: shown this once; the Hub keeps only its hash"),
+});
+export const WorkerKeySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  createdAt: Timestamp,
+  lastUsedAt: Timestamp.optional(),
+  revokedAt: Timestamp.optional(),
+  connected: z.boolean().describe("Whether a worker is connected with it now"),
+});
 export const SignedInSchema = z.object({ ok: z.literal(true) });

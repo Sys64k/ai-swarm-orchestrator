@@ -10,6 +10,9 @@ import {
   projectNameProblem,
   projectSummary,
   deployView,
+  joinCommands,
+  workerAccess,
+  workerKeyBadge,
   formatDuration,
   hubUpdateView,
   shortCommit,
@@ -570,5 +573,26 @@ describe("deploys and the Hub's own update", () => {
       banner: true,
     });
     assert.equal(view("failed", { target: undefined, error: "could not read the repository's main" })?.label, "Update failed");
+  });
+});
+
+describe("worker machines and their keys", () => {
+  const now = Date.parse("2026-10-24T12:00:00Z");
+  it("gives the new machine its commands, with the Hub's name as the console knows it", () => {
+    assert.equal(joinCommands("h", "C", "ab12")[0], 'd=$(mktemp -d) && curl -fo "$d/aso.tgz" http://h:7420/dist/aso.tgz && echo "ab12  $d/aso.tgz" | sha256sum -c - && npm install -g "$d/aso.tgz"');
+    assert.deepEqual(joinCommands("agent007.tailc9777f.ts.net", "C0DE"), [
+      'd=$(mktemp -d) && curl -fo "$d/aso.tgz" http://agent007.tailc9777f.ts.net:7420/dist/aso.tgz && npm install -g "$d/aso.tgz"',
+      "aso service install --hub agent007.tailc9777f.ts.net --join C0DE",
+    ]);
+    assert.match(joinCommands("::1", "C")[1], /--hub \[::1\] /);
+  });
+  it("says where each key stands and how a worker connected", () => {
+    assert.deepEqual(workerKeyBadge({ connected: true }, now), { label: "Connected", tone: "good" });
+    assert.deepEqual(workerKeyBadge({ connected: false }, now), { label: "Not connected", tone: "waiting", detail: "never joined" });
+    assert.deepEqual(workerKeyBadge({ connected: false, lastUsedAt: "2026-10-24T11:50:00Z" }, now).detail, "last seen 10 min ago");
+    assert.deepEqual(workerKeyBadge({ connected: true, revokedAt: "2026-10-24T11:00:00Z" }, now), { label: "Revoked", tone: "muted", detail: "1 h ago" });
+    assert.equal(workerAccess({ workerKey: { id: "k", name: "avalon" } }), 'key "avalon"');
+    assert.equal(workerAccess({ workerKey: null }), "the Hub's main token");
+    assert.equal(workerAccess({}), undefined, "an older Hub");
   });
 });
