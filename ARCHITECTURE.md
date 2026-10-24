@@ -1595,7 +1595,7 @@ sequenceDiagram
   refused: discovery is for the LAN.
 - **Where the responder runs.** Broadcasts don't reach a container on Docker's bridge network,
   so the responder runs in the host process: `startHubCommand` beside the in-process Hub, or
-  `startHubInDocker` once `/api/health` answers. It reads the machine's IPv4 addresses on each
+  `startHubInDocker` once `/api/health` answers. The image's own `start-hub` runs with `--no-discovery`. It reads the machine's IPv4 addresses on each
   query, so a new DHCP lease shows at once, and asks the Hub's API for the proof, so the
   container keeps the keys. It answers at most 30 queries per 10 s. If the port is taken, the Hub
   runs on without discovery and logs that.
