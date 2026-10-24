@@ -1518,3 +1518,48 @@ The core works without any separate UI: both are in the console and the CLI.
   through `cli/src/hub-api.ts`, which `aso plan` shares. Their lines come from pure functions
   (`hubLine`, `workerLine`, `projectLine`, `deployLine`). `deployEnded` waits for the deploy that
   started after the request, not one already running.
+
+### Worker keys and workers anywhere
+
+`WorkerKeys` (`hub/src/worker-keys.ts`) gives each worker machine its own credential:
+
+- **Joining.** `POST /api/worker-keys/join-codes` (main token) creates a one-time code (18
+  random bytes, 30 min, at most 20 outstanding, in memory). The new machine trades it at
+  `POST /api/worker-keys/join` (public; wrong codes are limited to 30 a minute Hub-wide) for a
+  key: `asow_` plus 32 random bytes. The Hub stores only its sha256, in
+  `<state>/worker-keys.json` (mode 600), and the machine stores the key in
+  `~/.config/aso/worker-key`, which `resolveWorkerToken` prefers after `ASO_TOKEN`.
+- **Scope.** `requireWorker` guards `/ws` and `/git/*`, where it accepts the main token or a
+  valid worker key. Everything under `/api/*` still needs the main token, so a key can't plan,
+  approve, merge, deploy or read the API. Git's push rules (task branches only) apply to everyone.
+- **What a key may register.** A connection made with a key may register a worker, never the
+  Architect (which reads every requirement and writes the plans people approve), and never a
+  node id another credential registered (`nodeOwners`, so it can't take over another machine's
+  held jobs). One worker per key: a newer registration replaces the older connection (a machine
+  back after a power cut), so a key never runs two workers, e.g. one implementing and one passing
+  its own QA. Pushes made with a key must go to a task this key's worker implements, or just
+  implemented when it was cancelled or failed, so the agent's unfinished work is saved
+  (`mayPush` in `gitHttpHandler`).
+- **What reaches GitHub.** A pull request gets the commit QA passed (`pushBranch(branch,
+  task.commit)`), not whatever is on the Hub's task branch by then.
+- **Revocation** marks the key, saves it (a failed save answers 500: unlike other state, key
+  saves throw), and cuts every connection made with it at once (`terminate`, node dropped).
+  Connections opening at that moment and every later message re-check `isActive`, and Git
+  checks the key per request. Each node shows `workerKey` (`{id, name}` or `null` for the main
+  token) in `/api/nodes`, the console and `aso status`.
+- **Joining.** Wrong codes are slowed down per client address (30 a minute); a valid code always
+  joins, so a flood can't keep a machine out, even behind a proxy where every client shares an
+  address. A join whose save fails answers 500 and leaves no key behind. The printed join steps download into a fresh private folder (`mktemp -d`) and
+  check the package against the Hub's SHA-256 before installing it. The machine's key wins over an `ASO_TOKEN` left in its environment, and it is
+  written to a new owner-only file that is renamed into place.
+- **Known limits.** `nodeOwners` lives in memory: right after a Hub restart, the first credential
+  to register a node id gets it (persisting it with the task state would close that window). It
+  also keeps one small entry per worker start until the Hub restarts. `100.64.0.0/10` counts as private for Tailscale, but carrier-grade
+  NAT uses it too. The transport check runs when the worker starts, not on every reconnect. The
+  worker passes its credential to `git` as `-c http.extraHeader`, so other local users can see it
+  in the process list (as with the main token before).
+- **Transport.** Workers dial out, so their location doesn't matter. `checkTransport`
+  (`cli/src/join.ts`) refuses plain `ws://` when the Hub's address resolves to a public IP
+  (`isPrivateAddress`: loopback, RFC 1918, link-local, Tailscale's 100.64.0.0/10 and ULA
+  addresses count as private), unless `--allow-insecure`. With `wss://`, Git and package
+  downloads use `https://` too (`hubGitUrl`, `hubHttpBase`).

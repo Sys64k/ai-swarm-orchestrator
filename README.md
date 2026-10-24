@@ -186,14 +186,41 @@ aso hub-service uninstall
 
 ### Worker machines
 
-Workers install the package the Hub serves. No clone, build or npm registry access is needed:
+Workers install the package the Hub serves. No clone, build or npm registry access is needed.
+Each machine joins with **its own worker key**: on the Hub machine, `aso worker-key new` (or
+**Worker machines → Add a machine** in the console) prints a one-time code and what to run:
 
 ```bash
 curl -fo /tmp/aso.tgz http://192.168.1.10:7420/dist/aso.tgz && npm install -g /tmp/aso.tgz
-mkdir -p ~/.config/aso && echo "ASO_TOKEN=<output of aso token on the Hub>" >> ~/.config/aso/.env
-chmod 600 ~/.config/aso/.env
-aso start-worker --hub 192.168.1.10
+aso service install --hub 192.168.1.10 --join <code>
 ```
+
+- **A worker key only does worker work:** the worker connection, and the projects' Git (pushes
+  to task branches only). It can't plan, approve, merge, deploy or read the API, so a machine
+  that is lost or compromised doesn't hand over the Hub.
+- **One key per machine, revocable:** `aso worker-keys` lists them (connected, last seen),
+  `aso worker-key revoke <id>` (or **Revoke** in the console) disconnects that machine at once
+  and keeps it out. The Hub stores only a hash of each key; the machine keeps its key in
+  `~/.config/aso/worker-key` (mode 600).
+- **The join code** works once, for 30 minutes. `--name` labels the key (default: the
+  machine's hostname).
+- Workers that use the Hub's main token (`ASO_TOKEN`) keep working; `aso status` and the console
+  say which workers use it, so you can move them to keys.
+
+#### Workers anywhere
+
+A worker connects out to the Hub, so it needs no open port, wherever it is. What matters is how
+its traffic gets there:
+
+- **Tailscale (recommended for your own machines):** put the Hub machine and the worker in the
+  same tailnet and use the Hub's tailnet name: `aso service install --hub agent007 --join
+  <code>`. WireGuard encrypts everything end to end, and nothing of the Hub faces the internet.
+- **TLS:** with a `wss://` address (a reverse proxy or tunnel with HTTPS in front of the Hub's
+  port), the worker connection, Git and updates all use TLS.
+- **Plain `ws://` over the internet is refused.** If the Hub's address resolves to a public IP
+  and the address isn't `wss://`, the worker stops with the reason, because the key, the code and
+  every job would cross the internet unencrypted. `--allow-insecure` overrides that.
+- Model calls go through the Hub: workers never hold the Anthropic key.
 
 Workers need **Docker**, usable by the worker's user (in the `docker` group). Every command a
 job runs goes into a throwaway container: agent commands, `npm ci` with its install scripts,
@@ -768,7 +795,9 @@ outgoing messages and sends them once it has registered again.
 | `-p, --port <port>` | `7420` | Hub port, if `--hub` doesn't include one |
 | `-w, --work-dir <path>` | `~/.aso/work` | Where the project checkouts live; the I/O benchmark runs here |
 | `--slots <n>` | from the machine | Jobs to run at once, 1–16, each in its own checkout (`<project>`, `<project>.2`, …). The default is one per 2 threads and 6 GiB of RAM, at most 4, and 1 with `--sandbox none` (jobs would share ports) |
-| `--token <token>` | `ASO_TOKEN` / token file | The Hub's ASO token |
+| `--token <token>` | `ASO_TOKEN` / worker key / token file | What to connect with (normally the machine's worker key) |
+| `--join <code>` | | Join the Hub with a one-time code from `aso worker-key new`: the machine gets its own worker key |
+| `--allow-insecure` | | Allow plain `ws://` to a Hub on the internet (refused otherwise) |
 | `--sandbox <mode>` | `docker` | `docker`: each job command runs in a throwaway container that sees only the checkout. `none`: directly on this machine as this user. The worker refuses to start if `docker` is chosen but Docker isn't usable |
 | `--sandbox-image <image>` | built on first start | Image for job commands. The default is `node:<worker's Node major>-bookworm` plus Playwright's Chromium libraries |
 | `--sandbox-network <name>` | `bridge` | Docker network for job commands. `none` blocks all network access, but then `npm ci` and browser downloads fail |
@@ -846,6 +875,13 @@ Deploys the project's `main` now with its command from the Hub's `deploy.json`, 
 the end, and prints how it went: the commit and how long it took, or the reason and the last 30
 lines of output (exit code 1). `--no-wait` only starts it. A project without a deploy command is
 refused with the reason.
+
+### `aso worker-key new`, `aso worker-keys`, `aso worker-key revoke <id>`
+
+`new` creates a one-time join code (30 minutes) and prints what to run on the new machine.
+`--address` is the Hub's address as that machine reaches it (default: this machine's hostname,
+which on Tailscale is its tailnet name). `--name` labels the key. `aso worker-keys` lists the
+keys, and `revoke` shuts a machine out.
 
 ### `aso sync`
 
@@ -927,6 +963,10 @@ Answers can gain fields over time: clients should ignore fields they don't know.
 |---|---|---|
 | `GET` | `/api/health` | Without a token: `{status, auth}`. With it: also target, state directory, main branch, QA, sync status, connections, uptime |
 | `GET` | `/api/version` | Version and SHA-256 of the `aso` package this Hub serves (public) |
+| `POST` | `/api/worker-keys/join-codes` | A one-time code (30 min) a new worker machine trades for its own key |
+| `POST` | `/api/worker-keys/join` | For the joining machine (public: the code is the credential): its worker key, shown once |
+| `GET` | `/api/worker-keys` | The worker keys: name, connected, last used, revoked |
+| `POST` | `/api/worker-keys/{id}/revoke` | Revoke a key: its machine is disconnected and can't come back with it |
 | `GET` / `POST` | `/api/hub/update` | Where the Hub's own update stands (`off` without `--update-from`) / the updater on the Hub machine reports it |
 | `GET` | `/api/openapi.json` | This API as an OpenAPI 3.1 document (public) |
 | `GET` | `/dist/aso.tgz` | The `aso` package for installing/updating machines (public; contains no secrets) |
@@ -1035,9 +1075,13 @@ For the scoring formula, see [ARCHITECTURE.md](ARCHITECTURE.md#6-hardware-aware-
 
 - **Token authentication.** Every node, CLI call, Git operation and dashboard visit needs the
   ASO token. Tokens are compared in constant time.
+- **Worker keys.** Each worker machine can have its own key (`--join`), which only allows worker
+  work (the worker connection and Git) and can be revoked on its own. The Hub's main token is for
+  you, the CLI and the console. See [Worker machines](#worker-machines).
 - **Plain HTTP.** Traffic is unencrypted, so anyone able to sniff your LAN could read the
   token and code. Use a trusted network, or put the Hub behind a TLS reverse proxy or VPN
-  (e.g. WireGuard/Tailscale) if the LAN isn't trusted.
+  (e.g. WireGuard/Tailscale) if the LAN isn't trusted. Workers refuse plain `ws://` to a public
+  address (`--allow-insecure` overrides).
 - **Rotating the token.** Delete `~/.config/aso/token`, restart the Hub, and update `ASO_TOKEN`
   on the workers.
 - **Push restrictions.** The Git endpoint refuses pushes to `main`, tags, deletions, and

@@ -35,7 +35,8 @@ export function workerLine(node: ApiNode): string {
   const name = node.hardware?.hostname ?? node.nodeId;
   const jobs = node.currentTaskIds.length;
   const doing = node.draining ? "draining" : jobs ? `working (${jobs} of ${node.slots} jobs)` : "idle";
-  return `${name}: ${doing}${node.outdated ? `, runs ${node.version} (updates when idle)` : ""}`;
+  const access = node.workerKey ? `key "${node.workerKey.name}"` : "the Hub's main token";
+  return `${name}: ${doing}${node.outdated ? `, runs ${node.version} (updates when idle)` : ""} · ${access}`;
 }
 
 /** What a project's last deploy did, or undefined when it has no deploy command. */

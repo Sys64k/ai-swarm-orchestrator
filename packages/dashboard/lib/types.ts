@@ -117,6 +117,8 @@ export interface HubNode {
   supervisor?: "systemd";
   /** What a person may do now, decided by the Hub (absent from Hubs older than the console). */
   actions?: { [A in WorkerAction]: boolean } & { why: Partial<Record<WorkerAction, string>> };
+  /** The worker key it connected with; null for the Hub's own token (absent from older Hubs). */
+  workerKey?: { id: string; name: string } | null;
   /** aso build the node runs (`0.1.0+<commit>`). Optional: Hubs older than the console don't send it. */
   version?: string;
   /** Runs another build than the Hub serves: `aso update` on that machine. */
@@ -151,6 +153,16 @@ export interface DeployStatus {
   error?: string;
   /** The end of the command's output. */
   output?: string;
+}
+
+/** A worker machine's own key (`GET /api/worker-keys`). */
+export interface WorkerKey {
+  id: string;
+  name: string;
+  createdAt: string;
+  lastUsedAt?: string;
+  revokedAt?: string;
+  connected: boolean;
 }
 
 /** The Hub's own update from its repository (`GET /api/hub/update`). */

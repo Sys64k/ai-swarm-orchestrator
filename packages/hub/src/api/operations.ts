@@ -26,6 +26,11 @@ import {
   PushTestResultSchema,
   PushTestSchema,
   RedeemSignInCodeBodySchema,
+  JoinBodySchema,
+  JoinCodeBodySchema,
+  JoinCodeSchema,
+  WorkerKeyJoinedSchema,
+  WorkerKeySchema,
   RequestChangesBodySchema,
   ReviewChecksSchema,
   SignedInSchema,
@@ -50,6 +55,8 @@ export const REQUEST_SCHEMAS = {
   DeployResult: DeployResultBodySchema,
   HubUpdateReport: HubUpdateReportBodySchema,
   RedeemSignInCode: RedeemSignInCodeBodySchema,
+  JoinCode: JoinCodeBodySchema,
+  Join: JoinBodySchema,
   PushSubscription: PushSubscriptionSchema,
   PushEndpoint: PushEndpointSchema,
   PushTest: PushTestSchema,
@@ -79,6 +86,9 @@ export const ANSWER_SCHEMAS = {
   PushRemoved: PushRemovedSchema,
   PushTestResult: PushTestResultSchema,
   SignInCode: SignInCodeSchema,
+  JoinCode: JoinCodeSchema,
+  WorkerKeyJoined: WorkerKeyJoinedSchema,
+  WorkerKey: WorkerKeySchema,
   SignedIn: SignedInSchema,
 } as const;
 
@@ -214,6 +224,19 @@ const WORKERS: ApiOperation[] = [
   { method: "post", path: "/api/nodes/{id}/drain", tag: "Workers", summary: "Give a worker no new jobs; current ones finish", responses: act("Node", "worker", "Not allowed now (see actions.why)") },
   { method: "post", path: "/api/nodes/{id}/resume", tag: "Workers", summary: "Give a drained worker jobs again (cancels a waiting restart or update)", responses: act("Node", "worker", "Not allowed now") },
   { method: "post", path: "/api/nodes/{id}/restart", tag: "Workers", summary: "Restart a service-run worker once its jobs are done", responses: act("Node", "worker", "Not allowed now (e.g. started by hand)") },
+  {
+    method: "post", path: "/api/worker-keys/join-codes", tag: "Workers", summary: "A one-time code (30 min) a new worker machine trades for its own key", body: "JoinCode", optionalBody: true,
+    responses: { 201: ok("JoinCode", "Created"), 400: err("Invalid body") },
+  },
+  {
+    method: "post", path: "/api/worker-keys/join", tag: "Workers", public: true, summary: "For a joining machine: trade a join code for a worker key (worker work only: /ws and Git)", body: "Join",
+    responses: { 201: ok("WorkerKeyJoined", "Joined"), 400: err("Invalid body"), 403: err("Unknown, used or expired code"), 429: err("Too many failed attempts") },
+  },
+  { method: "get", path: "/api/worker-keys", tag: "Workers", summary: "The worker keys, revoked ones included", responses: { 200: ok(["WorkerKey"]) } },
+  {
+    method: "post", path: "/api/worker-keys/{id}/revoke", tag: "Workers", summary: "Revoke a worker key: its machine is disconnected and can't come back with it",
+    responses: { 200: ok("WorkerKey"), 404: err("No such key") },
+  },
 ];
 
 const CONSOLE: ApiOperation[] = [

@@ -60,7 +60,11 @@ export function parseGitPath(path: string): { project: string; pathInfo: string 
  * `git http-backend`. Mounted under GIT_PATH; workers clone/fetch/push
  * `http://<hub>:<port>/git/<project>.git`. `repoDirOf` maps a project id to its repository.
  */
-export function gitHttpHandler(repoDirOf: (project: string) => string | undefined) {
+export function gitHttpHandler(
+  repoDirOf: (project: string) => string | undefined,
+  /** Who may push these refs, beyond the rules for everyone: a reason to refuse, or undefined. */
+  mayPush: (c: Context, project: string, refs: readonly string[]) => string | undefined = () => undefined,
+) {
   return async (c: Context): Promise<Response> => {
     const parsed = parseGitPath(c.req.path);
     const repoDir = parsed && repoDirOf(parsed.project);
@@ -80,7 +84,7 @@ export function gitHttpHandler(repoDirOf: (project: string) => string | undefine
       } catch (err) {
         return c.text(`invalid push: ${(err as Error).message}`, 400);
       }
-      const violation = checkPushPolicy(updates);
+      const violation = checkPushPolicy(updates) ?? mayPush(c, parsed.project, updates.map((u) => u.ref));
       if (violation) {
         log.warn(`rejected push: ${violation}`);
         return c.text(violation, 403);

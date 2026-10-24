@@ -17,6 +17,7 @@ import { consoleLinkCommand } from "./commands/console-link.js";
 import { llmCheckCommand } from "./commands/llm-check.js";
 import { syncCommand } from "./commands/sync.js";
 import { deployCommand, statusCommand } from "./commands/status.js";
+import { listWorkerKeysCommand, newWorkerKeyCommand, revokeWorkerKeyCommand } from "./commands/worker-keys.js";
 import { layout } from "./layout.js";
 import { approvePlanCommand, planCommand, rejectPlanCommand, replyPlanCommand } from "./commands/plan.js";
 import { startHubCommand } from "./commands/start-hub.js";
@@ -150,7 +151,9 @@ function workerOptions(cmd: Command): Command {
     .option("-p, --port <port>", "Hub port if not given in --hub", parsePort, DEFAULT_HUB_PORT)
     .option("-w, --work-dir <path>", "directory for task checkouts (default: ~/.aso/work)")
     .option("--slots <n>", "jobs to run at once (default: from cores and RAM, at most 4; 1 with --sandbox none)", parseSlots)
-    .option("--token <token>", "ASO token from the Hub (default: ASO_TOKEN or the local token file)")
+    .option("--token <token>", "ASO token from the Hub (default: ASO_TOKEN, this machine's worker key, or the local token file)")
+    .option("--join <code>", "join the Hub with a one-time code from `aso worker-key new` (or its console): this machine gets its own worker key")
+    .option("--allow-insecure", "allow plain ws:// to a Hub on the internet (unencrypted)", false)
     .option(
       "--sandbox <mode>",
       "where job commands run: docker (a container per command that sees only the checkout) or none (directly on this machine)",
@@ -271,6 +274,25 @@ program
   .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
   .option("--no-wait", "only start it")
   .action((project: string, opts: { hub: string; wait: boolean }) => deployCommand(project, opts));
+
+const workerKeyCmd = program.command("worker-key").description("Let a worker machine join with its own key, or shut one out");
+workerKeyCmd
+  .command("new")
+  .description("A one-time join code, and the commands to run with it on the new machine")
+  .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
+  .option("--address <address>", "the Hub's address as the new machine reaches it (default: this machine's hostname)")
+  .option("--name <name>", "a name for the machine's key (default: its hostname)")
+  .action(newWorkerKeyCommand);
+workerKeyCmd
+  .command("revoke <id>")
+  .description("Revoke a worker key: its machine is disconnected and can't come back with it")
+  .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
+  .action((id: string, opts: { hub: string }) => revokeWorkerKeyCommand(id, opts));
+program
+  .command("worker-keys")
+  .description("List the worker keys: which machine, whether connected, revoked ones too")
+  .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
+  .action(listWorkerKeysCommand);
 
 program
   .command("token")

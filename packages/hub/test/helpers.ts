@@ -27,6 +27,8 @@ const AUTH = `Authorization: Bearer ${TOKEN}`;
 
 const GIT_ENV = {
   ...process.env,
+  // A refused credential fails the command instead of waiting for someone to type a password.
+  GIT_TERMINAL_PROMPT: "0",
   GIT_AUTHOR_NAME: "Test",
   GIT_AUTHOR_EMAIL: "test@test",
   GIT_COMMITTER_NAME: "Test",
@@ -169,9 +171,11 @@ export async function worker(
     hostname?: string;
     slots?: number;
     running?: Array<{ taskId: string; job: "implement" | "test" }>;
+    /** What it connects with (default: the Hub's token). */
+    token?: string;
   } = {},
 ) {
-  const c = await connect(port);
+  const c = await connect(port, opts.token ?? TOKEN);
   c.send(
     createMessage("NODE_REGISTRATION", nodeId, {
       nodeKind: "worker",

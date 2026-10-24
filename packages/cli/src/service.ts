@@ -16,6 +16,7 @@ export interface WorkerServiceOptions {
   sandbox?: "docker" | "none";
   sandboxImage?: string;
   sandboxNetwork?: string;
+  allowInsecure?: boolean;
 }
 
 /** `start-worker` arguments for the service, with defaults left out so later defaults apply. */
@@ -27,6 +28,7 @@ export function workerArgs(o: WorkerServiceOptions, defaultPort: number): string
   if (o.sandbox && o.sandbox !== "docker") args.push("--sandbox", o.sandbox);
   if (o.sandboxImage) args.push("--sandbox-image", o.sandboxImage);
   if (o.sandboxNetwork) args.push("--sandbox-network", o.sandboxNetwork);
+  if (o.allowInsecure) args.push("--allow-insecure");
   return args;
 }
 
@@ -132,10 +134,10 @@ export function envFilesSetToken(contents: readonly string[], token: string): bo
 
 /**
  * Whether the service needs its own token file: not when the worker finds the token by itself,
- * in the token file or in a `.env` file the CLI loads on start.
+ * in a file it reads (the token file, its worker key) or in a `.env` file the CLI loads on start.
  */
-export function needsTokenEnvFile(token: { token: string; source: string }, tokenFilePath: string, envContents: readonly string[]): boolean {
-  return token.source !== tokenFilePath && !envFilesSetToken(envContents, token.token);
+export function needsTokenEnvFile(token: { token: string; source: string }, foundIn: readonly string[], envContents: readonly string[]): boolean {
+  return !foundIn.includes(token.source) && !envFilesSetToken(envContents, token.token);
 }
 
 export function userUnitDir(env: NodeJS.ProcessEnv = process.env): string {

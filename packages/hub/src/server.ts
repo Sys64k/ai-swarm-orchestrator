@@ -18,6 +18,9 @@ import {
   createLogger,
   createMessage,
   isAuthorized,
+  credentialOf,
+  JoinBodySchema,
+  JoinCodeBodySchema,
   parseAgentMessage,
   parseBody,
   runningJobsOf,
@@ -54,6 +57,10 @@ import { Notifier, TEST_NOTIFICATION } from "./push/notifier.js";
 import { WorkerWatch } from "./push/workers.js";
 import { Deployer, deployNotification, HostDeployQueue } from "./deploy.js";
 import { hubUpdateNotification } from "./hub-update.js";
+import { WorkerKeys, type WorkerKeyView } from "./worker-keys.js";
+
+/** Wrong join codes per client address and minute before joining answers 429 (codes are 144 random bits; this only slows a flood). */
+const MAX_FAILED_JOINS_PER_MIN = 30;
 import type { sendPush } from "./push/web-push.js";
 import { SignInCodes } from "./sign-in-codes.js";
 import { StateStore } from "./state-store.js";
@@ -173,6 +180,8 @@ export interface HubHandle {
 interface Connection {
   connId: string;
   ws: WSContext;
+  /** The worker key it connected with; none for the Hub's own token. */
+  workerKey?: { id: string; name: string };
   /** Set once the node has sent a valid NODE_REGISTRATION. */
   nodeId?: string;
   transport?: NodeTransport;
@@ -216,6 +225,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   // Remember every record's current state, so only what changes from now on notifies.
   for (const p of projects.list()) notifier.observe({ id: p.id, tasks: p.tasks.list(), plans: p.plans.list() });
   const workerWatch = await WorkerWatch.open({ dir: conversationDir, alertMs: opts.push?.workerOfflineMs });
+  const workerKeys = await WorkerKeys.open(conversationDir);
   if (conversationDir) {
     deployer = new Deployer({
       dir: conversationDir,
@@ -293,12 +303,22 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       return reject(conn, `nodes may not send ${msg.type}`, [], msg.id);
     }
 
+    // A revoked key's connection is cut at once; a message that raced the cut goes nowhere.
+    if (conn.workerKey && !workerKeys.isActive(conn.workerKey.id)) return void conn.ws.close(4401, "worker key revoked");
+
     if (msg.type === "NODE_REGISTRATION") {
       if (conn.nodeId) return reject(conn, "already registered", [], msg.id);
       if (msg.from === HUB_NODE_ID || registry.has(msg.from)) {
         reject(conn, `node id "${msg.from}" is already in use`, [], msg.id);
         return conn.ws.close(4009, "duplicate node id");
       }
+      const keyProblem = workerKeyProblem(conn, msg.from, msg.payload.nodeKind);
+      if (keyProblem) {
+        reject(conn, keyProblem, [], msg.id);
+        return conn.ws.close(4403, keyProblem.slice(0, 120));
+      }
+      nodeOwners.set(msg.from, conn.workerKey?.id ?? null);
+      replaceEarlier(conn);
       conn.nodeId = msg.from;
       conn.transport = {
         send: (raw) => conn.ws.send(raw),
@@ -402,6 +422,51 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     c.header("WWW-Authenticate", 'Basic realm="ASO Hub"');
     return c.json({ error: "missing or invalid ASO token" }, 401);
   };
+  /** Which credential each node id registered with (a key id, or null for the Hub's token): no other may take that id or its jobs. */
+  const nodeOwners = new Map<string, string | null>();
+  /**
+   * Why a connection made with a worker key may not register as `nodeId`: a key registers one
+   * worker, never the Architect, and never a node id another credential registered.
+   */
+  const workerKeyProblem = (conn: Connection, nodeId: string, kind: string): string | undefined => {
+    const owner = nodeOwners.get(nodeId);
+    const mine = conn.workerKey?.id ?? null;
+    if (owner !== undefined && owner !== mine) return `node id "${nodeId}" belongs to another credential`;
+    if (!conn.workerKey) return undefined;
+    if (kind !== "worker") return "a worker key can only register a worker";
+    return undefined;
+  };
+  /**
+   * One worker per key: a new registration replaces the key's earlier connection (a machine back
+   * after a power cut, whose old socket the Hub still thinks is open), so a key never has two
+   * workers at once (e.g. one to implement and one to pass its own QA).
+   */
+  const replaceEarlier = (conn: Connection) => {
+    if (!conn.workerKey) return;
+    for (const other of connections.values()) {
+      if (other === conn || other.workerKey?.id !== conn.workerKey.id || !other.nodeId) continue;
+      log.info(`worker key ${conn.workerKey.id}: ${conn.nodeId ?? "a new connection"} replaces ${other.nodeId}`);
+      other.ws.close(4409, "replaced by a newer connection with the same worker key");
+      other.transport?.terminate();
+      if (other.transport) dropNode(other.nodeId, other.transport);
+    }
+  };
+  /** Cut every connection made with a key now: no close handshake to wait for, and its node is gone. */
+  const cutOff = (keyId: string) => {
+    for (const conn of connections.values()) {
+      if (conn.workerKey?.id !== keyId) continue;
+      conn.ws.close(4401, "worker key revoked");
+      conn.transport?.terminate();
+      if (conn.nodeId && conn.transport) dropNode(conn.nodeId, conn.transport);
+    }
+  };
+  /** The worker key a request presents, if it is a valid one. */
+  const workerKeyOf = (c: Context) => {
+    const given = credentialOf(c.req.header("authorization"));
+    return given === undefined ? undefined : workerKeys.verify(given);
+  };
+  /** Worker work (the worker connection, the projects' Git) also takes a worker key. */
+  const requireWorker: MiddlewareHandler = async (c, next) => (workerKeyOf(c) ? next() : requireAuth(c, next));
   // The CLI package is public: it contains no secrets, and new machines need it before they
   // have a token. Version info lets `aso update` decide whether to download it.
   let digest: { file: string; mtimeMs: number; sha256: string } | undefined;
@@ -427,13 +492,31 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   });
 
   // Health stays public (minimal) so tools can check liveness; everything else needs the token.
-  app.use("/api/*", async (c, next) => (["/api/health", "/api/version", "/api/openapi.json"].includes(c.req.path) ? next() : requireAuth(c, next)));
+  // Joining is public: the one-time code in the body is the credential.
+  app.use("/api/*", async (c, next) =>
+    ["/api/health", "/api/version", "/api/openapi.json", "/api/worker-keys/join"].includes(c.req.path) ? next() : requireAuth(c, next),
+  );
   app.get("/api/openapi.json", (c) => c.json(openApiDocument(hubVersion() ?? UNKNOWN_VERSION)));
-  app.use(`${GIT_PATH}/*`, requireAuth);
-  app.use(WS_PATH, requireAuth);
+  app.use(`${GIT_PATH}/*`, requireWorker);
+  app.use(WS_PATH, requireWorker);
 
   // Workers clone, fetch and push each project at /git/<project>.git; pushes are limited to task/* refs.
-  const git = gitHttpHandler((id) => projects.get(id)?.dir);
+  // A worker key pushes only to the tasks its own worker is implementing.
+  const git = gitHttpHandler(
+    (id) => projects.get(id)?.dir,
+    (c, project, refs) => {
+      const key = workerKeyOf(c);
+      if (!key) return undefined;
+      const nodes = new Set([...nodeOwners].filter(([, owner]) => owner === key.id).map(([nodeId]) => nodeId));
+      for (const ref of refs) {
+        const task = projects.get(project)?.tasks.get(ref.slice("refs/heads/task/".length));
+        // Its own job, or one just cancelled or failed under it (the agent saves unfinished work then).
+        const ours = task && ["assigned", "in_progress", "cancelled", "failed"].includes(task.state) && task.nodeId !== undefined && nodes.has(task.nodeId);
+        if (!ours) return `this worker key has no job on ${ref}`;
+      }
+      return undefined;
+    },
+  );
   app.on(["GET", "POST"], [`${GIT_PATH}/*`], (c) => git(c));
 
   /** A project path as people know it (the host path when the Hub runs in Docker). */
@@ -466,6 +549,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   const withOutdated = (n: ReturnType<NodeRegistry["view"]>) => ({
     ...n,
     outdated: isOutdated(n.version, hubVersion()),
+    workerKey: [...connections.values()].find((c) => c.nodeId === n.nodeId)?.workerKey ?? null,
     jobs: n.currentTaskIds.map((taskId) => {
       const task = tasks.get(taskId);
       const job = task?.state === "testing" && task.qaNodeId === n.nodeId ? ("test" as const) : ("implement" as const);
@@ -603,6 +687,48 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     if (!hostDeploys?.complete(c.req.param("id"), req.data)) return c.json({ error: "no such deploy job waiting for a result" }, 404);
     return c.json({ accepted: true });
   });
+  // Worker keys: a machine joins with a one-time code and gets a key for worker work only.
+  /** Wrong join codes per client address and minute: one flood source can't block others joining. */
+  const failedJoins = new Map<string, { minute: number; count: number }>();
+  const clientAddress = (c: Context) => (c.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined)?.incoming?.socket?.remoteAddress ?? "unknown";
+  app.post("/api/worker-keys/join-codes", async (c) => {
+    const req = await parsed(c, JoinCodeBodySchema, { optional: true });
+    if (!req.ok) return c.json({ error: req.error }, 400);
+    return c.json(workerKeys.createJoinCode(req.data?.name), 201);
+  });
+  app.post("/api/worker-keys/join", async (c) => {
+    const minute = Math.floor(Date.now() / 60_000);
+    const from = clientAddress(c);
+    const failed = failedJoins.get(from);
+    const req = await parsed(c, JoinBodySchema);
+    if (!req.ok) return c.json({ error: req.error }, 400);
+    // Only wrong codes are slowed down: behind a proxy every client shares an address, and a
+    // flood of guesses must not keep a machine with a real code out.
+    const limited = failed?.minute === minute && failed.count >= MAX_FAILED_JOINS_PER_MIN;
+    if (limited && !workerKeys.hasCode(req.data.code)) return c.json({ error: "too many failed attempts; try again in a minute" }, 429);
+    const joined = await workerKeys.join(req.data.code, req.data.machine);
+    if (!joined) {
+      for (const [address, f] of failedJoins) if (f.minute !== minute) failedJoins.delete(address);
+      failedJoins.set(from, { minute, count: failed?.minute === minute ? failed.count + 1 : 1 });
+      return c.json({ error: "unknown, used or expired join code: create a new one on the Hub" }, 403);
+    }
+    return c.json(joined, 201);
+  });
+  const keyView = (k: WorkerKeyView) => ({ ...k, connected: [...connections.values()].some((c) => c.workerKey?.id === k.id) });
+  app.get("/api/worker-keys", (c) => c.json(workerKeys.list().map(keyView)));
+  app.post("/api/worker-keys/:id/revoke", async (c) => {
+    const id = c.req.param("id");
+    // Revoked in memory first: cut it off even if saving fails (the 500 then says so).
+    const revoked = await workerKeys.revoke(id).catch((err: Error) => {
+      cutOff(id);
+      throw err;
+    });
+    if (!revoked) return c.json({ error: "no such worker key" }, 404);
+    // Its machine stops now: its connection is cut, and it can't reconnect or fetch.
+    cutOff(revoked.id);
+    return c.json(keyView(revoked));
+  });
+
   /** The Hub's own update, as the updater on its machine last reported it (`off` until it does). */
   const running = opts.dist?.version() ?? UNKNOWN_VERSION;
   let hubUpdate: HubUpdate = { state: "off", current: running };
@@ -783,16 +909,20 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
 
   app.get(
     WS_PATH,
-    upgradeWebSocket(() => {
+    upgradeWebSocket((c) => {
       const connId = randomUUID();
+      const key = workerKeyOf(c);
       let conn: Connection;
       return {
         onOpen(_evt, ws) {
-          conn = { connId, ws };
+          // Revoked between the upgrade and now: never let it in.
+          if (key && !workerKeys.isActive(key.id)) return void ws.close(4401, "worker key revoked");
+          conn = { connId, ws, ...(key ? { workerKey: { id: key.id, name: key.name } } : {}) };
           connections.set(connId, conn);
           log.info(`connection opened ${connId} (total ${connections.size})`);
         },
         onMessage(evt) {
+          if (!conn) return; // refused in onOpen
           if (typeof evt.data !== "string") return reject(conn, "binary frames are not supported");
           if (Buffer.byteLength(evt.data) > MAX_FRAME_BYTES) return reject(conn, "frame too large");
           const parsed = parseAgentMessage(evt.data);

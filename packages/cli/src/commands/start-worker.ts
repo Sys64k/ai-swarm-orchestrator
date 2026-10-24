@@ -1,4 +1,5 @@
-import { createLogger, hubHttpBase, resolveToken } from "@aso/shared";
+import { createLogger, hubHttpBase, resolveWorkerToken } from "@aso/shared";
+import { checkTransport, joinHub } from "../join.js";
 import { startWorker, type WorkerHandle } from "@aso/worker";
 import { layout } from "../layout.js";
 import { runsAsSystemdService } from "../service.js";
@@ -15,12 +16,16 @@ export async function startWorkerCommand(opts: {
   sandbox: "docker" | "none";
   sandboxImage?: string;
   sandboxNetwork?: string;
+  join?: string;
+  allowInsecure?: boolean;
 }): Promise<void> {
-  const token = opts.token ?? resolveToken()?.token;
+  await checkTransport(opts.hub, opts.port, opts.allowInsecure ?? false);
+  if (opts.join) await joinHub(opts.hub, opts.port, opts.join);
+  const token = opts.token ?? resolveWorkerToken()?.token;
   if (!token) {
-    throw new Error("no ASO token: pass --token or set ASO_TOKEN (run `aso token` on the Hub machine to see it)");
+    throw new Error("no worker key: join with --join <code> (from `aso worker-key new` on the Hub), or pass --token");
   }
-  const { sandboxImage, sandboxNetwork, ...rest } = opts;
+  const { sandboxImage, sandboxNetwork, join: _join, allowInsecure: _allowInsecure, ...rest } = opts;
   // Our unit has Restart=always, so exiting restarts the worker on the installed build.
   const supervisor = runsAsSystemdService(process.env, process.pid) ? ("systemd" as const) : undefined;
   // Only a package install run as a service updates itself: a source checkout follows its git

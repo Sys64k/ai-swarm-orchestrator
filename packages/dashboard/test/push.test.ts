@@ -52,6 +52,11 @@ describe("console access to push", () => {
     assert.equal(hubPath("GET", ["projects", "shop", "deploy"]), undefined);
     assert.equal(hubPath("GET", ["hub", "update"]), "/api/hub/update");
     assert.equal(hubPath("POST", ["hub", "update"]), undefined, "only the updater on the Hub machine reports");
+    assert.equal(hubPath("GET", ["worker-keys"]), "/api/worker-keys");
+    assert.equal(hubPath("GET", ["version"]), "/api/version");
+    assert.equal(hubPath("POST", ["worker-keys", "join-codes"]), "/api/worker-keys/join-codes");
+    assert.equal(hubPath("POST", ["worker-keys", "k1", "revoke"]), "/api/worker-keys/k1/revoke");
+    assert.equal(hubPath("POST", ["worker-keys", "join"]), undefined, "joining is for the new machine, not the console");
     for (const p of ["subscriptions", "subscriptions/check", "subscriptions/delete", "test"]) assert.equal(hubPath("POST", ["push", ...p.split("/")]), `/api/push/${p}`);
     assert.equal(hubPath("POST", ["push"]), undefined);
     assert.equal(hubPath("GET", ["push", "subscriptions"]), undefined);
