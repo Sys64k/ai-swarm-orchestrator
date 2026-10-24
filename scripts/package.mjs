@@ -79,7 +79,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends git ca-certific
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 HOME=/data
 COPY . /opt/aso
 ENTRYPOINT ["node", "/opt/aso/dist/aso.mjs"]
-CMD ["start-hub", "--root", "/projects", "--no-architect"]
+# The host-side aso start-hub --docker answers LAN discovery: broadcasts never reach this container.
+CMD ["start-hub", "--root", "/projects", "--no-architect", "--no-discovery"]
 `,
 );
 const composeSource = readFileSync(path.join(root, "docker-compose.yml"), "utf8");
