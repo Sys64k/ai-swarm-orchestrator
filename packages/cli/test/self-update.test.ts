@@ -36,6 +36,7 @@ interface SetupOptions {
   /** The version the Hub says it runs. */
   hubVersion?: string;
   watchdogFails?: boolean;
+  /** The restart never happens: the updater notices after a short grace. */
   restartFails?: boolean;
   /** `git ls-remote` fails. */
   remoteFails?: boolean;
@@ -103,8 +104,10 @@ async function setup(opts: SetupOptions = {}) {
       },
       restart: () => {
         restarts++;
-        return !opts.restartFails;
       },
+      // A restart stops the process, which a test can't: check() then never returns, as in a real
+      // restart, and the test looks at the state it left. With restartFails the grace is short.
+      restartGraceMs: opts.restartFails ? 50 : 10 * 60_000,
       idlePollMs: 50,
       stableMs: 200,
     });
@@ -117,7 +120,14 @@ async function setup(opts: SetupOptions = {}) {
     await hub.close();
     rmSync(root, { recursive: true, force: true });
   };
-  return { hub, paths, versions, runningDir, calls, envs, watchdogs, restarts: () => restarts, updater, call, status, pending, current, cleanup };
+  /** A pass that switches: in a real restart, check() never returns, so wait for the restart or its end. */
+  const checkUntilRestart = async () => {
+    const done = updater().check();
+    let finished = false;
+    void done.then(() => (finished = true));
+    while (restarts === 0 && !finished) await new Promise((r) => setTimeout(r, 10));
+  };
+  return { checkUntilRestart, hub, paths, versions, runningDir, calls, envs, watchdogs, restarts: () => restarts, updater, call, status, pending, current, cleanup };
 }
 
 const LS_REMOTE = "git ls-remote https://example.com/aso.git refs/heads/main";
@@ -145,7 +155,7 @@ describe("the Hub's own update", () => {
     try {
       await s.call("/api/projects/shop/deploy", "POST");
       while ((await s.call("/api/projects/shop")).deploy.last?.state !== "running") await new Promise((r) => setTimeout(r, 10));
-      await s.updater().check();
+      await s.checkUntilRestart();
       assert.deepEqual(s.calls.map((c) => c.split(" ").slice(0, 2).join(" ")), [
         "git ls-remote",
         "git clone",
@@ -180,7 +190,7 @@ describe("the Hub's own update", () => {
     process.env.ASO_GIT_TOKEN = "secret-git-token";
     const s = await setup();
     try {
-      await s.updater().check();
+      await s.checkUntilRestart();
       assert.equal(s.envs.length, 3, "npm ci, npm test and npm run package; git runs with the Hub's own");
       for (const env of s.envs) {
         assert.equal(env.HOME, path.join(s.paths.work, "home"));
@@ -390,7 +400,7 @@ describe("the update watchdog", () => {
     const s = await setup();
     try {
       fakeInstall(s.versions.dirOf(NEW_VERSION), "built on an earlier pass");
-      await s.updater().check();
+      await s.checkUntilRestart();
       assert.deepEqual(s.calls, [LS_REMOTE, LS_REMOTE], "no build, only the re-check after waiting");
       assert.equal(s.current(), s.versions.dirOf(NEW_VERSION));
     } finally {

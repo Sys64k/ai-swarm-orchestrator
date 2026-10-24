@@ -1432,7 +1432,7 @@ flowchart TD
   V --> W["waiting: until no task at work, no running deploy, no plan being made"]
   W -->|"main moved"| P
   W --> A["pending.json (id, deadline); arm watchdog for that id in the running version (systemd-run, 15 min)"]
-  A --> S["previous and current links, restart the service (--no-block; undone if it fails)"]
+  A --> S["previous and current links, restart from a transient unit (undone if this process is still alive after RESTART_GRACE_MS)"]
   S --> N{"new version answers as itself for CONFIRM_STABLE_MS?"}
   N -->|yes| U["clear pending, prune other versions, report updated"]
   N -->|"no, by the deadline"| RB["watchdog (previous version's CLI): failed.json permanent, rolled-back.json, current back, restart"]
@@ -1456,6 +1456,11 @@ flowchart TD
   start, the version before the last update rolls back an update past its `deadline`, and the
   start then runs the previous version. `-`: a failing check never blocks a start. The unit sets
   `ASO_HUB_HOME`, so the install, the service and the watchdog agree on the folder.
+- **Restarting.** `restartHubService` asks for the restart from a transient unit
+  (`systemd-run ... systemctl --user restart aso-hub.service`): stopping the service kills every
+  process in it, so a `systemctl` started from the Hub itself was killed mid-way and reported a
+  failure although the restart went ahead. Its answer is not trusted either way: the updater waits
+  `RESTART_GRACE_MS` (2 min), and only a process still alive then undoes the switch.
 - **Order.** `afterStart` (confirming) runs before the first `check()`, so pruning old versions
   never races an install, and a new update never starts while the last one is unconfirmed.
 - **Confirming** (`afterStart`) polls `GET /api/hub/update`, whose `current` is the version the

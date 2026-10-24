@@ -19,6 +19,8 @@ export const CONFIRM_DEADLINE_SEC = 15 * 60;
 export const HUB_HOME_ENV = "ASO_HUB_HOME";
 /** How long a new version must answer, as itself, before it confirms. */
 export const CONFIRM_STABLE_MS = 60_000;
+/** How long a restart may take to stop this process before it counts as not having happened. */
+export const RESTART_GRACE_MS = 2 * 60_000;
 /** A commit whose build or tests failed is tried this often (a flaky test, the network); one that didn't come up, once. */
 export const BUILD_ATTEMPTS = 3;
 const CLONE_TIMEOUT_MS = 10 * 60_000;
@@ -158,11 +160,12 @@ export interface UpdaterOptions {
   exec?: Exec;
   /** Make the running version (its CLI at `entry`) check in `deadlineSec` that update `id` confirmed, else roll back. */
   armWatchdog: (entry: string, deadlineSec: number, id: string) => Promise<void>;
-  /** Restart the service onto `current` (without waiting: it stops this process); false when it couldn't. */
-  restart: () => boolean;
+  /** Restart the service onto `current`, which stops this process (without waiting for that). */
+  restart: () => void;
   pollMs?: number;
   idlePollMs?: number;
   stableMs?: number;
+  restartGraceMs?: number;
 }
 
 /**
@@ -280,8 +283,10 @@ export class HubUpdater {
     await this.report({ state: "restarting", target: sha });
     log.info(`switched to ${version}; restarting`);
     this.stop();
-    if (this.opts.restart()) return;
-    // Still running the old version: undo the switch (the watchdog then finds nothing to do).
+    this.opts.restart();
+    // A restart stops this process within seconds; one still here after the grace didn't happen.
+    await new Promise((r) => setTimeout(r, this.opts.restartGraceMs ?? RESTART_GRACE_MS).unref());
+    log.warn(`still running ${current} ${(this.opts.restartGraceMs ?? RESTART_GRACE_MS) / 1000} s after asking for a restart: undoing the switch`);
     await this.versions.switchTo(fromDir);
     await this.state.clearPending();
     await this.fail(sha, "the Hub service could not be restarted onto it", false);
