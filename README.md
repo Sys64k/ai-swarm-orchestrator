@@ -303,6 +303,24 @@ The install puts the package in `~/.local/share/aso/hub/versions/` and points th
 it, so the Hub no longer runs from the checkout. A source checkout or a Hub started by hand never
 updates itself: both warn and ignore the option.
 
+#### Projects that keep a copy of the Hub API
+
+A project that builds on the Hub's API, such as a console of its own, can keep a copy of the
+API description in `docs/openapi.json`, for generating its types. When the Hub starts on a
+version whose API differs from that copy, it queues a task in the project:
+
+- **The task's branch already has the new copy** as its first commit, by the Hub, so the agent
+  starts from the real contract. It is told what changed (operations and schemas added, removed
+  or changed), and to regenerate what the project derives from the copy and fix what no longer
+  compiles or passes, such as fixtures that miss new required fields. Features on new endpoints
+  are left for a plan.
+- **It goes through QA and review like any task**, so the update reaches the project as a pull
+  request to merge.
+- **Once per project and version of the API:** a task you cancel isn't queued again, and a copy
+  already synced on GitHub (by hand, say) is noticed after catching up.
+- Only a `docs/openapi.json` titled "ASO Hub API" counts; other API descriptions are left alone.
+  `apiSync: false` (in `startHub`) turns it off.
+
 #### Drain and restart from the console
 
 Tap a worker on the console's home page:

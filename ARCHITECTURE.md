@@ -1479,3 +1479,24 @@ flowchart TD
   update ends (`hubUpdateNotification`: `updated` or `failed`, once per outcome).
 - **Busy** comes from `TASK_AT_WORK` in `@aso/shared`, a map over every task state, so a new
   state has to say whether a restart would interrupt it.
+
+### Keeping a project's copy of the Hub API in sync
+
+`syncApiCopies` (`hub/src/api-sync.ts`) runs once when the Hub starts. For each project whose
+`main` has a `docs/openapi.json` titled like the Hub's own description (`openApiDocument`) but
+different from it:
+
+1. **Catch up first.** `ProjectSet.followForPlanning`, then read the copy again: it may have been
+   synced on GitHub already. Projects without a copy cause no fetch.
+2. **Seed the branch.** `HubRepository.seedTaskBranch` writes the new description (as
+   `npm run openapi` writes it) into `task/<id>` as one commit on top of `main`, by "ASO Hub",
+   through a temporary index (`GIT_INDEX_FILE`, plain `git`, since simple-git refuses that
+   variable), so the checkout and `main` are untouched. A worker taking the task continues from
+   that branch (`startTask` resumes an existing task branch).
+3. **Queue the task** (`syncTaskSpec`, role `frontend`): what changed per `apiChanges`
+   (operations as `METHOD /path` and `schema Name`, at most 40 of each named), regenerate and
+   fix, no new features, keep the copy as it is.
+
+The task id is `sync-hub-api-<hash of project id and description>`, so each project gets one
+task per version of the description, and a cancelled one is not queued again. Failures are
+logged, never thrown; `close()` waits for the run, so it never outlives the Hub.

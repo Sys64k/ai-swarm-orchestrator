@@ -1,11 +1,14 @@
 import { existsSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { simpleGit, type SimpleGit } from "simple-git";
 import {
   createLogger,
   isProtectedPath,
   taskBranchName,
+  TaskIdSchema,
   writeDenial,
   type AgentRole,
   type PackageChange,
@@ -13,6 +16,8 @@ import {
   type TaskId,
 } from "@aso/shared";
 import { parseDiff } from "./diff.js";
+
+const execFileAsync = promisify(execFile);
 
 const log = createLogger("hub-repo");
 
@@ -112,6 +117,45 @@ export class HubRepository {
       if (outOfScope.length) return `${branch} modifies files outside the ${role} role's scope: ${outOfScope.join(", ")}`;
     }
     return undefined;
+  }
+
+  /** A file's contents at `commit`, or undefined when it has none. */
+  async readFileAt(commit: string, repoPath: string): Promise<string | undefined> {
+    if (!(await this.fileExists(commit, repoPath))) return undefined;
+    return this.git.raw(["show", `${commit}:${repoPath}`]);
+  }
+
+  /**
+   * Start a task's branch from main with `files` written, as one commit by the Hub, without
+   * touching the checkout (a temporary index). The worker that takes the task continues from it.
+   */
+  async seedTaskBranch(taskId: TaskId, files: Record<string, string>, message: string): Promise<string> {
+    const base = await this.mainHead();
+    const gitDir = await this.gitDir();
+    const scratch = path.join(gitDir, `aso-seed-${TaskIdSchema.parse(taskId)}`);
+    // Plain git: simple-git refuses GIT_INDEX_FILE, and its `env()` would change the shared client.
+    const env = { ...process.env, GIT_INDEX_FILE: `${scratch}.index`, GIT_AUTHOR_NAME: "ASO Hub", GIT_AUTHOR_EMAIL: "aso-hub@localhost", GIT_COMMITTER_NAME: "ASO Hub", GIT_COMMITTER_EMAIL: "aso-hub@localhost" };
+    const git = { raw: async (args: string[]) => (await execFileAsync("git", args, { cwd: this.dir, env })).stdout };
+    try {
+      await git.raw(["read-tree", base]);
+      for (const [repoPath, content] of Object.entries(files)) {
+        await writeFile(scratch, content);
+        const blob = (await git.raw(["hash-object", "-w", scratch])).trim();
+        await git.raw(["update-index", "--add", "--cacheinfo", `100644,${blob},${repoPath}`]);
+      }
+      const tree = (await git.raw(["write-tree"])).trim();
+      const commit = (await git.raw(["commit-tree", tree, "-p", base, "-m", message])).trim();
+      await git.raw(["update-ref", `refs/heads/${taskBranchName(taskId)}`, commit]);
+      return commit;
+    } finally {
+      await rm(scratch, { force: true });
+      await rm(`${scratch}.index`, { force: true });
+    }
+  }
+
+  /** Remove a task's branch (e.g. one seeded for a task that couldn't be queued). */
+  async deleteTaskBranch(taskId: TaskId): Promise<void> {
+    await this.git.raw(["update-ref", "-d", `refs/heads/${taskBranchName(taskId)}`]).catch(() => undefined);
   }
 
   async fileExists(commit: string, repoPath: string): Promise<boolean> {

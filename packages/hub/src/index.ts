@@ -39,3 +39,4 @@ export { duration, WorkerWatch, WORKER_FORGET_MS, WORKER_OFFLINE_ALERT_MS } from
 export { notableChanges, type ProjectState, type PushNotification } from "./push/changes.js";
 export { encryptPayload, generateVapidKeys, sendPush, vapidAuthorization, MAX_PAYLOAD_BYTES, type PushResult, type VapidKeys } from "./push/web-push.js";
 export { hubUpdateNotification } from "./hub-update.js";
+export { apiChanges, apiFileContents, apiHash, API_COPY_PATH, syncApiCopies, syncTaskId, syncTaskSpec, type ApiChanges } from "./api-sync.js";

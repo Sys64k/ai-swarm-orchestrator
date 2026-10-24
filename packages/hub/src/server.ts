@@ -37,7 +37,8 @@ import {
   SyncBodySchema,
   type AgentMessage,
 } from "@aso/shared";
-import { openApiDocument } from "./api/openapi.js";
+import { API_DOC_VERSION, openApiDocument } from "./api/openapi.js";
+import { syncApiCopies } from "./api-sync.js";
 import type { z } from "zod";
 import { AnthropicApiAdapter, DEFAULT_MAX_TOKENS, type Effort, type LlmAdapter } from "./llm/adapter.js";
 import { ConversationManager } from "./llm/conversations.js";
@@ -104,6 +105,11 @@ export interface HubOptions {
   autoUpdate?: boolean;
   /** The `aso` package this Hub serves to other machines (`aso update`, first installs). */
   dist?: { version: () => string | undefined; tarball: () => string | undefined };
+  /**
+   * When the Hub starts, queue a task for each project whose copy of this Hub's API description
+   * (`docs/openapi.json`) is out of date. Default: on.
+   */
+  apiSync?: boolean;
   /**
    * Push main to the target repo's remote after merges, and catch up with what was merged there
    * (`followMs`: see ProjectSetOptions). Default: on when an `origin` remote exists.
@@ -222,6 +228,8 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     // already live at their main are skipped.
     for (const p of projects.list()) deployer.request(p);
   }
+  // A copy that looks out of date is checked again after catching up with GitHub. `close` waits for it.
+  const apiSyncing = opts.apiSync === false ? Promise.resolve() : syncApiCopies(projects.list(), openApiDocument(API_DOC_VERSION), (p) => projects.followForPlanning(p));
   const llm = opts.llm ?? {};
   const model = llm.model ?? "claude-opus-5-5";
   const anthropic = (id: string) =>
@@ -840,6 +848,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     routes: () => app.routes.filter((r) => r.method === "GET" || r.method === "POST").map((r) => ({ method: r.method, path: r.path })),
     close: async () => {
       clearInterval(sweep);
+      await apiSyncing;
       // Save before the nodes are disconnected: those disconnects are the Hub's doing, and
       // restore() decides what happens to their jobs. Hub-side steps still running (a merge)
       // are saved mid-way and simply run again on the next start.
