@@ -47,13 +47,14 @@ export function restartAfterUpdate(unit: string): void {
 
 
 /**
- * After switching versions: restart the Hub service without waiting for it, since the restart
- * stops this process (a blocking `systemctl` would be killed mid-way and report a failure).
+ * After switching versions: restart the Hub service from a transient unit of its own. Stopping
+ * the service kills every process in it, a `systemctl` started from here included, which then
+ * reports a failure although the restart goes ahead. Whether it happened is for the caller to
+ * see: this process is stopped.
  */
-export function restartHubService(): boolean {
-  const r = userTool("systemctl", ["--no-block", "restart", HUB_SERVICE]);
-  if (!r.ok) log.warn(`could not restart ${HUB_SERVICE}: ${r.output}`);
-  return r.ok;
+export function restartHubService(): void {
+  const r = userTool("systemd-run", ["--collect", "--no-block", `--unit=aso-hub-restart-${Date.now()}`, "systemctl", "--user", "restart", HUB_SERVICE]);
+  if (!r.ok) log.warn(`could not ask systemd to restart ${HUB_SERVICE}: ${r.output}`);
 }
 
 /**
