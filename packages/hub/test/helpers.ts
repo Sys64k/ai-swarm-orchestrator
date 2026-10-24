@@ -13,8 +13,13 @@ import {
 } from "@aso/shared";
 
 process.env.ASO_LOG_LEVEL ??= "error";
+/** Every temporary folder a test made, removed when the test process ends (tests that fail mid-way leave none). */
+const madeDirs: string[] = [];
+process.on("exit", () => {
+  for (const dir of madeDirs) rmSync(dir, { recursive: true, force: true });
+});
 // Never read or write the real ~/.config/aso from tests.
-process.env.ASO_CONFIG_DIR = mkdtempSync(path.join(os.tmpdir(), "aso-config-"));
+process.env.ASO_CONFIG_DIR = tempDir("aso-config-");
 
 /** Every test Hub requires this token. */
 export const TOKEN = "aso_test-token-0123456789";
@@ -49,7 +54,9 @@ export function writeFiles(dir: string, files: Record<string, string>): void {
 }
 
 export function tempDir(prefix = "aso-test-"): string {
-  return mkdtempSync(path.join(os.tmpdir(), prefix));
+  const dir = mkdtempSync(path.join(os.tmpdir(), prefix));
+  madeDirs.push(dir);
+  return dir;
 }
 
 /** A target project repository with one commit on main. */
