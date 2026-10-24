@@ -5,7 +5,10 @@ import { ARCHITECT_TMUX_SESSION, createLogger, resolveToken } from "@aso/shared"
 import { startHub, type Effort } from "@aso/hub";
 import { gitBuildId, layout } from "../layout.js";
 import { startDeployRunner, type DeployRunner } from "../deploy-runner.js";
-import { runsAsSystemdService } from "../service.js";
+import { HUB_SERVICE, runsAsSystemdService } from "../service.js";
+import { sanitizeUrl } from "@aso/hub";
+import { HubUpdater, updatePaths } from "../self-update.js";
+import { armUpdateWatchdog, restartHubService } from "../systemd.js";
 
 const log = createLogger("cli");
 
@@ -30,6 +33,8 @@ export interface StartHubOptions {
   planBudget: number;
   maxTurns: number;
   llmConcurrency: number;
+  /** Git URL of the ASO repository whose main this Hub follows (`--update-from`). */
+  updateFrom?: string;
 }
 
 export async function startHubCommand(opts: StartHubOptions): Promise<void> {
@@ -44,6 +49,7 @@ export async function startHubCommand(opts: StartHubOptions): Promise<void> {
 
   const testCommand = parseTestCommand(opts.testCommand);
   const qaEnabled = opts.qa && process.env.ASO_QA !== "0";
+  const updater = hubUpdater(opts, auth.token);
   const hub = await startHub({
     projectsRoot: root,
     projectsRootDisplay: process.env.ASO_PROJECTS_ROOT_DISPLAY || undefined,
@@ -68,10 +74,14 @@ export async function startHubCommand(opts: StartHubOptions): Promise<void> {
       concurrency: opts.llmConcurrency,
     },
   });
+  // A version that never gets here is rolled back by the watchdog the previous one armed. Checks
+  // for the next update start once this one confirmed.
+  void updater?.afterStart().then(() => updater.start());
   const dashboard = opts.dashboard ? launchDashboard(opts.dashboardPort, hub.port) : undefined;
   const architect = opts.architect ? launchArchitect(hub.port) : undefined;
 
   onShutdown(async () => {
+    updater?.stop();
     dashboard?.kill("SIGTERM");
     architect?.stop();
     await hub.close();
@@ -129,12 +139,17 @@ async function startHubInDocker(root: string, opts: StartHubOptions, token: stri
 
   let architect: Architect | undefined;
   let deploys: DeployRunner | undefined;
+  const updater = hubUpdater(opts, token);
   if (await waitForHealth(`http://127.0.0.1:${opts.port}/api/health`, exited)) {
     if (opts.architect) architect = launchArchitect(opts.port);
     deploys = startDeployRunner({ hubUrl: `http://127.0.0.1:${opts.port}`, token, root });
+    // A version that never answers is rolled back by the watchdog the previous one armed. Checks
+    // for the next update start once this one confirmed.
+    void updater?.afterStart().then(() => updater.start());
   }
 
   onShutdown(async (signal) => {
+    updater?.stop();
     architect?.stop();
     deploys?.stop();
     // Ctrl+C already reached compose via the terminal's process group; a second SIGINT would
@@ -295,4 +310,32 @@ function launchDashboard(port: number, hubPort: number): ChildProcess | undefine
   child.on("exit", (code) => code && log.warn(`dashboard exited with code ${code}`));
   log.info(`dashboard on http://localhost:${port}`);
   return child;
+}
+
+/**
+ * The updater for `--update-from`, when this process can use it: a version installed by
+ * `aso hub-service install --update-from` (a source checkout runs what its owner builds), run as
+ * the Hub service (which restarts it onto new versions).
+ */
+function hubUpdater(opts: StartHubOptions, token: string): HubUpdater | undefined {
+  if (!opts.updateFrom) return undefined;
+  if (layout.mode === "source") {
+    log.warn("--update-from is ignored in a source checkout: install the Hub service with it (`aso hub-service install --update-from ...`)");
+    return undefined;
+  }
+  if (!runsAsSystemdService(process.env, process.pid)) {
+    log.warn("--update-from needs the Hub service to restart onto new versions: run `aso hub-service install` with it");
+    return undefined;
+  }
+  log.info(`following ${sanitizeUrl(opts.updateFrom)} main`);
+  const local = opts.host === "0.0.0.0" || opts.host === "::" ? "127.0.0.1" : opts.host;
+  return new HubUpdater({
+    hubUrl: `http://${local.includes(":") ? `[${local}]` : local}:${opts.port}`,
+    token,
+    repo: opts.updateFrom,
+    paths: updatePaths(),
+    current: layout.version(),
+    armWatchdog: armUpdateWatchdog,
+    restart: restartHubService,
+  });
 }

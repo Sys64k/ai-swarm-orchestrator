@@ -1415,3 +1415,67 @@ in `cli/src/commands/service.ts`.
 - **`aso update`** restarts an active Hub service when it installed a package. A source
   checkout also serves the console and package it was built with, so it says to run
   `build:dashboard`, `package` and `aso hub-service restart` instead.
+
+### The Hub updating itself
+
+`HubUpdater` (`cli/src/self-update.ts`) runs in the host process of `start-hub --update-from
+<git-url>` (beside the Architect and the host deploy runner), only for a version installed by
+`aso hub-service install --update-from` and run as the service.
+
+```mermaid
+flowchart TD
+  P["every UPDATE_POLL_MS (5 min): git ls-remote main"] -->|"the running build"| C["report current"]
+  P -->|"given up on"| X["skip"]
+  P -->|newer| B["own clone, own HOME: checkout, npm ci, npm test, npm run package"]
+  B -->|fails| F["failed.json (3 attempts), report failed"]
+  B --> V["install into versions/&lt;version&gt;/ (running version untouched; reused if already there)"]
+  V --> W["waiting: until no task at work, no running deploy, no plan being made"]
+  W -->|"main moved"| P
+  W --> A["pending.json (id, deadline); arm watchdog for that id in the running version (systemd-run, 15 min)"]
+  A --> S["previous and current links, restart the service (--no-block; undone if it fails)"]
+  S --> N{"new version answers as itself for CONFIRM_STABLE_MS?"}
+  N -->|yes| U["clear pending, prune other versions, report updated"]
+  N -->|"no, by the deadline"| RB["watchdog (previous version's CLI): failed.json permanent, rolled-back.json, current back, restart"]
+  RB --> RF["the previous version reports failed once it is up"]
+```
+
+- **Versions** (`HubVersions`, `cli/src/hub-versions.ts`): each in `versions/<version>/` under
+  `~/.local/share/aso/hub/`, installed with `npm install --prefix` into a temporary folder that
+  is renamed into place. The service's `ExecStart` runs `current/node_modules/aso-cli/dist/aso.mjs`.
+  Switching and rolling back replace the `current` link with one rename, so neither can leave a
+  half-installed Hub, and a failed install changes nothing.
+- **The watchdog lives in the old version.** Code in the new version can't roll back a version
+  that crashes at load or hangs, so before switching the running version starts
+  `systemd-run --user --on-active=900 <its own CLI> hub-update-check --id <id>`
+  (`armUpdateWatchdog`). That transient unit is outside the Hub service, so the restart doesn't
+  stop it. `rollbackUnconfirmed` acts only on its own update (`pending.id`), and only if
+  `current` points at that update's version: a switch that never happened clears `pending`
+  without blaming the commit. Without a watchdog there is no switch.
+- **Reboots.** A transient timer doesn't survive one, so the unit also has
+  `ExecStartPre=-<node> <root>/previous/.../aso.mjs hub-update-check --at-start`: before every
+  start, the version before the last update rolls back an update past its `deadline`, and the
+  start then runs the previous version. `-`: a failing check never blocks a start. The unit sets
+  `ASO_HUB_HOME`, so the install, the service and the watchdog agree on the folder.
+- **Order.** `afterStart` (confirming) runs before the first `check()`, so pruning old versions
+  never races an install, and a new update never starts while the last one is unconfirmed.
+- **Confirming** (`afterStart`) polls `GET /api/hub/update`, whose `current` is the version the
+  answering Hub runs, so an old container still on the port doesn't count.
+- **State** (`UpdateState`, `<root>/update/`, root `~/.local/share/aso/hub` or `ASO_HUB_HOME`): `pending.json`,
+  `rolled-back.json` (deleted once its report reached the Hub) and `failed.json`, each written to
+  a temporary file and renamed.
+- **The build's environment** (`buildEnv`, for `npm ci`, `npm test` and `npm run package`):
+  `PATH`, the locale and the user name, with `HOME` and the XDG folders under `build/home`. It
+  keeps the Hub's variables (tokens, API key) from the build, but it is not a sandbox: the code
+  runs as the Hub's user. git runs with the Hub's own environment, so SSH remotes work.
+  `ASO_BUILD` names the package after the commit, and a package not named after it is refused:
+  a mismatch would rebuild and reinstall on every pass.
+- **Failures** are reported, including a repository that can't be read. A build that fails is
+  tried 3 times; a version that didn't confirm, never again.
+- **The first install** (`hub-service install --update-from`) refuses a `release/aso.tgz` that
+  isn't the checkout's commit or was built with uncommitted changes, and runs the installed
+  CLI's `start-hub --help` and `hub-update-check --help` before writing the unit.
+- **Reports** go to `POST /api/hub/update` (`HubUpdateReportBodySchema`). The Hub adds its own
+  version and the time, keeps the last report for `GET /api/hub/update`, and notifies when an
+  update ends (`hubUpdateNotification`: `updated` or `failed`, once per outcome).
+- **Busy** comes from `TASK_AT_WORK` in `@aso/shared`, a map over every task state, so a new
+  state has to say whether a restart would interrupt it.

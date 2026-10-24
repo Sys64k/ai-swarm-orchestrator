@@ -58,8 +58,13 @@ export function serviceUnit(opts: {
   args: string[];
   path: string;
   envFile?: string;
+  /** Run before each start; `-`: its failure doesn't stop the start. */
+  execStartPre?: string[];
+  env?: Record<string, string>;
 }): string {
   const exec = [opts.node, opts.script, ...opts.args].map(systemdQuote).join(" ");
+  const pre = opts.execStartPre ? `ExecStartPre=-${opts.execStartPre.map(systemdQuote).join(" ")}\n` : "";
+  const env = Object.entries(opts.env ?? {}).map(([k, v]) => `${environment(k, v)}\n`).join("");
   return `# Installed by \`${opts.installedBy} install\`; remove with \`${opts.installedBy} uninstall\`.
 [Unit]
 Description=${opts.description}
@@ -68,11 +73,11 @@ After=network-online.target
 
 [Service]
 Type=simple
-ExecStart=${exec}
+${pre}ExecStart=${exec}
 Restart=always
 RestartSec=10
 ${environment("PATH", opts.path)}
-${opts.envFile ? `EnvironmentFile=${systemdQuote(opts.envFile)}\n` : ""}
+${env}${opts.envFile ? `EnvironmentFile=${systemdQuote(opts.envFile)}\n` : ""}
 [Install]
 WantedBy=default.target
 `;

@@ -2,7 +2,8 @@ import { spawnSync, type SpawnSyncOptions } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { configDir, createLogger } from "@aso/shared";
-import { userUnitDir } from "./service.js";
+import { HUB_HOME_ENV } from "./self-update.js";
+import { HUB_SERVICE, userUnitDir } from "./service.js";
 
 const log = createLogger("cli");
 
@@ -12,7 +13,7 @@ export const unitFile = (unit: string) => path.join(userUnitDir(), unit);
 export const workerEnvFile = () => path.join(configDir(), "worker.env");
 
 /** Run a systemd tool for the user's session (`systemctl --user`, `journalctl --user`, `loginctl`). */
-export function userTool(tool: "systemctl" | "journalctl" | "loginctl", args: string[], opts: { show?: boolean } = {}): { ok: boolean; output: string } {
+export function userTool(tool: "systemctl" | "journalctl" | "loginctl" | "systemd-run", args: string[], opts: { show?: boolean } = {}): { ok: boolean; output: string } {
   const argv = tool === "loginctl" ? args : ["--user", ...args];
   const spawnOpts: SpawnSyncOptions = opts.show ? { stdio: "inherit" } : { encoding: "utf8" };
   const r = spawnSync(tool, argv, spawnOpts);
@@ -44,3 +45,34 @@ export function restartAfterUpdate(unit: string): void {
   else log.warn(`could not restart ${unit}: ${r.output}; run \`systemctl --user restart ${unit}\``);
 }
 
+
+/**
+ * After switching versions: restart the Hub service without waiting for it, since the restart
+ * stops this process (a blocking `systemctl` would be killed mid-way and report a failure).
+ */
+export function restartHubService(): boolean {
+  const r = userTool("systemctl", ["--no-block", "restart", HUB_SERVICE]);
+  if (!r.ok) log.warn(`could not restart ${HUB_SERVICE}: ${r.output}`);
+  return r.ok;
+}
+
+/**
+ * Have the previous version's CLI (`entry`, known to work) run `aso hub-update-check` in
+ * `deadlineSec`, as a transient systemd timer outside the Hub service, which the update restarts.
+ */
+export async function armUpdateWatchdog(entry: string, deadlineSec: number, id: string): Promise<void> {
+  const unit = `aso-hub-update-check-${id.slice(0, 8)}`;
+  const home = process.env[HUB_HOME_ENV];
+  const r = userTool("systemd-run", [
+    "--collect",
+    `--unit=${unit}`,
+    `--on-active=${deadlineSec}`,
+    ...(home ? [`--setenv=${HUB_HOME_ENV}=${home}`] : []),
+    process.execPath,
+    entry,
+    "hub-update-check",
+    "--id",
+    id,
+  ]);
+  if (!r.ok) throw new Error(`systemd-run failed: ${r.output}`);
+}

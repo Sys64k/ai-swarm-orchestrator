@@ -34,6 +34,9 @@ export const layout = {
     asoBuild?: string;
   },
 
+  /** Per-user cache folder. */
+  cacheDir,
+
   /** `.env` files in priority order (earlier wins; shell variables beat all of them). */
   envFiles(): string[] {
     return [process.env.ASO_ENV_FILE, path.join(configDir(), ".env"), sourceRoot && path.join(sourceRoot, ".env")].filter(

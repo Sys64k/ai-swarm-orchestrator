@@ -3,6 +3,23 @@ import { describe, it } from "node:test";
 import { Command } from "commander";
 import { envFilesSetToken, explicitArgs, needsTokenEnvFile, runsAsSystemdService, serviceUnit, systemdQuote, userUnitDir, workerArgs } from "../dist/service.js";
 
+describe("Hub service unit following a repository", () => {
+  it("checks with the previous version before each start, and names the Hub's home for every process", () => {
+    const unit = serviceUnit({
+      description: "ASO Hub",
+      installedBy: "aso hub-service",
+      node: "/usr/bin/node",
+      script: "/h/current/node_modules/aso-cli/dist/aso.mjs",
+      args: ["start-hub", "--update-from", "https://github.com/me/aso.git"],
+      path: "/bin",
+      execStartPre: ["/usr/bin/node", "/h/previous/node_modules/aso-cli/dist/aso.mjs", "hub-update-check", "--at-start"],
+      env: { ASO_HUB_HOME: "/h" },
+    });
+    assert.match(unit, /^ExecStartPre=-\/usr\/bin\/node \/h\/previous\/node_modules\/aso-cli\/dist\/aso\.mjs hub-update-check --at-start\nExecStart=\/usr\/bin\/node \/h\/current\//m);
+    assert.match(unit, /^Environment="ASO_HUB_HOME=\/h"$/m);
+  });
+});
+
 describe("worker service unit", () => {
   it("passes on only the options that differ from start-worker's defaults", () => {
     assert.deepEqual(workerArgs({ hub: "192.168.1.10", port: 7420, sandbox: "docker" }, 7420), ["start-worker", "--hub", "192.168.1.10"]);
@@ -41,6 +58,7 @@ describe("worker service unit", () => {
     assert.match(unit, /^WantedBy=default\.target$/m);
     assert.doesNotMatch(unit, /aso_/, "the token never goes into the unit file");
     assert.doesNotMatch(serviceUnit({ description: "d", installedBy: "aso hub-service", node: "n", script: "s", args: [], path: "/bin" }), /EnvironmentFile/);
+    assert.doesNotMatch(serviceUnit({ description: "d", installedBy: "aso hub-service", node: "n", script: "s", args: [], path: "/bin" }), /ExecStartPre/);
   });
 
   it("knows when a .env file already provides the token", () => {

@@ -265,6 +265,44 @@ seconds later. The console shows **Update after job** or **Updating** meanwhile,
   and workers started by hand. The console says to run `aso update` on them.
 - **To turn it off,** set `ASO_AUTO_UPDATE=0` for the Hub.
 
+#### Automatic Hub updates
+
+A Hub installed with `aso hub-service install --update-from <git-url>` follows that
+repository's `main` itself:
+
+1. **Every 5 minutes** it asks the repository for `main`, with the Hub's own git setup (SSH
+   agent, keys, credential helpers). A newer commit is checked out in its own clone
+   (`~/.local/share/aso/hub/build/src`), installed with `npm ci`, tested with `npm test` and
+   packaged. Those three get none of the Hub's variables (tokens, API key) and a home folder of
+   their own, but they run as you: this is not a sandbox, so merge into the followed branch only
+   what you would run on the Hub machine.
+2. **It installs the package beside the running version** (`~/.local/share/aso/hub/versions/`).
+   The service runs whichever version `~/.local/share/aso/hub/current` points at.
+3. **It waits until a restart interrupts nothing:** no task assigned, at work, in QA or being
+   merged, no deploy running and no plan being made. If `main` moved meanwhile, it starts over
+   with the newer commit.
+4. **The running version arms a watchdog** (a systemd timer outside the Hub service), points
+   `current` at the new version, and restarts the service.
+5. **The new version confirms itself** once it has answered as itself for a minute. If it
+   hasn't within 15 minutes (it crashed, hung, or never started), the watchdog points `current`
+   back at the previous version and restarts. Every start of the service first runs the same
+   check with the previous version, so a reboot inside those 15 minutes rolls back too. That commit is never tried again; one whose build
+   or tests failed is tried 3 times. The next commit on `main` is tried as usual.
+6. **You get a notification** when the Hub has updated, or when an update failed, and
+   `GET /api/hub/update` says where it stands. The workers then update from the new Hub as usual.
+
+Set it up once, from a checkout of the version to start from:
+
+```bash
+npm run package                                    # the package the service will run
+cp .env ~/.config/aso/.env && chmod 600 ~/.config/aso/.env   # the package reads settings from there
+aso hub-service install --docker --update-from https://github.com/<you>/ai-swarm-orchestrator.git
+```
+
+The install puts the package in `~/.local/share/aso/hub/versions/` and points the service at
+it, so the Hub no longer runs from the checkout. A source checkout or a Hub started by hand never
+updates itself: both warn and ignore the option.
+
 #### Drain and restart from the console
 
 Tap a worker on the console's home page:
@@ -691,6 +729,7 @@ failure), and so do the dashboard and `aso sync`.
 | `--llm-concurrency <n>` | `4` | Concurrent model requests across all workers and the Architect; jobs beyond it wait their turn |
 | `--no-dashboard` | | Skip the dashboard (not supported with `--docker`) |
 | `--no-architect` | | Do not start the Architect |
+| `--update-from <git-url>` | `ASO_UPDATE_FROM` | Keep the Hub on that ASO repository's `main` (see [Automatic Hub updates](#automatic-hub-updates)). Only for an installed package run as the Hub service |
 
 ### `aso start-worker`
 
@@ -851,6 +890,7 @@ Answers can gain fields over time: clients should ignore fields they don't know.
 |---|---|---|
 | `GET` | `/api/health` | Without a token: `{status, auth}`. With it: also target, state directory, main branch, QA, sync status, connections, uptime |
 | `GET` | `/api/version` | Version and SHA-256 of the `aso` package this Hub serves (public) |
+| `GET` / `POST` | `/api/hub/update` | Where the Hub's own update stands (`off` without `--update-from`) / the updater on the Hub machine reports it |
 | `GET` | `/api/openapi.json` | This API as an OpenAPI 3.1 document (public) |
 | `GET` | `/dist/aso.tgz` | The `aso` package for installing/updating machines (public; contains no secrets) |
 | `GET` | `/api/deploys/next` | For the host runner of a Hub in Docker: take the next deploy job (404 when the Hub runs deploys itself) |
