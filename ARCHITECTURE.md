@@ -1505,3 +1505,16 @@ different from it:
 The task id is `sync-hub-api-<hash of project id and description>`, so each project gets one
 task per version of the description, and a cancelled one is not queued again. Failures are
 logged, never thrown; `close()` waits for the run, so it never outlives the Hub.
+
+### Deploys and the Hub's update outside aso-ui
+
+The core works without any separate UI: both are in the console and the CLI.
+
+- **Console.** `deployView` and `hubUpdateView` (`dashboard/lib/view.ts`) turn `Project.deploy`
+  and `GET /api/hub/update` into a label, a tone and details. The project page shows the deploy
+  and **Deploy now** (`POST /api/projects/{id}/deploy`, allowed by the proxy's `hub-routes.ts`).
+  The home page shows the Hub's status, plus a banner when an update failed.
+- **CLI.** `aso status` and `aso deploy` (`cli/src/commands/status.ts`) use the same endpoints,
+  through `cli/src/hub-api.ts`, which `aso plan` shares. Their lines come from pure functions
+  (`hubLine`, `workerLine`, `projectLine`, `deployLine`). `deployEnded` waits for the deploy that
+  started after the request, not one already running.

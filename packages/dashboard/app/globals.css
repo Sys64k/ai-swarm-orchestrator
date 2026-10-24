@@ -966,3 +966,12 @@ select.input {
 .diff-meta {
   color: var(--muted);
 }
+
+/* A failed deploy's output: long lines wrap, long output scrolls, never the page sideways. */
+.deploy-output {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 20rem;
+  overflow-y: auto;
+  margin: 0.5rem 0;
+}

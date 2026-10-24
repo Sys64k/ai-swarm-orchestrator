@@ -229,6 +229,8 @@ export const ProjectSchema = z.object({
     last: DeployStatusSchema.optional().describe("The latest deploy since the Hub started"),
   }),
 });
+export type ApiProject = z.infer<typeof ProjectSchema>;
+export type ApiDeployStatus = z.infer<typeof DeployStatusSchema>;
 
 const ActionsSchema = z.object({
   drain: z.boolean(),
@@ -263,6 +265,7 @@ export const NodeSchema = z.object({
   /** Sent by workers from before roles were the Architect's call; ignored. */
   roles: z.array(z.string()).optional(),
 });
+export type ApiNode = z.infer<typeof NodeSchema>;
 
 const ReworkSchema = z
   .object({

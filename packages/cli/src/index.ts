@@ -16,6 +16,7 @@ import { startArchitect } from "@aso/architect";
 import { consoleLinkCommand } from "./commands/console-link.js";
 import { llmCheckCommand } from "./commands/llm-check.js";
 import { syncCommand } from "./commands/sync.js";
+import { deployCommand, statusCommand } from "./commands/status.js";
 import { layout } from "./layout.js";
 import { approvePlanCommand, planCommand, rejectPlanCommand, replyPlanCommand } from "./commands/plan.js";
 import { startHubCommand } from "./commands/start-hub.js";
@@ -257,6 +258,19 @@ program
   .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
   .option("-P, --project <name>", "project (needed when the Hub has more than one)", process.env.ASO_PROJECT || undefined)
   .action(syncCommand);
+
+program
+  .command("status")
+  .description("Show the Hub's version and update, its workers, and each project's work and last deploy")
+  .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
+  .action(statusCommand);
+
+program
+  .command("deploy <project>")
+  .description("Deploy a project's main now with its command from the Hub's deploy.json, and follow it to the end")
+  .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
+  .option("--no-wait", "only start it")
+  .action((project: string, opts: { hub: string; wait: boolean }) => deployCommand(project, opts));
 
 program
   .command("token")
