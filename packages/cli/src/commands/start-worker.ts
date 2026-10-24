@@ -1,5 +1,5 @@
-import { createLogger, hubHttpBase, resolveWorkerToken } from "@aso/shared";
-import { checkTransport, joinHub } from "../join.js";
+import { createLogger, discoverHub, hubHttpBase, resolveWorkerToken } from "@aso/shared";
+import { checkTransport, findHub, joinHub } from "../join.js";
 import { startWorker, type WorkerHandle } from "@aso/worker";
 import { layout } from "../layout.js";
 import { runsAsSystemdService } from "../service.js";
@@ -8,7 +8,8 @@ import { installHubPackage } from "./update.js";
 const log = createLogger("cli");
 
 export async function startWorkerCommand(opts: {
-  hub: string;
+  /** Without it, the worker finds the Hub on the LAN (and again whenever it moves). */
+  hub?: string;
   port: number;
   workDir?: string;
   slots?: number;
@@ -19,8 +20,8 @@ export async function startWorkerCommand(opts: {
   join?: string;
   allowInsecure?: boolean;
 }): Promise<void> {
-  await checkTransport(opts.hub, opts.port, opts.allowInsecure ?? false);
-  if (opts.join) await joinHub(opts.hub, opts.port, opts.join);
+  if (opts.hub) await checkTransport(opts.hub, opts.port, opts.allowInsecure ?? false);
+  const joinedAt = opts.join ? await joinHub(opts.hub ?? (await findHub(opts.join)), opts.port, opts.join) : undefined;
   const token = opts.token ?? resolveWorkerToken()?.token;
   if (!token) {
     throw new Error("no worker key: join with --join <code> (from `aso worker-key new` on the Hub), or pass --token");
@@ -32,7 +33,9 @@ export async function startWorkerCommand(opts: {
   // remote, not the Hub, and nothing would start a hand-started worker again.
   const canUpdateItself = supervisor !== undefined && layout.mode === "package";
   const update = async () => {
-    const installed = await installHubPackage(hubHttpBase(opts.hub, opts.port));
+    const hub = worker?.hubUrl();
+    if (!hub) throw new Error("not connected to a Hub");
+    const installed = await installHubPackage(hubHttpBase(hub.href));
     // Restart even when nothing was installed: re-registering settles what the Hub thinks this build is.
     shutdown(installed ? "updated" : "update requested, already on the Hub's build");
   };
@@ -45,6 +48,9 @@ export async function startWorkerCommand(opts: {
   };
   worker = await startWorker({
     ...rest,
+    hub: opts.hub ?? joinedAt?.hub,
+    // An address given is used as is; otherwise the LAN is asked, now and whenever the Hub can't be reached.
+    locate: opts.hub ? undefined : () => discoverHub(token),
     token,
     version: layout.version(),
     sandboxOptions: { image: sandboxImage, network: sandboxNetwork },

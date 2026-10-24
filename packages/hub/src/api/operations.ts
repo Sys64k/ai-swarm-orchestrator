@@ -4,6 +4,8 @@ import {
   CreatePlanBodySchema,
   CreateProjectBodySchema,
   CreateTaskBodySchema,
+  DiscoveryProofBodySchema,
+  DiscoveryProofSchema,
   DeployNextSchema,
   DeployResultAcceptedSchema,
   HubUpdateReportBodySchema,
@@ -57,6 +59,7 @@ export const REQUEST_SCHEMAS = {
   RedeemSignInCode: RedeemSignInCodeBodySchema,
   JoinCode: JoinCodeBodySchema,
   Join: JoinBodySchema,
+  DiscoveryProofBody: DiscoveryProofBodySchema,
   PushSubscription: PushSubscriptionSchema,
   PushEndpoint: PushEndpointSchema,
   PushTest: PushTestSchema,
@@ -89,6 +92,7 @@ export const ANSWER_SCHEMAS = {
   JoinCode: JoinCodeSchema,
   WorkerKeyJoined: WorkerKeyJoinedSchema,
   WorkerKey: WorkerKeySchema,
+  DiscoveryProof: DiscoveryProofSchema,
   SignedIn: SignedInSchema,
 } as const;
 
@@ -236,6 +240,11 @@ const WORKERS: ApiOperation[] = [
   {
     method: "post", path: "/api/worker-keys/{id}/revoke", tag: "Workers", summary: "Revoke a worker key: its machine is disconnected and can't come back with it",
     responses: { 200: ok("WorkerKey"), 404: err("No such key") },
+  },
+  {
+    method: "post", path: "/api/discovery/proof", tag: "Workers",
+    summary: "For the Hub machine's LAN discovery: prove the Hub holds the credential a worker's query names (its token, a worker key or a join code)", body: "DiscoveryProofBody",
+    responses: { 200: ok("DiscoveryProof"), 400: err("Invalid body"), 404: err("No credential with that id") },
   },
 ];
 

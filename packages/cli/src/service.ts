@@ -9,7 +9,8 @@ export const HUB_SERVICE = "aso-hub.service";
 
 /** The `start-worker` options a service can carry: keep in step with `workerOptions` in index.ts and `workerArgs` below. */
 export interface WorkerServiceOptions {
-  hub: string;
+  /** Without it, the service finds the Hub on the LAN each time it starts or loses it. */
+  hub?: string;
   port?: number;
   workDir?: string;
   slots?: number;
@@ -21,7 +22,7 @@ export interface WorkerServiceOptions {
 
 /** `start-worker` arguments for the service, with defaults left out so later defaults apply. */
 export function workerArgs(o: WorkerServiceOptions, defaultPort: number): string[] {
-  const args = ["start-worker", "--hub", o.hub];
+  const args = o.hub ? ["start-worker", "--hub", o.hub] : ["start-worker"];
   if (o.port !== undefined && o.port !== defaultPort) args.push("--port", String(o.port));
   if (o.workDir) args.push("--work-dir", path.resolve(o.workDir));
   if (o.slots !== undefined) args.push("--slots", String(o.slots));

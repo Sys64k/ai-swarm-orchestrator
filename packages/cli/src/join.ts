@@ -1,11 +1,14 @@
 import { lookup } from "node:dns/promises";
 import os from "node:os";
-import { createLogger, hubHttpBase, isPrivateAddress, resolveHubUrl, saveWorkerKey } from "@aso/shared";
+import { createLogger, DEFAULT_DISCOVERY_PORT, discoverHub, hubHttpBase, isPrivateAddress, resolveHubUrl, saveWorkerKey } from "@aso/shared";
 
 const log = createLogger("cli");
 
-/** Trade a join code (from `aso worker-key new` on the Hub, or its console) for this machine's worker key, and save it. */
-export async function joinHub(hub: string, port: number, code: string): Promise<{ id: string; name: string }> {
+/**
+ * Trade a join code (from `aso worker-key new` on the Hub, or its console) for this machine's
+ * worker key, and save it. A machine on the Hub's LAN can find `hub` with the code (`findHub`).
+ */
+export async function joinHub(hub: string, port: number, code: string): Promise<{ id: string; name: string; hub: string }> {
   const base = hubHttpBase(hub, port);
   let res: Response;
   try {
@@ -22,7 +25,22 @@ export async function joinHub(hub: string, port: number, code: string): Promise<
   const { file, replaced } = saveWorkerKey(body.key);
   log.info(`joined the Hub as "${body.name}" (worker key ${body.id}, saved in ${file})`);
   if (replaced) log.warn("this machine's previous worker key still works until it is revoked on the Hub (aso worker-keys)");
-  return { id: body.id, name: body.name };
+  return { id: body.id, name: body.name, hub };
+}
+
+/**
+ * The Hub's `host:port`, found on the LAN with `credential` (a worker key, the Hub's token, or a
+ * join code): only the Hub that holds it can answer.
+ */
+export async function findHub(credential: string, discover: (credential: string) => Promise<string | undefined> = discoverHub): Promise<string> {
+  const found = await discover(credential);
+  if (!found) {
+    throw new Error(
+      `no Hub answered on this network (UDP ${DEFAULT_DISCOVERY_PORT}). Check that it runs on this LAN, that the code or key is valid, ` +
+        "and that no VPN or firewall drops broadcasts; or pass --hub <address>",
+    );
+  }
+  return found;
 }
 
 /**

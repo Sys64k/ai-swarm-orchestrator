@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import { createLogger, WORKER_KEY_PREFIX } from "@aso/shared";
+import { createLogger, discoveryKeyId, discoverySecret, WORKER_KEY_PREFIX } from "@aso/shared";
 
 const log = createLogger("worker-keys");
 
@@ -115,6 +115,21 @@ export class WorkerKeys {
       this.save().catch((err: Error) => log.warn(`could not save when worker key ${record.id} was last used: ${err.message}`));
     }
     return view(record);
+  }
+
+  /**
+   * The discovery secret of the unrevoked key, or unexpired join code, whose discovery id is
+   * `keyId`: a joining machine finds the Hub with its code, a joined one with its key.
+   */
+  secretForKeyId(keyId: string, now = Date.now()): string | undefined {
+    const record = this.records.find((r) => !r.revokedAt && discoveryKeyId(r.hash) === keyId);
+    if (record) return record.hash;
+    for (const [code, entry] of this.codes) {
+      if (entry.expiresAt <= now) continue;
+      const secret = discoverySecret(code);
+      if (discoveryKeyId(secret) === keyId) return secret;
+    }
+    return undefined;
   }
 
   /** Whether the key with this id exists and isn't revoked (connections made with it re-check this). */

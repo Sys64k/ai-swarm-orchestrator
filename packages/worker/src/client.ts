@@ -26,8 +26,13 @@ import { lockWorkDir } from "./work-dir-lock.js";
 const log = createLogger("worker");
 
 export interface WorkerOptions {
-  /** Hub address: IP, host:port, or ws:// URL. */
-  hub: string;
+  /** Hub address: IP, host:port, or ws:// URL. Without it, `locate` finds the Hub. */
+  hub?: string;
+  /**
+   * Find the Hub's address (`host:port`) on the LAN: before the first connection when there is
+   * no `hub`, and again whenever the Hub can't be reached, so a Hub that moved is followed.
+   */
+  locate?: () => Promise<string | undefined>;
   port?: number;
   /** Directory for task checkouts; also where the I/O benchmark runs. Default ~/.aso/work. */
   workDir?: string;
@@ -70,13 +75,21 @@ const OUTBOX_LIMIT = 200;
 
 export interface WorkerHandle {
   nodeId: string;
+  /** The Hub this worker connects to (undefined until one is found). */
+  hubUrl(): URL | undefined;
   profile: HardwareProfile;
   runner: JobRunner;
   stop(): void;
 }
 
 export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
-  const url = resolveHubUrl(opts.hub, opts.port);
+  if (opts.hub === undefined && !opts.locate) throw new Error("the worker needs the Hub's address or a way to find it");
+  let url = opts.hub === undefined ? undefined : resolveHubUrl(opts.hub, opts.port);
+  /** The Hub's URL once known: jobs only come from a connected Hub. */
+  const requireHubUrl = () => {
+    if (!url) throw new Error("the Hub's address is not known yet");
+    return url;
+  };
   const workDir = path.resolve(opts.workDir ?? DEFAULT_WORK_DIR);
   const lock = lockWorkDir(workDir);
 
@@ -129,7 +142,7 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
 
   const runner = new JobRunner({
     workDir,
-    gitUrl: (project) => hubGitUrl(url, project),
+    gitUrl: (project) => hubGitUrl(requireHubUrl(), project),
     nodeId,
     executor: opts.executor ?? new LlmTaskExecutor(),
     send,
@@ -138,13 +151,36 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
     slots,
   });
 
-  const connect = () => {
+  const retry = (why: string) => {
+    const delay = Math.min(30_000, 1000 * 2 ** attempt++);
+    log.warn(`${why}, retrying in ${delay}ms`);
+    retryTimer = setTimeout(() => void connect(), delay);
+  };
+
+  /**
+   * Ask the LAN where the Hub is, when it can tell: before the first connection without an
+   * address, and after a failed or lost one (`attempt` counts from the close; an open resets it).
+   */
+  const relocate = async () => {
+    if (!opts.locate || (url && attempt === 0)) return;
+    const found = await opts.locate().catch((err: Error) => log.debug(`discovery failed: ${err.message}`));
+    if (!found) return;
+    const next = resolveHubUrl(found, opts.port);
+    if (next.href === url?.href) return;
+    log.info(`found the Hub on the LAN at ${next.host}`);
+    url = next;
+  };
+
+  const connect = async () => {
+    await relocate();
+    if (stopped) return;
+    if (!url) return retry("no Hub answered on the LAN");
     const socket = new WebSocket(url, { headers: opts.token ? { authorization: authorizationHeader(opts.token) } : {} });
     ws = socket;
     registered = false;
     socket.on("open", () => {
       attempt = 0;
-      log.info(`connected to hub ${url.href}`);
+      log.info(`connected to hub ${requireHubUrl().href}`);
       socket.send(
         JSON.stringify(
           createMessage("NODE_REGISTRATION", nodeId, {
@@ -218,9 +254,7 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
       registered = false;
       clearInterval(heartbeatTimer);
       if (stopped) return;
-      const delay = Math.min(30_000, 1000 * 2 ** attempt++);
-      log.warn(`disconnected from hub, retrying in ${delay}ms`);
-      retryTimer = setTimeout(connect, delay);
+      retry("disconnected from hub");
     });
     socket.on("unexpected-response", (_req, res) => {
       // 401 means the token is wrong; retrying won't help, but keep trying in case it's fixed on the Hub.
@@ -273,10 +307,11 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
     );
   };
 
-  connect();
+  void connect();
 
   return {
     nodeId,
+    hubUrl: () => url,
     profile,
     runner,
     stop() {

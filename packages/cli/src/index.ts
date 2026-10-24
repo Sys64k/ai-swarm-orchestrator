@@ -7,6 +7,7 @@ import {
   resolveToken,
   tokenFile,
   DEFAULT_DASHBOARD_PORT,
+  DEFAULT_DISCOVERY_PORT,
   DEFAULT_HUB_PORT,
   DEFAULT_PROJECTS_DIR,
   MAX_WORKER_SLOTS,
@@ -33,6 +34,7 @@ import {
   uninstallServiceCommand,
 } from "./commands/service.js";
 import { startWorkerCommand } from "./commands/start-worker.js";
+import { findHubCommand } from "./commands/find-hub.js";
 import { updateCommand } from "./commands/update.js";
 import { rollbackUnconfirmed, updatePaths } from "./self-update.js";
 import { userTool } from "./systemd.js";
@@ -114,6 +116,8 @@ function hubOptions(cmd: Command): Command {
     .option("--dashboard-port <port>", "dashboard port", parsePort, DEFAULT_DASHBOARD_PORT)
     .option("--no-dashboard", "do not launch the Next.js dashboard")
     .option("--no-architect", "do not launch the Architect")
+    .option("--discovery-port <port>", "UDP port this machine answers workers' LAN discovery on (workers started without --hub)", parsePort, DEFAULT_DISCOVERY_PORT)
+    .option("--no-discovery", "do not answer LAN discovery: workers need --hub")
     .option("--docker", "run the Hub and dashboard in Docker (Architect stays on the host)", false)
     .option("--test-command <cmd>", "QA test command, split on spaces, run without a shell", process.env.ASO_TEST_COMMAND || "npm test")
     .option("--no-qa", "merge verified work without a QA run")
@@ -147,7 +151,7 @@ hubOptions(program.command("start-hub").description("Start the Hub: API/WebSocke
  */
 function workerOptions(cmd: Command): Command {
   return cmd
-    .requiredOption("--hub <ip_address>", "Hub address (IP, host:port, or ws:// URL)")
+    .option("--hub <ip_address>", "Hub address (IP, host:port, or ws:// URL); without it, the Hub is found on the LAN, again whenever its address changes")
     .option("-p, --port <port>", "Hub port if not given in --hub", parsePort, DEFAULT_HUB_PORT)
     .option("-w, --work-dir <path>", "directory for task checkouts (default: ~/.aso/work)")
     .option("--slots <n>", "jobs to run at once (default: from cores and RAM, at most 4; 1 with --sandbox none)", parseSlots)
@@ -293,6 +297,12 @@ program
   .description("List the worker keys: which machine, whether connected, revoked ones too")
   .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
   .action(listWorkerKeysCommand);
+
+program
+  .command("find-hub")
+  .description(`Find the Hub on this LAN (a UDP ${DEFAULT_DISCOVERY_PORT} broadcast only that Hub can answer) and print its address`)
+  .option("--join <code>", "find it with a one-time join code instead (before this machine has a key)")
+  .action(findHubCommand);
 
 program
   .command("token")

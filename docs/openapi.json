@@ -2592,6 +2592,19 @@
         ],
         "additionalProperties": false
       },
+      "DiscoveryProof": {
+        "type": "object",
+        "properties": {
+          "proof": {
+            "type": "string",
+            "description": "HMAC-SHA256 over the claim, keyed with the credential's secret (hex)"
+          }
+        },
+        "required": [
+          "proof"
+        ],
+        "additionalProperties": false
+      },
       "SignedIn": {
         "type": "object",
         "properties": {
@@ -2843,6 +2856,45 @@
         "required": [
           "code",
           "machine"
+        ],
+        "additionalProperties": false
+      },
+      "DiscoveryProofBody": {
+        "type": "object",
+        "properties": {
+          "nonce": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{22}$",
+            "description": "The worker's nonce"
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "description": "The Hub port the answer gives"
+          },
+          "addresses": {
+            "minItems": 1,
+            "maxItems": 32,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "description": "The addresses the answer comes from"
+          },
+          "key": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$",
+            "description": "The key id from the worker's query"
+          }
+        },
+        "required": [
+          "nonce",
+          "port",
+          "addresses",
+          "key"
         ],
         "additionalProperties": false
       },
@@ -4884,6 +4936,60 @@
           },
           "404": {
             "description": "No such key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/discovery/proof": {
+      "post": {
+        "operationId": "postDiscoveryProof",
+        "tags": [
+          "Workers"
+        ],
+        "summary": "For the Hub machine's LAN discovery: prove the Hub holds the credential a worker's query names (its token, a worker key or a join code)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiscoveryProofBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiscoveryProof"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "No credential with that id",
             "content": {
               "application/json": {
                 "schema": {

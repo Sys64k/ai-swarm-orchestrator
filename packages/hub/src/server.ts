@@ -20,6 +20,10 @@ import {
   isAuthorized,
   credentialOf,
   JoinBodySchema,
+  DiscoveryProofBodySchema,
+  discoveryKeyId,
+  discoveryProof,
+  discoverySecret,
   JoinCodeBodySchema,
   parseAgentMessage,
   parseBody,
@@ -713,6 +717,17 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       return c.json({ error: "unknown, used or expired join code: create a new one on the Hub" }, 403);
     }
     return c.json(joined, 201);
+  });
+  // LAN discovery: the Hub machine's responder (outside a container, where broadcasts arrive)
+  // asks for the proof that answers a worker's query. Only the Hub's token may ask.
+  app.post("/api/discovery/proof", async (c) => {
+    const req = await parsed(c, DiscoveryProofBodySchema);
+    if (!req.ok) return c.json({ error: req.error }, 400);
+    const { key, ...claim } = req.data;
+    const own = token === null ? undefined : discoverySecret(token);
+    const secret = own && discoveryKeyId(own) === key ? own : workerKeys.secretForKeyId(key);
+    if (!secret) return c.json({ error: "no credential with that id" }, 404);
+    return c.json({ proof: discoveryProof(secret, claim) });
   });
   const keyView = (k: WorkerKeyView) => ({ ...k, connected: [...connections.values()].some((c) => c.workerKey?.id === k.id) });
   app.get("/api/worker-keys", (c) => c.json(workerKeys.list().map(keyView)));

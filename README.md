@@ -192,8 +192,29 @@ Each machine joins with **its own worker key**: on the Hub machine, `aso worker-
 
 ```bash
 curl -fo /tmp/aso.tgz http://192.168.1.10:7420/dist/aso.tgz && npm install -g /tmp/aso.tgz
-aso service install --hub 192.168.1.10 --join <code>
+aso service install --join <code>
 ```
+
+#### Finding the Hub on the LAN
+
+On the Hub's network a worker needs no address. Without `--hub`, it broadcasts a question on
+UDP port 7419, and the Hub's machine answers with the Hub's address. The worker asks again
+whenever it can't reach the Hub, so it follows the Hub to a new address (a new DHCP lease, say)
+within seconds, and the Hub's machine needs no fixed IP.
+
+- **Only the Hub that knows this machine's key, or the join code, can answer.** The answer
+  carries a proof made with that credential and the addresses it comes from, and the worker
+  connects only to an answer that checks out. A machine on the LAN pretending to be the Hub
+  never gets the key. A Hub that doesn't know the credential stays silent.
+- **`aso find-hub`** prints where the Hub is (`--join <code>` before the machine has a key).
+- **An address you give wins.** With `--hub`, the worker uses only that address, as before.
+  Workers on another network (Tailscale, `wss://`) need it: broadcasts don't cross networks.
+- **What can stop it:** a firewall on the Hub's machine that drops UDP 7419, Wi-Fi client
+  isolation, or a VPN on the worker. With NordVPN connected, run
+  `nordvpn set lan-discovery on`, or give `--hub`.
+- **The Hub side** answers from `aso start-hub` on the host, outside any container, because
+  broadcasts don't reach a container on Docker's bridge network. `--discovery-port` changes the
+  port, and `--no-discovery` turns it off.
 
 - **A worker key only does worker work:** the worker connection, and the projects' Git (pushes
   to task branches only). It can't plan, approve, merge, deploy or read the API, so a machine
@@ -214,7 +235,7 @@ its traffic gets there:
 
 - **Tailscale (recommended for your own machines):** put the Hub machine and the worker in the
   same tailnet and use the Hub's tailnet name: `aso service install --hub agent007 --join
-  <code>`. WireGuard encrypts everything end to end, and nothing of the Hub faces the internet.
+  <code>`. LAN discovery doesn't reach across Tailscale, so `--hub` is needed here. WireGuard encrypts everything end to end, and nothing of the Hub faces the internet.
 - **TLS:** with a `wss://` address (a reverse proxy or tunnel with HTTPS in front of the Hub's
   port), the worker connection, Git and updates all use TLS.
 - **Plain `ws://` over the internet is refused.** If the Hub's address resolves to a public IP
@@ -235,7 +256,7 @@ On Linux, install the worker as a systemd user service instead of starting it by
 starts at boot, restarts if it crashes, and `aso update` restarts it on the new version:
 
 ```bash
-aso service install --hub 192.168.1.10   # same options as start-worker
+aso service install   # same options as start-worker; finds the Hub on the LAN without --hub
 aso service status
 aso service logs -f
 aso service uninstall
@@ -779,6 +800,8 @@ failure), and so do the dashboard and `aso sync`.
 | `--llm-concurrency <n>` | `4` | Concurrent model requests across all workers and the Architect; jobs beyond it wait their turn |
 | `--no-dashboard` | | Skip the dashboard (not supported with `--docker`) |
 | `--no-architect` | | Do not start the Architect |
+| `--discovery-port <port>` | `7419` | UDP port this machine answers workers' [LAN discovery](#finding-the-hub-on-the-lan) on |
+| `--no-discovery` | | Don't answer LAN discovery: workers then need `--hub` |
 | `--update-from <git-url>` | `ASO_UPDATE_FROM` | Keep the Hub on that ASO repository's `main` (see [Automatic Hub updates](#automatic-hub-updates)). Only for an installed package run as the Hub service |
 
 ### `aso start-worker`
@@ -786,12 +809,13 @@ failure), and so do the dashboard and `aso sync`.
 Profiles the machine (CPU, RAM, Docker, disk write speed) and connects to the Hub. A worker
 doesn't choose what it works on: the Architect gives each task a role, and the Hub sends it to
 the best free machine. If the
-connection drops, the worker reconnects with exponential backoff. While offline it queues
+connection drops, the worker reconnects with exponential backoff. Without `--hub`, it asks the
+LAN where the Hub is before each attempt, so it follows a Hub that moved. While offline it queues
 outgoing messages and sends them once it has registered again.
 
 | Option | Default | Description |
 |---|---|---|
-| `--hub <address>` | *required* | `192.168.1.10`, `hub.lan:7420`, or `ws://…` |
+| `--hub <address>` | found on the LAN | `192.168.1.10`, `hub.lan:7420`, or `ws://…`. Without it, the worker [finds the Hub on the LAN](#finding-the-hub-on-the-lan) |
 | `-p, --port <port>` | `7420` | Hub port, if `--hub` doesn't include one |
 | `-w, --work-dir <path>` | `~/.aso/work` | Where the project checkouts live; the I/O benchmark runs here |
 | `--slots <n>` | from the machine | Jobs to run at once, 1–16, each in its own checkout (`<project>`, `<project>.2`, …). The default is one per 2 threads and 6 GiB of RAM, at most 4, and 1 with `--sandbox none` (jobs would share ports) |
@@ -878,10 +902,16 @@ refused with the reason.
 
 ### `aso worker-key new`, `aso worker-keys`, `aso worker-key revoke <id>`
 
-`new` creates a one-time join code (30 minutes) and prints what to run on the new machine.
-`--address` is the Hub's address as that machine reaches it (default: this machine's hostname,
-which on Tailscale is its tailnet name). `--name` labels the key. `aso worker-keys` lists the
+`new` creates a one-time join code (30 minutes) and prints what to run on the new machine. On
+the LAN, that machine finds the Hub with the code. `--address` is the Hub's address as that
+machine reaches it, for downloading the package and for joining from another network (default:
+this machine's hostname, which on Tailscale is its tailnet name). `--name` labels the key. `aso worker-keys` lists the
 keys, and `revoke` shuts a machine out.
+
+### `aso find-hub`
+
+Asks the LAN where the Hub is, with this machine's worker key, and prints its `host:port`.
+`--join <code>` asks with a join code instead. It fails with what to check when no Hub answers.
 
 ### `aso sync`
 
@@ -967,6 +997,7 @@ Answers can gain fields over time: clients should ignore fields they don't know.
 | `POST` | `/api/worker-keys/join` | For the joining machine (public: the code is the credential): its worker key, shown once |
 | `GET` | `/api/worker-keys` | The worker keys: name, connected, last used, revoked |
 | `POST` | `/api/worker-keys/{id}/revoke` | Revoke a key: its machine is disconnected and can't come back with it |
+| `POST` | `/api/discovery/proof` | For the Hub machine's LAN discovery: the proof answering a worker's query, if the Hub holds its credential |
 | `GET` / `POST` | `/api/hub/update` | Where the Hub's own update stands (`off` without `--update-from`) / the updater on the Hub machine reports it |
 | `GET` | `/api/openapi.json` | This API as an OpenAPI 3.1 document (public) |
 | `GET` | `/dist/aso.tgz` | The `aso` package for installing/updating machines (public; contains no secrets) |
@@ -1078,6 +1109,11 @@ For the scoring formula, see [ARCHITECTURE.md](ARCHITECTURE.md#6-hardware-aware-
 - **Worker keys.** Each worker machine can have its own key (`--join`), which only allows worker
   work (the worker connection and Git) and can be revoked on its own. The Hub's main token is for
   you, the CLI and the console. See [Worker machines](#worker-machines).
+- **LAN discovery.** A worker without `--hub` connects only to an answer proven with its own
+  key (or join code) and sent from an address the proof covers, so an impostor on the LAN can't
+  draw its key out. The query names the key by a hash, never the key. The Hub's machine answers at
+  most 30 queries per 10 s, and stays silent for a key it doesn't know. Plain HTTP (below) still
+  applies once connected.
 - **Plain HTTP.** Traffic is unencrypted, so anyone able to sniff your LAN could read the
   token and code. Use a trusted network, or put the Hub behind a TLS reverse proxy or VPN
   (e.g. WireGuard/Tailscale) if the LAN isn't trusted. Workers refuse plain `ws://` to a public
