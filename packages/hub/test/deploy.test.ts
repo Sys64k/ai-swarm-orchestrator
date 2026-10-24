@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
-import { Deployer, deployEnv, deployNotification, HostDeployQueue, runCommand, type DeployStatus } from "@aso/hub";
+import { Deployer, deployEnv, deployNotification, HostDeployQueue, runCommand, startHub, type DeployStatus } from "@aso/hub";
 import { createMessage } from "@aso/shared";
 import { git, makeTargetRepo, postTask, pushTaskBranch, tempDir, TOKEN, waitFor, withHub, worker } from "./helpers.ts";
 
@@ -109,6 +109,57 @@ describe("Deployer", () => {
       s.deployer.request(s.target); // a failed commit isn't live: deploy it again
       await waitFor(() => s.results.length === 4);
       assert.equal(s.results[3].status.state, "succeeded");
+    } finally {
+      s.cleanup();
+    }
+  });
+
+  it("remembers what is live across restarts, and deploys what isn't", async () => {
+    const s = setup();
+    try {
+      const runs = path.join(s.out, "runs");
+      writeFileSync(path.join(s.dir, "deploy.json"), JSON.stringify({ shop: { command: `echo "$ASO_DEPLOY_SHORT" >> "${runs}"` } }));
+      const count = () => (existsSync(runs) ? readFileSync(runs, "utf8").split("\n").filter(Boolean).length : 0);
+      s.deployer.request(s.target);
+      await waitFor(() => s.results.length === 1);
+      assert.deepEqual(JSON.parse(readFileSync(path.join(s.dir, "deployed.json"), "utf8")), { shop: s.head() });
+
+      const restarted = (results: DeployStatus[]) => new Deployer({ dir: s.dir, onResult: (_p, status) => results.push(status) });
+      const again: DeployStatus[] = [];
+      const second = restarted(again);
+      await second.restore();
+      second.request(s.target); // the Hub requests every project when it starts
+      await new Promise((r) => setTimeout(r, 300));
+      assert.equal(count(), 1, "main is live already");
+
+      git(s.repoDir, "commit", "--quiet", "--allow-empty", "-m", "merged while the Hub was down");
+      second.request(s.target);
+      await waitFor(() => again.length === 1);
+      assert.equal(count(), 2);
+
+      writeFileSync(path.join(s.dir, "deployed.json"), "{ half-saved");
+      const third = restarted([]);
+      await third.restore(); // ignored: one more deploy is safe
+      third.request(s.target);
+      await waitFor(() => count() === 3);
+    } finally {
+      s.cleanup();
+    }
+  });
+
+  it("deploys again after a restart when the last deploy failed or never finished", async () => {
+    const s = setup({ shop: { command: "exit 1" } });
+    try {
+      s.deployer.request(s.target);
+      await waitFor(() => s.results.length === 1);
+      assert.equal(existsSync(path.join(s.dir, "deployed.json")), false, "a failed deploy is not live");
+      writeFileSync(path.join(s.dir, "deploy.json"), JSON.stringify({ shop: { command: "true" } }));
+      const results: DeployStatus[] = [];
+      const next = new Deployer({ dir: s.dir, onResult: (_p, status) => results.push(status) });
+      await next.restore();
+      next.request(s.target);
+      const status = await waitFor(() => results[0]);
+      assert.equal(status.state, "succeeded");
     } finally {
       s.cleanup();
     }
@@ -261,6 +312,40 @@ describe("deploying from the Hub", () => {
         rmSync(out, { recursive: true, force: true });
       }
     }));
+
+  it("deploys on start what changed while the Hub was down, and only that", async () => {
+    const repoDir = makeTargetRepo({ "app.txt": "v1\n" });
+    const out = tempDir("aso-deploy-out-");
+    const stateDir = path.join(repoDir, ".git", "aso");
+    const commits = path.join(out, "commits");
+    const deployed = () => (existsSync(commits) ? readFileSync(commits, "utf8").split("\n").filter(Boolean) : []);
+    const run = async (check: () => Promise<void>) => {
+      const hub = await startHub({ targetDir: repoDir, port: 0, host: "127.0.0.1", token: TOKEN, sync: { enabled: false } });
+      try {
+        await check();
+      } finally {
+        await hub.close();
+      }
+    };
+    try {
+      mkdirSync(stateDir, { recursive: true });
+      writeFileSync(path.join(stateDir, "deploy.json"), JSON.stringify({ project: { command: `echo "$ASO_DEPLOY_COMMIT" >> "${commits}"` } }));
+      const first = git(repoDir, "rev-parse", "main");
+      await run(async () => {
+        await waitFor(() => deployed().length === 1, 10_000, "never deployed: deploys on start");
+        await waitFor(() => existsSync(path.join(stateDir, "deployed.json")));
+      });
+      await run(() => new Promise((r) => setTimeout(r, 500)));
+      assert.deepEqual(deployed(), [first], "already live: nothing on the second start");
+      git(repoDir, "commit", "--quiet", "--allow-empty", "-m", "merged while the Hub was down");
+      const second = git(repoDir, "rev-parse", "main");
+      await run(() => waitFor(() => deployed().length === 2, 10_000, "deploy of the new main"));
+      assert.deepEqual(deployed(), [first, second]);
+    } finally {
+      rmSync(repoDir, { recursive: true, force: true });
+      rmSync(out, { recursive: true, force: true });
+    }
+  });
 
   it("hands deploys to the host when it runs in a container", () =>
     withHub(

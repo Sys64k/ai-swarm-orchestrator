@@ -34,7 +34,7 @@ export { StateStore, type Snapshot } from "./state-store.js";
 export { Transcripts, type TranscriptEntry, type TranscriptInput, type TranscriptSubject } from "./transcripts.js";
 export { SignInCodes, SIGN_IN_CODE_TTL_MS } from "./sign-in-codes.js";
 export { Notifier, TEST_NOTIFICATION } from "./push/notifier.js";
-export { Deployer, deployEnv, deployNotification, deployWorkDir, HostDeployQueue, runCommand, runHere, type DeployJob, type RunResult, DEPLOY_FILE, DEPLOY_TIMEOUT_SEC, type DeployCommand, type DeployStatus } from "./deploy.js";
+export { Deployer, deployEnv, deployNotification, deployWorkDir, HostDeployQueue, runCommand, runHere, type DeployJob, type RunResult, DEPLOY_FILE, DEPLOYED_FILE, DEPLOY_TIMEOUT_SEC, type DeployCommand, type DeployStatus } from "./deploy.js";
 export { duration, WorkerWatch, WORKER_FORGET_MS, WORKER_OFFLINE_ALERT_MS } from "./push/workers.js";
 export { notableChanges, type ProjectState, type PushNotification } from "./push/changes.js";
 export { encryptPayload, generateVapidKeys, sendPush, vapidAuthorization, MAX_PAYLOAD_BYTES, type PushResult, type VapidKeys } from "./push/web-push.js";
