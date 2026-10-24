@@ -78,6 +78,23 @@ describe("a worker finding the Hub", () => {
       }
     }));
 
+  it("checks the Hub's address before every connection, and keeps trying while it is refused", () =>
+    withHub(async ({ port }) => {
+      let checks = 0;
+      // The first check refuses (say the name resolved to a public address); later ones pass.
+      const checkHub = async (url: URL) => {
+        assert.equal(url.port, String(port));
+        if (++checks === 1) throw new Error("the Hub is on the internet");
+      };
+      const worker = await startWorker({ ...common, nodeId: "checked", workDir: tempDir(), hub: `127.0.0.1:${port}`, checkHub });
+      try {
+        await waitFor(async () => (await listNodes(port)).some((n) => n.nodeId === "checked") || undefined, 10_000);
+        assert.equal(checks, 2, "refused once, then connected");
+      } finally {
+        worker.stop();
+      }
+    }));
+
   it("needs an address or a way to find one", async () => {
     await assert.rejects(startWorker({ ...common, workDir: tempDir() }), /needs the Hub's address or a way to find it/);
   });

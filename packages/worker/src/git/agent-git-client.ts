@@ -12,6 +12,8 @@ import {
   type TaskId,
 } from "@aso/shared";
 
+import { authConfigFile } from "./auth-config.js";
+
 const log = createLogger("git");
 
 export class AgentGitError extends Error {
@@ -48,14 +50,20 @@ export interface AgentGitClientOptions {
   mainBranch?: string;
   /** Identity used for agent commits. */
   author?: { name: string; email: string };
-  /** ASO token for the Hub's Git endpoint; sent as a header per command, never stored in .git/config. */
+  /**
+   * ASO token for the Hub's Git endpoint; sent as a header per command from an owner-only
+   * config file (`authConfigFile`), never stored in .git/config or shown in the process list.
+   */
   token?: string;
 }
+
+/** simple-git refuses `include.path` by default; ours only ever names the file `authConfigFile` wrote. */
+const UNSAFE = { allowUnsafeInclude: true };
 
 function gitConfig(opts: AgentGitClientOptions): string[] {
   const author = opts.author ?? { name: "ASO Agent", email: "aso-agent@localhost" };
   const config = [`user.name=${author.name}`, `user.email=${author.email}`];
-  if (opts.token) config.push(`http.extraHeader=Authorization: Bearer ${opts.token}`);
+  if (opts.token) config.push(`include.path=${authConfigFile(opts.token)}`);
   return config;
 }
 
@@ -81,7 +89,7 @@ export class AgentGitClient {
     this.repoDir = path.resolve(repoDir);
     this.remote = opts.remote ?? "origin";
     this.mainBranch = opts.mainBranch ?? "main";
-    this.git = simpleGit({ baseDir: this.repoDir, config: gitConfig(opts) });
+    this.git = simpleGit({ baseDir: this.repoDir, config: gitConfig(opts), unsafe: UNSAFE });
   }
 
   /** Open an existing checkout, or clone `remoteUrl` into `repoDir` first. */
@@ -94,7 +102,7 @@ export class AgentGitClient {
     const remote = opts.remote ?? "origin";
     if (!existsSync(path.join(dir, ".git"))) {
       log.info(`cloning ${remoteUrl} into ${dir}`);
-      await simpleGit({ config: gitConfig(opts) }).clone(remoteUrl, dir, ["--origin", remote]);
+      await simpleGit({ config: gitConfig(opts), unsafe: UNSAFE }).clone(remoteUrl, dir, ["--origin", remote]);
     } else {
       // The Hub may have moved (new IP/port) since the checkout was created.
       const git = simpleGit({ baseDir: dir });

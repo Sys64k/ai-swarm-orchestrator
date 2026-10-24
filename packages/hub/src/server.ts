@@ -61,6 +61,7 @@ import { Notifier, TEST_NOTIFICATION } from "./push/notifier.js";
 import { WorkerWatch } from "./push/workers.js";
 import { Deployer, deployNotification, HostDeployQueue } from "./deploy.js";
 import { hubUpdateNotification } from "./hub-update.js";
+import { NodeOwners, nodeIdsInUse } from "./node-owners.js";
 import { WorkerKeys, type WorkerKeyView } from "./worker-keys.js";
 
 /** Wrong join codes per client address and minute before joining answers 429 (codes are 144 random bits; this only slows a flood). */
@@ -230,6 +231,10 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   for (const p of projects.list()) notifier.observe({ id: p.id, tasks: p.tasks.list(), plans: p.plans.list() });
   const workerWatch = await WorkerWatch.open({ dir: conversationDir, alertMs: opts.push?.workerOfflineMs });
   const workerKeys = await WorkerKeys.open(conversationDir);
+  // Saved owners keep a restarted Hub's held jobs with their credential. On start, before any node
+  // is back, only node ids a task still names are kept: the rest have nothing left to protect.
+  const nodeOwners = await NodeOwners.open(conversationDir);
+  nodeOwners.prune(nodeIdsInUse(projects.list().flatMap((p) => p.tasks.list())));
   if (conversationDir) {
     deployer = new Deployer({
       dir: conversationDir,
@@ -321,7 +326,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
         reject(conn, keyProblem, [], msg.id);
         return conn.ws.close(4403, keyProblem.slice(0, 120));
       }
-      nodeOwners.set(msg.from, conn.workerKey?.id ?? null);
+      nodeOwners.record(msg.from, conn.workerKey?.id ?? null);
       replaceEarlier(conn);
       conn.nodeId = msg.from;
       conn.transport = {
@@ -426,14 +431,12 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     c.header("WWW-Authenticate", 'Basic realm="ASO Hub"');
     return c.json({ error: "missing or invalid ASO token" }, 401);
   };
-  /** Which credential each node id registered with (a key id, or null for the Hub's token): no other may take that id or its jobs. */
-  const nodeOwners = new Map<string, string | null>();
   /**
    * Why a connection made with a worker key may not register as `nodeId`: a key registers one
    * worker, never the Architect, and never a node id another credential registered.
    */
   const workerKeyProblem = (conn: Connection, nodeId: string, kind: string): string | undefined => {
-    const owner = nodeOwners.get(nodeId);
+    const owner = nodeOwners.ownerOf(nodeId);
     const mine = conn.workerKey?.id ?? null;
     if (owner !== undefined && owner !== mine) return `node id "${nodeId}" belongs to another credential`;
     if (!conn.workerKey) return undefined;
@@ -511,7 +514,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     (c, project, refs) => {
       const key = workerKeyOf(c);
       if (!key) return undefined;
-      const nodes = new Set([...nodeOwners].filter(([, owner]) => owner === key.id).map(([nodeId]) => nodeId));
+      const nodes = nodeOwners.nodesOf(key.id);
       for (const ref of refs) {
         const task = projects.get(project)?.tasks.get(ref.slice("refs/heads/task/".length));
         // Its own job, or one just cancelled or failed under it (the agent saves unfinished work then).

@@ -1119,7 +1119,10 @@ For the scoring formula, see [ARCHITECTURE.md](ARCHITECTURE.md#6-hardware-aware-
   ASO token. Tokens are compared in constant time.
 - **Worker keys.** Each worker machine can have its own key (`--join`), which only allows worker
   work (the worker connection and Git) and can be revoked on its own. The Hub's main token is for
-  you, the CLI and the console. See [Worker machines](#worker-machines).
+  you, the CLI and the console. See [Worker machines](#worker-machines). Which credential
+  registered each worker is saved, so after a Hub restart no other credential can claim a
+  worker's held jobs. Workers pass their key to `git` through an owner-only file, so other users
+  on the machine can't read it in the process list.
 - **LAN discovery.** A worker without `--hub` connects only to an answer proven with its own
   key (or join code) and sent from an address the proof covers, so an impostor on the LAN can't
   draw its key out. The query names the key by a hash, never the key. The Hub's machine answers at
