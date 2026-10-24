@@ -612,16 +612,18 @@ of the two it does, and why.
 Tests can pass while a change looks wrong. A project can have QA take screenshots, so you see
 the result next to the diff:
 
-1. **Add a `screenshots` npm script.** After the tests pass, the QA worker runs `npm run
-   screenshots` with `ASO_SCREENSHOT_DIR` set to an empty folder. The script saves images there,
+1. **Add a `screenshots` npm script.** After the tests pass, for a change that lists views (see
+   2), the QA worker runs `npm run screenshots` with `ASO_SCREENSHOT_DIR` set to an empty folder. The script saves images there,
    e.g. a Playwright spec that calls `page.screenshot({ path: path.join(process.env.ASO_SCREENSHOT_DIR, "home-dark.png") })`.
 2. **Shots of the change.** A developer agent whose change shows in the UI lists the views that
    show it when it finishes, e.g. `{"name": "task-dark-phone", "path": "/tasks/t-1", "theme":
    "dark", "width": 412}`. QA passes the list as JSON in `ASO_SCREENSHOT_TARGETS`, and the script
    saves each as `<name>.png`. The fields are `name`, `path`, and optional `theme` (`light` or
    `dark`), `width`, `height`, `selector` (shoot one element) and `state` (the project's own name
-   for the data a page needs, e.g. a mock scenario). Without the variable, the script takes its
-   default views. The shots come from the tested commit, not from the agent. The Architect plans
+   for the data a page needs, e.g. a mock scenario). A change that lists no views (a server route,
+   a test, a library function) gets no screenshots, so a pull request never shows pictures that
+   have nothing to do with it. Run by hand without the variable, the script takes its default
+   views. The shots come from the tested commit, not from the agent. The Architect plans
    a screenshots script for a project with a UI that has none.
 3. **Limits.** QA keeps up to 12 PNG, JPEG, GIF or WebP files from the top of that folder, in
    name order: up to 2 MB each and 4 MB together. Names may use letters, digits and `._-`.

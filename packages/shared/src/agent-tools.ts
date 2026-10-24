@@ -122,7 +122,7 @@ export const AGENT_TOOLS = {
       screenshots: ScreenshotTargetsSchema.optional().describe(
         "Only when the project has a \"screenshots\" npm script and your change shows in the UI: the views that show it " +
           `(up to ${QA_SCREENSHOTS_MAX}), e.g. the changed page in light and dark and at a phone width. QA screenshots them ` +
-          "from the tested commit and shows them to the reviewer. List them on every finish, rework included.",
+          "from the tested commit and shows them to the reviewer; without a list it takes none. List them on every finish, rework included.",
       ),
     }),
   },

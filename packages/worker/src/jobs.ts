@@ -419,15 +419,16 @@ export class JobRunner {
   }
 
   /**
-   * After the tests passed: run the project's screenshots script, if it has one, and collect
-   * what it saved. Screenshots never fail QA; a problem is only noted in the summary.
+   * After the tests passed: run the project's screenshots script for the views the developer
+   * listed, and collect what it saved. No views listed means the change doesn't show in the UI,
+   * so there is nothing to shoot. Screenshots never fail QA; a problem is only noted in the summary.
    */
   private async screenshots(
     repoDir: string,
     env: Record<string, string>,
     targets: ScreenshotTarget[] | undefined,
   ): Promise<{ screenshots: Screenshot[]; note: string } | undefined> {
-    if (!(await hasScreenshotScript(repoDir))) return undefined;
+    if (!targets?.length || !(await hasScreenshotScript(repoDir))) return undefined;
     const dir = path.join(repoDir, SCREENSHOT_DIR);
     const label = `npm run ${SCREENSHOT_SCRIPT}`;
     try {
@@ -435,7 +436,7 @@ export class JobRunner {
       await mkdir(dir, { recursive: true });
       const result = await this.commands.run(["npm", "run", SCREENSHOT_SCRIPT], {
         cwd: repoDir,
-        env: { ...env, [SCREENSHOT_DIR_ENV]: dir, ...(targets?.length ? { [SCREENSHOT_TARGETS_ENV]: JSON.stringify(targets) } : {}) },
+        env: { ...env, [SCREENSHOT_DIR_ENV]: dir, [SCREENSHOT_TARGETS_ENV]: JSON.stringify(targets) },
         timeoutMs: SCREENSHOT_TIMEOUT_SEC * 1000,
       });
       if (result.exitCode !== 0) {
@@ -449,7 +450,7 @@ export class JobRunner {
       const note = [
         `${screenshots.length} screenshot${screenshots.length === 1 ? "" : "s"}`,
         ...(skipped.length ? [`left out: ${skipped.join(", ").slice(0, 1000)}`] : []),
-        ...(missing.length ? [`views not saved (${missing.length} of ${targets!.length}): ${missing.join(", ").slice(0, 1000)}`] : []),
+        ...(missing.length ? [`views not saved (${missing.length} of ${targets.length}): ${missing.join(", ").slice(0, 1000)}`] : []),
       ].join(", ");
       return { screenshots, note };
     } catch (err) {

@@ -307,7 +307,7 @@ console.log("greeting ok");
         const executor: TaskExecutor = {
           async implement(_t, { repoDir }) {
             writeFiles(repoDir, { "greeting.txt": "hello\n" });
-            return { commitMessage: "feat: greeting" };
+            return { commitMessage: "feat: greeting", screenshotTargets: [{ name: "desk", path: "/" }] };
           },
         };
         const dirs = [tempDir("aso-w1-"), tempDir("aso-w2-")];
@@ -408,10 +408,38 @@ for (const t of targets.filter((t) => t.path !== "/broken")) writeFileSync(path.
           await waitFor(() => ctx.hub.registry.has("qa"));
           dev.send(createMessage("STATUS_UPDATE", "dev", { state: "in_progress", taskId: "broken-shots" }));
           const commit = await pushTaskBranch(ctx.gitUrl, "broken-shots", { "b.txt": "b\n" });
-          dev.send(createMessage("STATUS_UPDATE", "dev", { state: "completed", taskId: "broken-shots", commit }));
+          dev.send(createMessage("STATUS_UPDATE", "dev", { state: "completed", taskId: "broken-shots", commit, screenshotTargets: [{ name: "page", path: "/" }] }));
           const record = await waitFor(() => ["merged", "failed"].includes(ctx.hub.tasks.get("broken-shots")!.state) && ctx.hub.tasks.get("broken-shots")!, 30_000, "task to finish");
           assert.equal(record.state, "merged");
           assert.equal(record.qaSummary, "`npm test` passed; no screenshots: `npm run screenshots` exited with 3");
+          assert.equal(record.screenshots, undefined);
+        } finally {
+          dev.ws.close();
+          qa.stop();
+          await qa.runner.idle();
+          rmSync(dir, { recursive: true, force: true });
+        }
+      },
+      { files: { "package.json": JSON.stringify({ name: "s", private: true, scripts: { test: "node -e 0", screenshots: "exit 3" } }) } },
+    ));
+
+  it("takes no screenshots when the developer listed no views", () =>
+    withHub(
+      async (ctx) => {
+        const dir = tempDir("aso-w-");
+        // The fake implementer takes the task before the real QA worker connects.
+        const dev = await worker(ctx.port, "dev");
+        await postTask(ctx.port, task("no-views"));
+        expectType(await dev.next(), "TASK_ASSIGNMENT");
+        const qa = await startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "qa", workDir: dir, hardware: hardware(), sandbox: "none" });
+        try {
+          await waitFor(() => ctx.hub.registry.has("qa"));
+          dev.send(createMessage("STATUS_UPDATE", "dev", { state: "in_progress", taskId: "no-views" }));
+          const commit = await pushTaskBranch(ctx.gitUrl, "no-views", { "b.txt": "b\n" });
+          dev.send(createMessage("STATUS_UPDATE", "dev", { state: "completed", taskId: "no-views", commit }));
+          const record = await waitFor(() => ["merged", "failed"].includes(ctx.hub.tasks.get("no-views")!.state) && ctx.hub.tasks.get("no-views")!, 30_000, "task to finish");
+          assert.equal(record.state, "merged");
+          assert.equal(record.qaSummary, "`npm test` passed", "the script (which would fail) never ran: the change shows nowhere in the UI");
           assert.equal(record.screenshots, undefined);
         } finally {
           dev.ws.close();
