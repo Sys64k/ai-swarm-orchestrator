@@ -35,10 +35,20 @@ For the design, diagrams and protocol reference, see **[ARCHITECTURE.md](ARCHITE
 | 6 | Architect planning (`aso plan`), task dependencies, role prompts and write scopes | ✅ Done |
 | 7 | Token authentication, push to `origin` after merges, packaged CLI served by the Hub, `aso update` | ✅ Done |
 | 8 | Hub state saved to disk: tasks, plans and agent conversations survive a Hub restart | ✅ Done |
+| 9 | Job sandbox: every job command runs in a throwaway Docker container; task transcripts, cancel and retry | ✅ Done |
+| 10 | Mobile-first console with one-time sign-in links, several projects per Hub, push notifications to phones | ✅ Done |
+| 11 | A conversation with the Architect before a plan is approved; the Architect gives each task its role | ✅ Done |
+| 12 | Fleet: workers and the Hub as systemd services, job slots per machine, QA on another machine, drain and restart from the console, automatic worker updates | ✅ Done |
+| 13 | Review: a GitHub pull request per task, reviewed and merged (or sent back) in the console with its CI checks; the Hub API described as OpenAPI 3.1 | ✅ Done |
+| 14 | Agents: a cheaper model for builders and QA, plan budgets, conflict resolution with `main`, unfinished work kept at the turn limit, a hold when the Anthropic credit runs out, QA screenshots for the reviewer | ✅ Done |
+| 15 | Operations: deploy after each merge, catch up with merges made on GitHub, the Hub updating itself from its repository's `main`, offline alerts for workers, deploys and updates in `aso status` | ✅ Done |
+| 16 | Workers anywhere: a revocable key per worker machine, and LAN discovery so workers find the Hub without its address | ✅ Done |
 
-The whole loop runs end to end: a task is routed, and an agent on a worker explores and edits
-the code. The agent verifies its work, then the change is pushed, checked by the Hub, tested by
-QA, reworked if needed, and merged. Agents need an Anthropic API key on the Hub; see
+The whole loop runs end to end: you describe a requirement, the Architect plans it with you,
+and each task is routed to the best free machine. An agent there explores and edits the code
+and verifies its work. The Hub checks the push, QA tests it (on another machine when one is
+free), and the agent reworks it if needed. You review the pull request, from your phone if you
+like, and a project with a deploy command is deployed after the merge. Agents need an Anthropic API key on the Hub; see
 [Connecting Claude](#connecting-claude).
 
 ## What runs where
