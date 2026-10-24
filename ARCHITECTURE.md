@@ -1,4 +1,4 @@
-# ASO Architecture
+# ASO (Skynet) Architecture
 
 This document describes how ASO works. Sections marked **(planned)** are designs for phases not
 yet implemented; everything else reflects the code. Diagrams are Mermaid and render on GitHub

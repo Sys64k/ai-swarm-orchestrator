@@ -1,6 +1,7 @@
-# AI Swarm Orchestrator (ASO)
+# Skynet: AI Swarm Orchestrator (ASO)
 
-ASO coordinates a swarm of AI coding agents across the Linux machines on your local network.
+**Skynet** is the project's nickname; the code, the `aso` command and its files keep the name
+ASO. ASO coordinates a swarm of AI coding agents across the Linux machines on your local network.
 A central **Hub** splits project work into tasks and hands each one to the **Worker Node** best
 suited to it. Workers edit, build and test code on their own hardware and deliver results through
 Git. LLM access goes only through the Hub, so workers never hold API credentials.

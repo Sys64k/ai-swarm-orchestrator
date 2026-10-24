@@ -3,9 +3,9 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "ASO",
-  description: "AI Swarm Orchestrator console",
-  appleWebApp: { capable: true, title: "ASO", statusBarStyle: "black-translucent" },
+  title: "Skynet",
+  description: "Skynet, the AI Swarm Orchestrator console",
+  appleWebApp: { capable: true, title: "Skynet", statusBarStyle: "black-translucent" },
 };
 
 export const viewport: Viewport = {
