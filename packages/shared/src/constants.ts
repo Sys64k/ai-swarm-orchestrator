@@ -1,6 +1,9 @@
 /** Default TCP port for the Hub API + WebSocket server. */
 export const DEFAULT_HUB_PORT = 7420;
 
+/** UDP port the Hub's machine answers LAN discovery queries on (workers started without --hub find it there). */
+export const DEFAULT_DISCOVERY_PORT = 7419;
+
 /** Default port for the Next.js dashboard. */
 export const DEFAULT_DASHBOARD_PORT = 7421;
 

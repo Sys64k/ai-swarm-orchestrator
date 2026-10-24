@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DiscoveryClaimSchema, DiscoveryKeyIdSchema } from "./discovery.js";
 import { MAX_PLAN_REPLY_LENGTH } from "./plan-dialogue.js";
 import { HardwareProfileSchema, LlmUsageSchema, PlannedTaskSchema, ProjectIdSchema, SupervisorSchema, TaskSpecInputSchema, TaskSpecSchema } from "./protocol.js";
 
@@ -114,6 +115,7 @@ export const JoinBodySchema = z.strictObject({
     .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/, "a hostname: letters, digits, . _ -")
     .describe("The joining machine's hostname"),
 });
+export const DiscoveryProofBodySchema = DiscoveryClaimSchema.extend({ key: DiscoveryKeyIdSchema.describe("The key id from the worker's query") });
 export const ApproveTaskBodySchema = z.object({
   force: z.boolean().optional().describe("Merge even when the pull request's checks are failing, still running or can't be read"),
 });
@@ -466,4 +468,5 @@ export const WorkerKeySchema = z.object({
   revokedAt: Timestamp.optional(),
   connected: z.boolean().describe("Whether a worker is connected with it now"),
 });
+export const DiscoveryProofSchema = z.object({ proof: z.string().describe("HMAC-SHA256 over the claim, keyed with the credential's secret (hex)") });
 export const SignedInSchema = z.object({ ok: z.literal(true) });

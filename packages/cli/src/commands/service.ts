@@ -2,8 +2,8 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import os from "node:os";
 import path from "node:path";
 import type { Command } from "commander";
-import { configDir, createLogger, DEFAULT_HUB_PORT, resolveWorkerToken, tokenFile, workerKeyFile } from "@aso/shared";
-import { checkTransport, joinHub } from "../join.js";
+import { configDir, createLogger, DEFAULT_HUB_PORT, discoverHub, resolveWorkerToken, tokenFile, workerKeyFile } from "@aso/shared";
+import { checkTransport, findHub, joinHub } from "../join.js";
 import { execCommand } from "../exec.js";
 import { HubVersions } from "../hub-versions.js";
 import { HUB_HOME_ENV, updatePaths } from "../self-update.js";
@@ -30,7 +30,7 @@ const WORKER: ServiceKind = {
   unit: WORKER_SERVICE,
   what: "worker",
   command: "aso service",
-  installHint: "--hub <hub>",
+  installHint: "[--hub <hub>]",
   extraFiles: () => [workerEnvFile()],
 };
 const HUB: ServiceKind = { unit: HUB_SERVICE, what: "Hub", command: "aso hub-service", installHint: "[start-hub options]", extraFiles: () => [] };
@@ -45,11 +45,17 @@ export interface HubServiceOptions {
 export async function installServiceCommand(opts: WorkerServiceOptions & { token?: string; join?: string }): Promise<void> {
   requireSystemd();
   const port = opts.port ?? DEFAULT_HUB_PORT;
-  await checkTransport(opts.hub, port, opts.allowInsecure ?? false);
-  if (opts.join) await joinHub(opts.hub, port, opts.join);
+  if (opts.hub) await checkTransport(opts.hub, port, opts.allowInsecure ?? false);
+  if (opts.join) await joinHub(opts.hub ?? (await findHub(opts.join)), port, opts.join);
   const token = opts.token ? { token: opts.token, source: "--token" } : resolveWorkerToken();
   if (!token) throw new Error("no worker key: pass --join <code> (from `aso worker-key new` on the Hub), or --token");
-  install(WORKER, `ASO worker (Hub ${opts.hub})`, workerArgs(opts, DEFAULT_HUB_PORT), syncTokenEnvFile(token));
+  if (!opts.hub) {
+    // The service keeps looking on its own; say now whether the Hub answers.
+    const found = await discoverHub(token.token);
+    if (found) log.info(`found the Hub on the LAN at ${found}; the service finds it again whenever its address changes`);
+    else log.warn("no Hub answered on the LAN yet; the service keeps looking (or reinstall with --hub <address>)");
+  }
+  install(WORKER, `ASO worker (Hub ${opts.hub ?? "found on the LAN"})`, workerArgs(opts, DEFAULT_HUB_PORT), syncTokenEnvFile(token));
 }
 
 /**

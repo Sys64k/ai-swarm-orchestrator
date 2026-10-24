@@ -1563,3 +1563,48 @@ The core works without any separate UI: both are in the console and the CLI.
   (`isPrivateAddress`: loopback, RFC 1918, link-local, Tailscale's 100.64.0.0/10 and ULA
   addresses count as private), unless `--allow-insecure`. With `wss://`, Git and package
   downloads use `https://` too (`hubGitUrl`, `hubHttpBase`).
+
+### Finding the Hub on the LAN
+
+A worker started without `--hub` finds the Hub by UDP broadcast, so the Hub's machine needs no
+fixed address. The protocol is in `shared/src/discovery.ts`, the responder in
+`cli/src/discovery-responder.ts`.
+
+```mermaid
+sequenceDiagram
+  participant W as Worker (no --hub)
+  participant R as Responder in aso start-hub (host, UDP 7419)
+  participant H as Hub API (container or in-process)
+  W->>R: broadcast {aso:"discover", nonce, key: id of its credential}
+  R->>H: POST /api/discovery/proof {key, nonce, port, addresses} (main token)
+  H-->>R: {proof} or 404 (unknown, revoked, used)
+  R-->>W: unicast {aso:"hub", nonce, port, addresses, proof}
+  Note over W: accept only if the nonce matches, the sender is one of the<br/>private addresses listed, and the proof checks out
+  W->>H: WebSocket /ws to sender:port, with its credential
+```
+
+- **The proof.** The secret is the credential's sha256, which is exactly what `WorkerKeys`
+  stores of a key, so the Hub can prove it holds a key it can't recover. The query names the
+  credential by `sha256(secret)` (first 32 hex characters). The proof is HMAC-SHA256, keyed with
+  the secret, over the version, nonce, port and sorted addresses. The Hub matches the id against
+  its own token, unrevoked worker keys and unexpired join codes (so a machine joining finds the
+  Hub with its code), and answers 404 for anything else.
+- **Why the addresses are signed.** An impostor that overhears a real answer could resend its
+  proof from its own address. The worker accepts an answer only from an address the proof
+  covers, so a resent proof only ever points at the real Hub. Answers from public addresses are
+  refused: discovery is for the LAN.
+- **Where the responder runs.** Broadcasts don't reach a container on Docker's bridge network,
+  so the responder runs in the host process: `startHubCommand` beside the in-process Hub, or
+  `startHubInDocker` once `/api/health` answers. It reads the machine's IPv4 addresses on each
+  query, so a new DHCP lease shows at once, and asks the Hub's API for the proof, so the
+  container keeps the keys. It answers at most 30 queries per 10 s. If the port is taken, the Hub
+  runs on without discovery and logs that.
+- **On the worker.** `startWorker` takes `locate` along with an optional `hub`. Before the first
+  connection without an address, and before every reconnect after a failed or lost one, it calls
+  `locate` (`discoverHub`: three sends to `255.255.255.255` and each interface's broadcast
+  address, two seconds of waiting). A different answer replaces the URL, and the Git URLs follow
+  it. With `--hub`, `locate` isn't set and the address is used as given. `aso service install`
+  without `--hub` writes a unit without it.
+- **Limits.** IPv4 only. Broadcasts stay in one network: Tailscale, other subnets and VPNs need
+  `--hub`, and so does Wi-Fi with client isolation. The responder's port is fixed for workers at
+  7419.

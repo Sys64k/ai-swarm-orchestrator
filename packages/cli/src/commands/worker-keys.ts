@@ -22,11 +22,14 @@ export function joinInstructions(address: string, code: string, expiresAt: strin
     `On the new machine (the code works once, until ${expiresAt}):`,
     "",
     `  ${installCommand(http, sha256)}`,
-    `  aso service install --hub ${address} --join ${code}`,
+    `  aso service install --join ${code}`,
+    "",
+    "On this LAN it finds the Hub by itself, and again whenever the Hub's address changes. From",
+    `another network, add --hub ${address}, with both machines on a private network such as`,
+    "Tailscale, or give the Hub a wss:// address.",
     "",
     "It gets its own worker key: it can take jobs and use the projects' Git, nothing else, and",
-    "`aso worker-key revoke <id>` (or the console) shuts it out. Anywhere outside this network, put",
-    "both machines on a private network such as Tailscale, or give the Hub a wss:// address.",
+    "`aso worker-key revoke <id>` (or the console) shuts it out.",
   ];
 }
 

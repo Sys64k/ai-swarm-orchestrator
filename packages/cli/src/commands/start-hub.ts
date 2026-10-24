@@ -5,6 +5,7 @@ import { ARCHITECT_TMUX_SESSION, createLogger, resolveToken } from "@aso/shared"
 import { startHub, type Effort } from "@aso/hub";
 import { gitBuildId, layout } from "../layout.js";
 import { startDeployRunner, type DeployRunner } from "../deploy-runner.js";
+import { hubProver, startDiscoveryResponder, type DiscoveryResponder } from "../discovery-responder.js";
 import { HUB_SERVICE, runsAsSystemdService } from "../service.js";
 import { sanitizeUrl } from "@aso/hub";
 import { HubUpdater, updatePaths } from "../self-update.js";
@@ -20,6 +21,9 @@ export interface StartHubOptions {
   dashboardPort: number;
   dashboard: boolean;
   architect: boolean;
+  /** Answer workers' LAN discovery queries (`--no-discovery` turns it off). */
+  discovery: boolean;
+  discoveryPort: number;
   docker: boolean;
   testCommand: string;
   qa: boolean;
@@ -79,11 +83,13 @@ export async function startHubCommand(opts: StartHubOptions): Promise<void> {
   void updater?.afterStart().then(() => updater.start());
   const dashboard = opts.dashboard ? launchDashboard(opts.dashboardPort, hub.port) : undefined;
   const architect = opts.architect ? launchArchitect(hub.port) : undefined;
+  const discovery = startDiscovery(opts, hub.port, auth.token);
 
   onShutdown(async () => {
     updater?.stop();
     dashboard?.kill("SIGTERM");
     architect?.stop();
+    await discovery?.close();
     await hub.close();
     process.exit(0);
   });
@@ -139,10 +145,12 @@ async function startHubInDocker(root: string, opts: StartHubOptions, token: stri
 
   let architect: Architect | undefined;
   let deploys: DeployRunner | undefined;
+  let discovery: DiscoveryResponder | undefined;
   const updater = hubUpdater(opts, token);
   if (await waitForHealth(`http://127.0.0.1:${opts.port}/api/health`, exited)) {
     if (opts.architect) architect = launchArchitect(opts.port);
     deploys = startDeployRunner({ hubUrl: `http://127.0.0.1:${opts.port}`, token, root });
+    discovery = startDiscovery(opts, opts.port, token);
     // A version that never answers is rolled back by the watchdog the previous one armed. Checks
     // for the next update start once this one confirmed.
     void updater?.afterStart().then(() => updater.start());
@@ -152,6 +160,7 @@ async function startHubInDocker(root: string, opts: StartHubOptions, token: stri
     updater?.stop();
     architect?.stop();
     deploys?.stop();
+    await discovery?.close();
     // Ctrl+C already reached compose via the terminal's process group; a second SIGINT would
     // make compose force-kill the container. Only forward signals that came from elsewhere.
     if (signal !== "SIGINT") compose.kill(signal);
@@ -161,6 +170,12 @@ async function startHubInDocker(root: string, opts: StartHubOptions, token: stri
   architect?.stop();
   deploys?.stop();
   process.exit(code);
+}
+
+/** Answer workers' LAN discovery on this machine, with proofs from the Hub on `hubPort`. */
+function startDiscovery(opts: StartHubOptions, hubPort: number, token: string): DiscoveryResponder | undefined {
+  if (!opts.discovery) return undefined;
+  return startDiscoveryResponder({ port: opts.discoveryPort, hubPort, prove: hubProver(localHubUrl(opts.host, hubPort), token) });
 }
 
 async function waitForHealth(url: string, exited: Promise<number>): Promise<boolean> {
@@ -328,9 +343,8 @@ function hubUpdater(opts: StartHubOptions, token: string): HubUpdater | undefine
     return undefined;
   }
   log.info(`following ${sanitizeUrl(opts.updateFrom)} main`);
-  const local = opts.host === "0.0.0.0" || opts.host === "::" ? "127.0.0.1" : opts.host;
   return new HubUpdater({
-    hubUrl: `http://${local.includes(":") ? `[${local}]` : local}:${opts.port}`,
+    hubUrl: localHubUrl(opts.host, opts.port),
     token,
     repo: opts.updateFrom,
     paths: updatePaths(),
@@ -338,4 +352,10 @@ function hubUpdater(opts: StartHubOptions, token: string): HubUpdater | undefine
     armWatchdog: armUpdateWatchdog,
     restart: restartHubService,
   });
+}
+
+/** The Hub's URL from this machine: the address it binds, or loopback when it binds them all. */
+function localHubUrl(host: string, port: number): string {
+  const local = host === "0.0.0.0" || host === "::" ? "127.0.0.1" : host;
+  return `http://${local.includes(":") ? `[${local}]` : local}:${port}`;
 }
