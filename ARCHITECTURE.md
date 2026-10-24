@@ -1552,12 +1552,26 @@ The core works without any separate UI: both are in the console and the CLI.
   address. A join whose save fails answers 500 and leaves no key behind. The printed join steps download into a fresh private folder (`mktemp -d`) and
   check the package against the Hub's SHA-256 before installing it. The machine's key wins over an `ASO_TOKEN` left in its environment, and it is
   written to a new owner-only file that is renamed into place.
-- **Known limits.** `nodeOwners` lives in memory: right after a Hub restart, the first credential
-  to register a node id gets it (persisting it with the task state would close that window). It
-  also keeps one small entry per worker start until the Hub restarts. `100.64.0.0/10` counts as private for Tailscale, but carrier-grade
-  NAT uses it too. The transport check runs when the worker starts, not on every reconnect. The
-  worker passes its credential to `git` as `-c http.extraHeader`, so other local users can see it
-  in the process list (as with the main token before).
+- **Node owners survive a restart.** `NodeOwners` (`hub/src/node-owners.ts`) saves which
+  credential registered each node id in `<state>/node-owners.json` (mode 600), so right after a
+  Hub restart a job held for a worker still belongs to that worker's credential, and no other
+  credential can register its node id to claim it. On each start the Hub keeps only the node ids
+  a task still names (`nodeId` or `qaNodeId`), so the file doesn't grow with every worker start.
+  Within one run a node id stays with its credential even after the node is gone.
+- **The transport check runs before every connection,** not only at start: `startWorker` calls
+  `checkHub` (the CLI's `checkTransport`) before each attempt when `--hub` was given, because a
+  name can resolve to another address later. A refusal is logged and retried with the usual
+  back-off. Discovered addresses are private by construction.
+- **The credential stays out of the process list.** `AgentGitClient` passes git
+  `-c include.path=<file>` instead of `-c http.extraHeader=...`: `authConfigFile`
+  (`worker/src/git/auth-config.ts`) writes the header into an owner-only file in a private
+  folder (mode 700) under the temp directory, removed when the process exits (a killed process
+  leaves it, still owner-only). The value is quoted, and a token with a control character is
+  refused. The Architect's checkout uses the same client.
+- **Known limits.** `100.64.0.0/10` counts as private for Tailscale, but carrier-grade NAT uses it
+  too. The Hub's own push to GitHub still passes its GitHub token as `-c http.extraHeader` on the
+  Hub's machine. With `--sandbox none`, job commands run as the worker's user and can read the
+  credential file, as they could read the key before.
 - **Transport.** Workers dial out, so their location doesn't matter. `checkTransport`
   (`cli/src/join.ts`) refuses plain `ws://` when the Hub's address resolves to a public IP
   (`isPrivateAddress`: loopback, RFC 1918, link-local, Tailscale's 100.64.0.0/10 and ULA

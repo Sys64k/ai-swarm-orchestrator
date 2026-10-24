@@ -51,6 +51,9 @@ export async function startWorkerCommand(opts: {
     hub: opts.hub ?? joinedAt?.hub,
     // An address given is used as is; otherwise the LAN is asked, now and whenever the Hub can't be reached.
     locate: opts.hub ? undefined : () => discoverHub(token),
+    // Again before every reconnect: a name can resolve to another address later. Discovered
+    // addresses are private by construction.
+    checkHub: opts.hub ? (url) => checkTransport(url.href, opts.port, opts.allowInsecure ?? false) : undefined,
     token,
     version: layout.version(),
     sandboxOptions: { image: sandboxImage, network: sandboxNetwork },

@@ -33,6 +33,11 @@ export interface WorkerOptions {
    * no `hub`, and again whenever the Hub can't be reached, so a Hub that moved is followed.
    */
   locate?: () => Promise<string | undefined>;
+  /**
+   * Refuse a Hub address before each connection (rejects with the reason), e.g. plain ws:// to
+   * an address that now resolves to the internet. The worker logs the reason and tries again.
+   */
+  checkHub?: (url: URL) => Promise<void>;
   port?: number;
   /** Directory for task checkouts; also where the I/O benchmark runs. Default ~/.aso/work. */
   workDir?: string;
@@ -175,6 +180,13 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
     await relocate();
     if (stopped) return;
     if (!url) return retry("no Hub answered on the LAN");
+    try {
+      await opts.checkHub?.(url);
+    } catch (err) {
+      if (!stopped) retry(`not connecting to ${url.host}: ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+    if (stopped) return;
     const socket = new WebSocket(url, { headers: opts.token ? { authorization: authorizationHeader(opts.token) } : {} });
     ws = socket;
     registered = false;

@@ -34,6 +34,7 @@ export { StateStore, type Snapshot } from "./state-store.js";
 export { Transcripts, type TranscriptEntry, type TranscriptInput, type TranscriptSubject } from "./transcripts.js";
 export { SignInCodes, SIGN_IN_CODE_TTL_MS } from "./sign-in-codes.js";
 export { JOIN_CODE_TTL_MS, WorkerKeys, type WorkerKeyView } from "./worker-keys.js";
+export { NodeOwners, nodeIdsInUse } from "./node-owners.js";
 export { Notifier, TEST_NOTIFICATION } from "./push/notifier.js";
 export { Deployer, deployEnv, deployNotification, deployWorkDir, HostDeployQueue, runCommand, runHere, type DeployJob, type RunResult, DEPLOY_FILE, DEPLOYED_FILE, DEPLOY_TIMEOUT_SEC, type DeployCommand, type DeployStatus } from "./deploy.js";
 export { duration, WorkerWatch, WORKER_FORGET_MS, WORKER_OFFLINE_ALERT_MS } from "./push/workers.js";
