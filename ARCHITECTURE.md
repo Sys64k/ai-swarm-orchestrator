@@ -142,6 +142,7 @@ flowchart LR
 | | `git/http-backend.ts` | Git smart-HTTP via a `git http-backend` CGI bridge, with the push policy |
 | | `git/hub-repo.ts` | `HubRepository`: verify task commits, merge and add dependencies on main under one lock |
 | | `llm/adapter.ts` | `LlmAdapter` interface; `AnthropicApiAdapter` (official SDK, streaming, caching, fallbacks) |
+| | `llm/openai-compatible.ts` | `OpenAiCompatibleAdapter` for `openai:<model>` specs: any Chat Completions API (OpenAI, OpenRouter, Ollama, vLLM…) |
 | | `llm/conversations.ts` | `ConversationManager`: Hub-held conversations, turn checks, budget, concurrency queue |
 | | `llm/prompts.ts`, `llm/pricing.ts` | Role system prompts, task prompt (with rework feedback), price table |
 | | `plans.ts` | `PlanManager`: plan queue, Architect assignment, validation, approval → tasks |
@@ -1045,6 +1046,30 @@ sequenceDiagram
 | `cache_control` | `{type: "ephemeral"}` (automatic) | Caches the growing prefix |
 | `fallbacks` | `"default"` + `server-side-fallback-2026-07-01` | If the model declines for policy reasons, Anthropic retries on its recommended fallback model |
 | Tools | `eager_input_streaming: true`; inputs validated on the worker | Large file contents stream as generated |
+
+### Other providers (`OpenAiCompatibleAdapter`)
+
+A model spec `openai:<model>` (for `--model` or `--agent-model`) selects the OpenAI-compatible
+adapter, at `ASO_LLM_BASE_URL` with `ASO_LLM_API_KEY`; anything else is a Claude model.
+Conversations keep the Messages API format, and each request is translated:
+
+| Hub (Messages API) | Chat Completions |
+|---|---|
+| `system` | first `system` message |
+| assistant `text` + `tool_use` blocks | one `assistant` message with `content` and `tool_calls` (arguments as JSON) |
+| `tool_result` (with `is_error`) | a `tool` message (prefixed `Error:`) |
+| image in a `tool_result` (view_image) | a following `user` message with `image_url` parts with `ASO_LLM_VISION=1`; otherwise a text note |
+| `thinking` blocks | dropped (only valid for their own model) |
+| tools | `function` tools with the same JSON Schema |
+
+The answer comes back streamed (`stream: true`, `include_usage`), so slow local models keep the
+connection alive. Deltas are added up (`accumulateChunks`), `<think>…</think>` text is dropped,
+tool-call arguments must parse as a JSON object (otherwise a retryable error, so the turn is
+asked again), and finish reasons map to the Hub's: `stop` → `end_turn`, `tool_calls` →
+`tool_use`, `length` → `max_tokens` (the cut-off handling below applies), `content_filter` →
+`refusal`. HTTP errors: 401/403/404/400 aren't retried; 408, 429 and 5xx are; an
+`insufficient_quota` or credit error pauses model calls like Anthropic's credit error. Cached
+input reported in `prompt_tokens_details` counts as cache reads. Models without a price cost $0.
 
 ### Error handling
 

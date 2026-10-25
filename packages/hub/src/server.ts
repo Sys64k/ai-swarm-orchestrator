@@ -48,6 +48,7 @@ import { API_DOC_VERSION, openApiDocument } from "./api/openapi.js";
 import { syncApiCopies } from "./api-sync.js";
 import type { z } from "zod";
 import { AnthropicApiAdapter, DEFAULT_MAX_TOKENS, type Effort, type LlmAdapter } from "./llm/adapter.js";
+import { openAiCompatibleFor } from "./llm/openai-compatible.js";
 import { ConversationManager } from "./llm/conversations.js";
 import { hasPrice } from "./llm/pricing.js";
 import { gitHttpHandler } from "./git/http-backend.js";
@@ -251,15 +252,18 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   const apiSyncing = opts.apiSync === false ? Promise.resolve() : syncApiCopies(projects.list(), openApiDocument(API_DOC_VERSION), (p) => projects.followForPlanning(p));
   const llm = opts.llm ?? {};
   const model = llm.model ?? "claude-opus-5-5";
-  const anthropic = (id: string) =>
-    process.env.ANTHROPIC_API_KEY ? new AnthropicApiAdapter({ model: id, effort: llm.effort ?? "high", maxTokens: llm.maxTokens ?? DEFAULT_MAX_TOKENS }) : undefined;
-  const adapter = llm.adapter ?? anthropic(model);
-  const agentAdapter = llm.agentAdapter ?? (llm.agentModel && llm.agentModel !== model ? anthropic(llm.agentModel) : undefined);
-  if (!adapter) log.warn("no LLM configured: set ANTHROPIC_API_KEY to let agents work");
+  const maxTokens = llm.maxTokens ?? DEFAULT_MAX_TOKENS;
+  // `openai:<model>` goes to the OpenAI-compatible API at ASO_LLM_BASE_URL; anything else is a Claude model.
+  const adapterFor = (spec: string): LlmAdapter | undefined =>
+    openAiCompatibleFor(spec, process.env, maxTokens) ??
+    (process.env.ANTHROPIC_API_KEY ? new AnthropicApiAdapter({ model: spec, effort: llm.effort ?? "high", maxTokens }) : undefined);
+  const adapter = llm.adapter ?? adapterFor(model);
+  const agentAdapter = llm.agentAdapter ?? (llm.agentModel && llm.agentModel !== model ? adapterFor(llm.agentModel) : undefined);
+  if (!adapter) log.warn("no LLM configured: set ANTHROPIC_API_KEY, or use an openai:<model> with ASO_LLM_BASE_URL, to let agents work");
   else {
     log.info(`LLM: ${adapter.name} ${adapter.model}${agentAdapter ? ` (Architect); ${agentAdapter.model} (agents)` : ""}`);
     for (const a of [adapter, agentAdapter]) {
-      if (a && !hasPrice(a.model)) log.warn(`no price known for ${a.model}; cost estimates will read $0`);
+      if (a && !hasPrice(a.model)) log.warn(`no price known for ${a.model}; cost estimates will read $0, so task budgets won't stop it (the turn limit still does)`);
     }
   }
   const conversations = new ConversationManager(adapter, tasks, registry, plans, {

@@ -127,6 +127,38 @@ second notification.
 The dashboard and `GET /api/llm` show calls and estimated spend; each task shows its own
 turns and cost. Estimates use the Hub's price table. Your Console billing is authoritative.
 
+### Other models (OpenAI-compatible APIs)
+
+Any model behind an OpenAI-compatible Chat Completions API works too: OpenAI, Gemini, Mistral,
+Groq, OpenRouter, LiteLLM, or a local server such as Ollama, vLLM or LM Studio. Name the model
+with an `openai:` prefix and tell the Hub where the API is, in `~/.config/aso/.env`:
+
+```bash
+ASO_LLM_BASE_URL=http://avalon:11434/v1   # the API's root (Ollama's OpenAI endpoint here)
+ASO_LLM_API_KEY=                          # if the provider needs one; local servers don't
+ASO_LLM_VISION=                           # 1 if the model accepts images (QA screenshots)
+```
+
+```bash
+aso llm-check --model openai:qwen3-coder:30b   # a reply and a tool call: can it drive an agent?
+aso hub-service install ... --agent-model openai:qwen3-coder:30b   # builders and QA on it
+```
+
+- **Mix and match.** `--model` (the Architect, and agents without `--agent-model`) and
+  `--agent-model` each take a Claude model or an `openai:` one. Planning is the hardest job:
+  keeping the Architect on a strong model and running builders and QA on a cheaper or local one
+  is a good start. With both on `openai:` models, the Hub needs no Anthropic key at all.
+- **Tool calling is required.** Agents work only through tool calls. `aso llm-check` tries one;
+  a model that fails it can't work as an agent. Small local models often call tools poorly over
+  long tasks; QA, review and the turn limit keep their mistakes out of `main`, at the cost of
+  time.
+- **Ollama:** let the Hub reach it (`OLLAMA_HOST=0.0.0.0:11434` in its service) and give it room
+  for the agents' instructions and files (`OLLAMA_CONTEXT_LENGTH=32768` or more): its default
+  context is too small, and Ollama's OpenAI endpoint can't change it per request.
+- **What's Claude-only:** effort levels, prompt caching control, extended thinking and fallbacks
+  on refusal. Costs read $0 for models without a price in the Hub's table, so task budgets don't
+  stop them; the turn limit does.
+
 ## Installation
 
 ### Hub machine
@@ -877,9 +909,10 @@ while no Architect is connected.
 
 ### `aso llm-check`
 
-Sends one tiny request with `ANTHROPIC_API_KEY` to confirm the key, model access and credit
-balance. Prints the reply, the tokens used and the estimated cost (a fraction of a cent).
-`--model <id>` checks a different model.
+Sends two tiny requests: a one-word reply (the key, model access and credit balance), then a
+tool call, which agents can't work without. Prints the reply, the tokens used and the estimated
+cost (a fraction of a cent). `--model <id>` checks a different model, also an
+`openai:<model>` one (see [Other models](#other-models-openai-compatible-apis)).
 
 ### `aso token`
 
