@@ -1118,8 +1118,11 @@ Models with none cost $0, so only the turn limit stops them.
 a preset (`anthropic`, `openai`, `openrouter`, `gemini`, `groq`, `mistral`, `ollama`,
 `custom`), which gives the kind of API and, for the cloud ones, its base URL, and a key and/or
 base URL. Added providers are saved with their keys in `<state>/providers.json` (mode 600); the
-`.env` adds `anthropic` (`ANTHROPIC_API_KEY`) and `local` (`ASO_LLM_BASE_URL`,
-`ASO_LLM_API_KEY`, `ASO_LLM_VISION`), unless an added provider has that id. API answers carry
+`.env` adds `anthropic` (`ANTHROPIC_API_KEY`), the cloud presets whose key it holds
+(`ENV_KEYS`: `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`,
+`MISTRAL_API_KEY`), and `local` (`ASO_LLM_BASE_URL`, `ASO_LLM_API_KEY`, `ASO_LLM_VISION`),
+unless an added provider has that id. In Docker, `docker-compose.yml` passes these names into
+the container. API answers carry
 `hasKey`, never the key.
 
 - **Adding** fetches the provider's model list first, so a refused key or an unreachable

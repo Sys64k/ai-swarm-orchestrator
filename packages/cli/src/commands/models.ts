@@ -4,15 +4,16 @@ import { api } from "../hub-api.js";
 /** What `aso models` prints: the models to choose from. */
 export function modelLines(m: Models): string[] {
   const lines = [`Architect: ${m.architect ?? "none"}`, `Desks without a model of their own: ${m.defaultAgent ?? "none"}`, ""];
-  const claude = m.available.filter((a) => a.provider === "anthropic");
-  const local = m.available.filter((a) => a.provider === "openai-compatible");
-  lines.push(claude.length ? "Claude:" : "Claude: none (the Hub has no ANTHROPIC_API_KEY)");
-  for (const a of claude) lines.push(`  ${a.model}`);
-  if (local.length) lines.push(`Local (${local[0].baseUrl}):`);
-  for (const a of local) lines.push(`  ${a.model}`);
-  if (m.localError) lines.push(`Local models: ${m.localError}`);
-  else if (!local.length) lines.push("Local: none (set ASO_LLM_BASE_URL on the Hub, e.g. to Ollama's http://<host>:11434/v1)");
-  lines.push("", "Put a desk on one with `aso desk <host>#<slot> <model>`, or a whole machine with `aso desk <host> <model>`.");
+  if (!m.available.length) lines.push("No models: add a provider with `aso provider add` (see `aso providers`).");
+  // One heading per provider, in the Hub's order; each model by the spec desks are put on.
+  const groups = new Map<string, string[]>();
+  for (const a of m.available) {
+    const heading = a.providerLabel ? `${a.providerLabel} (${a.providerId ?? a.provider})` : (a.providerId ?? a.provider);
+    groups.set(heading, [...(groups.get(heading) ?? []), a.spec]);
+  }
+  for (const [heading, specs] of groups) lines.push(`${heading}:`, ...specs.map((s) => `  ${s}`));
+  if (m.localError) lines.push("", `Couldn't list: ${m.localError}`);
+  lines.push("", "Put a desk on one with `aso desk <host>#<slot> <provider>/<model>`, or a whole machine with `aso desk <host> <provider>/<model>`.");
   return lines;
 }
 

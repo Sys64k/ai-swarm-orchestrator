@@ -45,9 +45,15 @@ aso provider remove openai                 # forgets the key
   OpenAI-style Chat Completions API; only the address, key and model name differ. For OpenAI
   the answer limit is sent as `max_completion_tokens` (its reasoning models refuse
   `max_tokens`). Models only on OpenAI's newer Responses API aren't supported.
-- **The `.env` still works:** `ANTHROPIC_API_KEY` appears as the provider `anthropic`, and
-  `ASO_LLM_BASE_URL` as `local`; older names (`claude-haiku-5-5`, `openai:qwen3-coder:30b`) keep
-  working. An added provider with the same name takes over.
+- **Or put keys in the Hub's `.env`** (`~/.config/aso/.env`, read when the Hub starts):
+  `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`
+  and `MISTRAL_API_KEY` each make that provider available, and `ASO_LLM_BASE_URL` adds one
+  OpenAI-compatible server as `local`. A change there needs a Hub restart; one made with
+  `aso provider add` doesn't. A provider added on the Hub takes over a `.env` one of the same
+  name. Older model names (`claude-haiku-5-5`, `openai:qwen3-coder:30b`) keep working.
+- **Gemini** names its models `models/<name>` (`gemini/models/gemini-3.8-flash`), and its list
+  includes models it no longer serves to new keys; such a model fails on its first call with
+  Google's explanation. `aso llm-check --model <spec>` tries one first.
 
 ## Connecting Claude
 

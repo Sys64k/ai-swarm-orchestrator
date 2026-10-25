@@ -48,6 +48,11 @@ describe("providers", () => {
     ]);
     assert.equal(env[1].label, "Local (avalon:11434)");
     assert.deepEqual(environmentProviders({}), []);
+    const cloud = environmentProviders({ OPENAI_API_KEY: "sk-oa", GEMINI_API_KEY: " g-key ", GROQ_API_KEY: "" });
+    assert.deepEqual(cloud.map((p) => [p.id, p.preset, p.source, p.key, p.baseUrl]), [
+      ["openai", "openai", "environment", "sk-oa", "https://api.openai.com/v1"],
+      ["gemini", "gemini", "environment", "g-key", "https://generativelanguage.googleapis.com/v1beta/openai"],
+    ], "each cloud key in the .env is a provider at its known address; an empty one isn't");
   });
 
   it("adds a provider only when its key works, keeps keys owner-only and never shows them", async () => {
@@ -173,6 +178,19 @@ describe("providers", () => {
     assert.equal(priceUsage("claude-haiku-5-5", million).costUsd, 0.6, "back to the built-in price");
     assert.equal(await prices.remove("claude-haiku-5-5"), false);
     await prices.remove("qwen3-coder:30b");
+  });
+
+  it("lets a provider added on the Hub take over the .env's with the same name", async () => {
+    const api = await fakeApi(["gpt-5"], "sk-added");
+    try {
+      const providers = await Providers.open(undefined, { OPENAI_API_KEY: "sk-env" });
+      assert.equal(providers.get("openai")?.source, "environment");
+      await providers.add({ preset: "openai", key: "sk-added", baseUrl: api.url });
+      assert.deepEqual([providers.get("openai")?.source, providers.get("openai")?.key], ["added", "sk-added"]);
+      assert.equal(providers.list().filter((p) => p.id === "openai").length, 1);
+    } finally {
+      await api.close();
+    }
   });
 
   it("keeps .env providers removable only there", async () => {

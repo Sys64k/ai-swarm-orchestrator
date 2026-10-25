@@ -27,7 +27,8 @@ services:
       ASO_PULL_REQUESTS: "${ASO_PULL_REQUESTS:-1}"
       ASO_ALLOW_DEPS: "${ASO_ALLOW_DEPS:-}"
       ASO_CONSOLE_URL: "${ASO_CONSOLE_URL:-}"
-      ASO_MODEL: "${ASO_MODEL:-claude-opus-5-5}"
+      # Empty: Claude Opus when Anthropic is a provider; otherwise the Hub asks for --model.
+      ASO_MODEL: "${ASO_MODEL:-}"
       ASO_AGENT_MODEL: "${ASO_AGENT_MODEL:-}"
       ASO_EFFORT: "${ASO_EFFORT:-high}"
       ASO_TASK_BUDGET: "${ASO_TASK_BUDGET:-5}"
@@ -38,7 +39,13 @@ services:
       ASO_DEPLOY_RUNNER: "${ASO_DEPLOY_RUNNER:-}"
       # Read from the environment of `aso start-hub --docker`; never baked into the image.
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
-      # For openai:<model> specs: any OpenAI-compatible API (OpenAI, OpenRouter, Ollama, vLLM...).
+      # Cloud providers' keys: each makes that provider available (docs/models.md, "Providers").
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      GROQ_API_KEY: "${GROQ_API_KEY:-}"
+      MISTRAL_API_KEY: "${MISTRAL_API_KEY:-}"
+      # One OpenAI-compatible API (e.g. Ollama), as the provider `local`.
       ASO_LLM_BASE_URL: "${ASO_LLM_BASE_URL:-}"
       ASO_LLM_API_KEY: "${ASO_LLM_API_KEY:-}"
       ASO_LLM_VISION: "${ASO_LLM_VISION:-}"

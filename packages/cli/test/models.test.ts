@@ -3,25 +3,32 @@ import { describe, it } from "node:test";
 import { deskLines, modelLines } from "../dist/commands/models.js";
 
 describe("aso models and aso desks", () => {
-  it("lists the models to choose from, Claude and local", () => {
+  it("lists the models by provider, each by the spec a desk is put on", () => {
     const lines = modelLines({
       architect: "claude-opus-5-5",
       defaultAgent: "claude-haiku-5-5",
       available: [
-        { model: "claude-haiku-5-5", spec: "claude-haiku-5-5", provider: "anthropic" },
-        { model: "qwen3-coder:30b", spec: "openai:qwen3-coder:30b", provider: "openai-compatible", baseUrl: "http://avalon:11434/v1" },
+        { model: "claude-haiku-5-5", spec: "anthropic/claude-haiku-5-5", provider: "anthropic", providerId: "anthropic", providerLabel: "Anthropic" },
+        { model: "gpt-5", spec: "openai/gpt-5", provider: "openai-compatible", providerId: "openai", providerLabel: "OpenAI" },
+        { model: "gpt-5-mini", spec: "openai/gpt-5-mini", provider: "openai-compatible", providerId: "openai", providerLabel: "OpenAI" },
+        { model: "qwen3-coder:30b", spec: "local/qwen3-coder:30b", provider: "openai-compatible", providerId: "local", providerLabel: "Local (avalon:11434)" },
       ],
     });
-    assert.deepEqual(lines.slice(0, 7), [
+    assert.deepEqual(lines.slice(0, 10), [
       "Architect: claude-opus-5-5",
       "Desks without a model of their own: claude-haiku-5-5",
       "",
-      "Claude:",
-      "  claude-haiku-5-5",
-      "Local (http://avalon:11434/v1):",
-      "  qwen3-coder:30b",
+      "Anthropic (anthropic):",
+      "  anthropic/claude-haiku-5-5",
+      "OpenAI (openai):",
+      "  openai/gpt-5",
+      "  openai/gpt-5-mini",
+      "Local (avalon:11434) (local):",
+      "  local/qwen3-coder:30b",
     ]);
-    assert.match(modelLines({ architect: null, defaultAgent: null, available: [], localError: "x can't be reached" }).join("\n"), /Local models: x can't be reached/);
+    const none = modelLines({ architect: null, defaultAgent: null, available: [], localError: "OpenAI: HTTP 401" }).join("\n");
+    assert.match(none, /No models: add a provider/);
+    assert.match(none, /Couldn't list: OpenAI: HTTP 401/);
   });
 
   it("shows each desk's model and each model's load", () => {
