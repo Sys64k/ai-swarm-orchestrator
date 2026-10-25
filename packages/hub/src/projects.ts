@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import { createLogger, ProjectIdSchema, type LlmUsage } from "@aso/shared";
+import { createLogger, gitBasicAuthConfig, ProjectIdSchema, type LlmUsage } from "@aso/shared";
 import { DependencyManager, type DependencyManagerOptions } from "./dependencies.js";
 import { GitHubApi, GitHubError, parseGitHubRepo, type RepoSlug } from "./git/github.js";
 import { HubRepository } from "./git/hub-repo.js";
@@ -40,13 +40,6 @@ const exec = promisify(execFile);
 async function initRepo(dir: string, branch: string): Promise<void> {
   await exec("git", ["init", "--quiet", `--initial-branch=${branch}`], { cwd: dir });
   await exec("git", ["-c", "user.name=ASO Hub", "-c", "user.email=aso-hub@localhost", "commit", "--quiet", "--allow-empty", "-m", "Initial commit"], { cwd: dir });
-}
-
-/** The token as a header scoped to an HTTPS remote's host (as GitSync does); never stored in .git/config. */
-function authArgs(url: string, token: string): string[] {
-  if (!/^https?:\/\//.test(url)) return [];
-  const basic = Buffer.from(`x-access-token:${token}`).toString("base64");
-  return ["-c", `http.${new URL(url).origin}/.extraHeader=Authorization: Basic ${basic}`];
 }
 
 /** Everything the Hub keeps for one project; each project's state lives in its own `.git/aso/`. */
@@ -221,7 +214,8 @@ export class ProjectSet {
 
   /** Clone the repository into `dir`, or start it there and push the first commit when it is empty. */
   private async connectGitHub(dir: string, github: { slug: RepoSlug; url: string; token: string }, branch: string): Promise<void> {
-    const auth = authArgs(github.url, github.token);
+    const entry = gitBasicAuthConfig(github.url, github.token);
+    const auth = entry ? ["-c", entry] : [];
     const git = async (args: string[], cwd = dir) => {
       try {
         return (await exec("git", [...auth, ...args], { cwd })).stdout;
