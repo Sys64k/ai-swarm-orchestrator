@@ -36,9 +36,9 @@ or holds no secret.
   machine doesn't need the Hub token; remove any old `ASO_TOKEN` from its `~/.config/aso/.env`.
   Model calls go through the Hub, so workers never hold the Anthropic key.
 - **The core console** (the Hub's dashboard) runs on the Hub machine with the Hub token. A
-  browser signs in with a one-time code, and the console then keeps **the Hub token in the
-  browser's session cookie** (httpOnly, so page scripts can't read it). See
-  [Known limits](#known-limits).
+  browser signs in with a one-time code (or by typing the token on its sign-in page) and gets a
+  signed session cookie that contains no token. Scripts can still use HTTP Basic auth with the
+  token.
 - **aso-ui** holds the Hub token on its server only, from `~/.config/aso/aso-ui.env` (mode 600)
   passed to its container with `--env-file`. A browser signs in with a one-time code and gets a
   signed session cookie that contains no token. The token is never in its pages, links or
@@ -61,8 +61,8 @@ or holds no secret.
 2. Put the new token (`aso token`) in `~/.config/aso/aso-ui.env` as `ASO_TOKEN=…` and redeploy
    aso-ui (`aso deploy aso-ui`). Its sessions are signed with a key derived from the token
    (unless `ASO_SESSION_SECRET` is set), so every aso-ui browser is signed out.
-3. Core console browsers are signed out too, because their cookie held the old token. Sign in
-   again with `aso console-link`.
+3. Core console browsers are signed out too: their sessions are signed with a key derived from
+   the token. Sign in again with `aso console-link`.
 4. Workers with their own keys need nothing. A worker still using `ASO_TOKEN` needs a worker key
    (preferred) or the new token.
 
@@ -97,6 +97,9 @@ the Hub (`aso hub-service restart`). `aso llm-check` confirms the Anthropic key.
   proof (made with the key's hash, which only the Hub holds) covers the worker's nonce, the port
   and the address the answer came from, and only from a private address. The Hub's machine
   answers at most 30 queries per 10 s and stays silent for a key it doesn't know.
+- **Session cookies hold no token.** Both consoles sign their session cookie (HMAC-SHA256 with a
+  key derived from the Hub token), so copying a browser's cookies gives access to that console
+  until it expires or the token is rotated, never the token itself.
 - **Session cookies follow HTTPS.** aso-ui marks its cookie Secure over HTTPS (also behind a
   proxy, via `X-Forwarded-Proto`), not over plain HTTP, so LAN sign-in works.
 
@@ -144,8 +147,6 @@ environment, after the merge you approved. Prefer commands that build in contain
 
 ## Known limits
 
-- **The core console keeps the Hub token in its session cookie** (httpOnly, so scripts can't
-  read it, but anyone with the browser's cookies has the token). aso-ui doesn't.
 - **Plain HTTP on the LAN** unless you use Tailscale or a TLS proxy (above).
 - **`--sandbox none`** runs job commands directly as the worker's user, so they can read the
   worker key and anything else that user can.

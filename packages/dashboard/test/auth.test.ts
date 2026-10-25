@@ -1,21 +1,42 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { browserOrigin, isPublicPath, isSameOrigin, isSignedIn, mismatchHint, normalizeToken, redirectTo, safeNext, signInLink, cleanSignInCode } from "../lib/auth.ts";
+import { browserOrigin, isPublicPath, isSameOrigin, isSignedIn, isValidSession, mismatchHint, newSessionValue, SESSION_MAX_AGE_SEC, normalizeToken, redirectTo, safeNext, signInLink, cleanSignInCode } from "../lib/auth.ts";
 import { errorMessage, hubPath } from "../lib/hub-routes.ts";
 
 describe("console sign-in", () => {
   const token = "aso_secret-token";
   const basic = (pw: string) => `Basic ${btoa(`any:${pw}`)}`;
 
-  it("accepts the session cookie or Basic auth with the token", () => {
-    assert.ok(isSignedIn(token, token, null));
-    assert.ok(isSignedIn(token, undefined, basic(token)));
-    assert.ok(!isSignedIn(token, "wrong", null));
-    assert.ok(!isSignedIn(token, undefined, basic("wrong")));
-    assert.ok(!isSignedIn(token, undefined, "Basic %%%not-base64"));
-    assert.ok(!isSignedIn(token, undefined, `Bearer ${token}`), "the Hub's bearer form is not a browser credential");
-    assert.ok(!isSignedIn(token, undefined, null));
-    assert.ok(isSignedIn(undefined, undefined, null), "open when the Hub runs without a token");
+  it("accepts a signed session cookie or Basic auth with the token", async () => {
+    const session = await newSessionValue(token);
+    assert.ok(await isSignedIn(token, session, null));
+    assert.ok(await isSignedIn(token, undefined, basic(token)));
+    assert.ok(!(await isSignedIn(token, token, null)), "a cookie holding the token itself (the old design) no longer signs in");
+    assert.ok(!(await isSignedIn(token, "wrong", null)));
+    assert.ok(!(await isSignedIn(token, undefined, basic("wrong"))));
+    assert.ok(!(await isSignedIn(token, undefined, "Basic %%%not-base64")));
+    assert.ok(!(await isSignedIn(token, undefined, `Bearer ${token}`)), "the Hub's bearer form is not a browser credential");
+    assert.ok(!(await isSignedIn(token, undefined, null)));
+    assert.ok(await isSignedIn(undefined, undefined, null), "open when the Hub runs without a token");
+  });
+
+  it("keeps the token out of the session cookie, and checks its signature and age", async () => {
+    const now = Date.UTC(2026, 9, 25);
+    const session = await newSessionValue(token, now);
+    assert.match(session, /^v1\.\d+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
+    assert.ok(!session.includes(token) && !session.includes("secret"), "no token in the cookie");
+    assert.notEqual(session, await newSessionValue(token, now), "each sign-in gets its own value");
+    assert.ok(await isValidSession(token, session, now + 1000), "survives a restart: nothing kept in memory");
+    assert.ok(!(await isValidSession("aso_rotated-token", session, now)), "a rotated token ends every session");
+
+    const [v, issued, nonce, mac] = session.split(".");
+    assert.ok(!(await isValidSession(token, [v, String(Number(issued) + 1), nonce, mac].join("."), now)), "the issue time is signed");
+    assert.ok(!(await isValidSession(token, [v, issued, `${nonce}x`, mac].join("."), now)));
+    assert.ok(!(await isValidSession(token, [v, issued, nonce, `${mac.slice(0, -1)}A`].join("."), now)));
+    assert.ok(!(await isValidSession(token, ["v2", issued, nonce, mac].join("."), now)));
+    assert.ok(!(await isValidSession(token, "v1.not-a-time.x.y", now)));
+    assert.ok(await isValidSession(token, session, now + (SESSION_MAX_AGE_SEC - 1) * 1000));
+    assert.ok(!(await isValidSession(token, session, now + (SESSION_MAX_AGE_SEC + 1) * 1000)), "expires with the cookie");
   });
 
   it("only redirects to paths on this site after signing in", () => {
