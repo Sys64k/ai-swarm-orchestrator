@@ -23,7 +23,7 @@ import type { NodeRegistry } from "./registry.js";
 import { DEFAULT_ROUTING_POLICIES, selectNode, type RoutingPolicies } from "./routing.js";
 import type { TranscriptInput } from "./transcripts.js";
 import type { Screenshots, ScreenshotSet } from "./screenshots.js";
-import { unmetReason, type AcceptanceChecker } from "./llm/acceptance.js";
+import { acceptanceCounts, unmetReason, type AcceptanceChecker } from "./llm/acceptance.js";
 
 const log = createLogger("tasks");
 
@@ -785,14 +785,10 @@ export class TaskManager {
       return this.release(task);
     }
     task.acceptance = { result: verdict.result, commit, at, model: verdict.model, summary: verdict.summary, criteria: verdict.criteria };
-    const met = verdict.criteria.filter((c) => c.verdict !== "unmet").length;
-    if (verdict.result === "unmet") {
-      this.note(task, `acceptance check: ${met} of ${verdict.criteria.length} criteria met`);
-      this.rework(task, unmetReason(verdict.criteria));
-    } else {
-      this.note(task, `acceptance check: all ${verdict.criteria.length} criteria met`);
-      this.release(task);
-    }
+    const counts = acceptanceCounts(verdict.criteria);
+    this.note(task, `acceptance check: ${counts}`);
+    if (verdict.result === "unmet") this.rework(task, unmetReason(verdict.criteria));
+    else this.release(task);
     this.kick();
   }
 

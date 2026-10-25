@@ -145,3 +145,10 @@ export function unmetReason(criteria: CriterionVerdict[]): string {
     "Do these before finishing; the tests passing isn't enough.",
   ].join("\n");
 }
+
+/** "2 of 3 criteria met, 1 unclear": the same counts in the task's history and its pull request. */
+export function acceptanceCounts(criteria: CriterionVerdict[]): string {
+  const n = (v: CriterionVerdict["verdict"]) => criteria.filter((c) => c.verdict === v).length;
+  const extra = [n("unmet") && `${n("unmet")} unmet`, n("unclear") && `${n("unclear")} unclear`].filter(Boolean);
+  return `${n("met")} of ${criteria.length} criteria met${extra.length ? `, ${extra.join(", ")}` : ""}`;
+}

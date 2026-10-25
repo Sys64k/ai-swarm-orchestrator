@@ -82,7 +82,7 @@ describe("acceptance check", () => {
     assert.equal(unmetReason(criteria), "Acceptance check: 1 of 2 criteria not met.\n- The llm-none scenario answers 404\n  Missing: no such scenario\nDo these before finishing; the tests passing isn't enough.");
     const note = acceptanceNote({ commit: "c", acceptance: { result: "met", commit: "c", at: "t", model: "claude-opus-5-5", summary: "Done.", criteria: [criteria[0], { ...criteria[1], verdict: "unclear" }] } });
     assert.deepEqual(note, [
-      "**Acceptance check** (claude-opus-5-5): 1 of 2 criteria met. Done.",
+      "**Acceptance check** (claude-opus-5-5): 1 of 2 criteria met, 1 unclear. Done.",
       "- ✅ GET /api/llm answers the status",
       "- ❔ The llm-none scenario answers 404: no such scenario",
     ]);
@@ -148,7 +148,7 @@ describe("acceptance check in the pipeline", () => {
         assert.match(back.rework!.reason, /Acceptance check: 1 of 2 criteria not met\.\n- The llm-none scenario answers 404\n {2}Missing: no llm-none scenario/);
         const task = ctx.hub.tasks.get("llm")!;
         assert.equal(task.acceptance!.result, "unmet");
-        assert.ok(task.history.some((h) => h.event === "acceptance check: 1 of 2 criteria met"));
+        assert.ok(task.history.some((h) => h.event === "acceptance check: 1 of 2 criteria met, 1 unmet"));
         assert.equal(task.llm.costUsd, 0.01, "the check's cost counts toward the task");
 
         dev.send(createMessage("STATUS_UPDATE", "dev", { state: "in_progress", taskId: "llm" }));
