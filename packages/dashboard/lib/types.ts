@@ -241,7 +241,33 @@ export interface AvailableModel {
   model: string;
   spec: string;
   provider: "anthropic" | "openai-compatible";
+  providerId?: string;
+  providerLabel?: string;
   baseUrl?: string;
+}
+
+export type ProviderPreset = "anthropic" | "openai" | "openrouter" | "gemini" | "groq" | "mistral" | "ollama" | "custom";
+
+/** A model provider (`GET /api/providers`): never its key, only whether it has one. */
+export interface Provider {
+  id: string;
+  preset: ProviderPreset;
+  kind: "anthropic" | "openai-compatible";
+  label: string;
+  source: "added" | "environment";
+  hasKey: boolean;
+  baseUrl?: string;
+  vision?: boolean;
+  models?: number;
+  error?: string;
+}
+
+/** A model's price, USD per million tokens (`GET /api/prices`). */
+export interface Price {
+  model: string;
+  input: number;
+  output: number;
+  source: "built-in" | "set";
 }
 
 export interface Models {

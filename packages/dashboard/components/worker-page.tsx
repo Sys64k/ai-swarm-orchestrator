@@ -6,7 +6,7 @@ import { ActionButton, Badge, Banner, LoadingPage, Row, Section, TopBar } from "
 import type { WorkerAction } from "../lib/hub-routes.ts";
 import { useState } from "react";
 import type { Desks, HubNode, Models, Task } from "../lib/types.ts";
-import { agentRows, deskModelChoices, deskModelOf, machineModelOf, workerView, type AgentRow, type DeskModelChoice } from "../lib/view.ts";
+import { agentRows, choiceGroups, deskModelChoices, deskModelOf, machineModelOf, workerView, type AgentRow, type DeskModelChoice } from "../lib/view.ts";
 
 /** One worker: what it runs, and draining or restarting it. */
 export function WorkerPage({ id }: { id: string }) {
@@ -71,7 +71,7 @@ export function WorkerPage({ id }: { id: string }) {
           <ModelPicker
             label="Model for all desks"
             choices={choices}
-            value={machineModelOf(desks, models, host, slots)}
+            value={machineModelOf(desks, host, slots)}
             onChoose={(model) => choose(host, model)}
           />
         )}
@@ -84,7 +84,7 @@ export function WorkerPage({ id }: { id: string }) {
                   <ModelPicker
                     label={`Model for ${agent.name}`}
                     choices={choices}
-                    value={deskModelOf(desks, models, host, agent.slot)}
+                    value={deskModelOf(desks, host, agent.slot)}
                     onChoose={(model) => choose(`${host}#${agent.slot}`, model)}
                   />
                 )}
@@ -92,14 +92,14 @@ export function WorkerPage({ id }: { id: string }) {
             ))}
           </div>
         </Section>
-        {models?.localError && <p className="muted small">Local models: {models.localError}</p>}
+        {models?.localError && <p className="muted small">Some providers&apos; models couldn&apos;t be listed: {models.localError}</p>}
         <p className="muted small">
           <strong>Drain</strong> lets the current job finish but gives this worker no new ones, for example before you take the machine offline.{" "}
           <strong>Restart</strong> drains it, then restarts it on the aso build installed there, so it also finishes an <code>aso update</code>.
         </p>
         <p className="muted small">
           <strong>Model</strong>: each desk builds and tests with the model you pick; a local model takes one request at a time. A
-          change applies to the desk&apos;s next job.
+          change applies to the desk&apos;s next job. Models come from the <Link href="/providers">model providers</Link>.
         </p>
       </main>
     </>
@@ -148,11 +148,20 @@ function ModelPicker({ label, choices, value, onChoose }: { label: string; choic
         }}
       >
         {value === undefined && <option value="">Mixed</option>}
-        {choices.map((c) => (
-          <option key={c.value} value={c.value}>
-            {c.label}
-          </option>
-        ))}
+        {choiceGroups(choices).map(({ group, choices: inGroup }) => {
+          const options = inGroup.map((c) => (
+            <option key={c.value} value={c.value}>
+              {c.label}
+            </option>
+          ));
+          return group ? (
+            <optgroup key={group} label={group}>
+              {options}
+            </optgroup>
+          ) : (
+            options
+          );
+        })}
       </select>
       {error && <Banner tone="bad">{error}</Banner>}
     </label>

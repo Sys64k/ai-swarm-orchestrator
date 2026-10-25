@@ -8,6 +8,8 @@ const ID = "[A-Za-z0-9_-]{1,128}";
 export const WORKER_ACTIONS = ["drain", "resume", "restart"] as const;
 export type WorkerAction = (typeof WORKER_ACTIONS)[number];
 /** Node ids carry the hostname, so dots and colons too; never a `.` or `..` segment. */
+/** A provider's name on the Hub (lower-case letters, digits, . _ -). */
+export const PROVIDER_ID = "[a-z0-9][a-z0-9._-]{0,39}";
 const NODE_ID = "(?!\\.\\.?/)[A-Za-z0-9._:-]{1,128}";
 const RULES: ReadonlyArray<{ method: "GET" | "POST"; pattern: RegExp }> = [
   { method: "GET", pattern: /^health$/ },
@@ -24,6 +26,12 @@ const RULES: ReadonlyArray<{ method: "GET" | "POST"; pattern: RegExp }> = [
   { method: "GET", pattern: /^llm$/ },
   { method: "GET", pattern: /^models$/ },
   { method: "GET", pattern: /^desks$/ },
+  // Model providers: added with a key (it passes through, and is never returned), and prices.
+  { method: "GET", pattern: /^providers$/ },
+  { method: "POST", pattern: /^providers$/ },
+  { method: "POST", pattern: new RegExp(`^providers/${PROVIDER_ID}/remove$`) },
+  { method: "GET", pattern: /^prices$/ },
+  { method: "POST", pattern: /^prices(\/remove)?$/ },
   { method: "POST", pattern: /^desks$/ },
   { method: "GET", pattern: /^nodes$/ },
   { method: "POST", pattern: new RegExp(`^nodes/${NODE_ID}/(${WORKER_ACTIONS.join("|")})$`) },
