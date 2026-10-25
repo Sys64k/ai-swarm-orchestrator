@@ -46,4 +46,4 @@ export { apiChanges, apiFileContents, apiHash, API_COPY_PATH, syncApiCopies, syn
 export { OpenAiCompatibleAdapter, OPENAI_PREFIX, accumulateChunks, classifyHttp, fromChatAnswer, openAiCompatibleFor, sseData, toChatMessages, toChatTools, type ChatAnswer, type ChatMessage } from "./llm/openai-compatible.js";
 export { adapterForModel, deskName, DeskModels, desksOf, modelConcurrency, type ModelSettings, type Route } from "./llm/desk-models.js";
 export { CLAUDE_MODELS, ModelCatalog, resolveModel } from "./llm/catalog.js";
-export { ACCEPTANCE_DIFF_LIMIT, AcceptanceChecker, acceptancePrompt, diffText, readVerdict, unmetReason, type AcceptanceVerdict, type CriterionVerdict } from "./llm/acceptance.js";
+export { ACCEPTANCE_DIFF_LIMIT, AcceptanceChecker, acceptanceCounts, acceptancePrompt, diffText, readVerdict, unmetReason, type AcceptanceVerdict, type CriterionVerdict } from "./llm/acceptance.js";

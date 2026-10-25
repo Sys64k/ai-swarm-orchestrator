@@ -1,4 +1,5 @@
 import { createLogger, taskBranchName, type ChecksOverall, type CheckState, type ReviewChecks } from "@aso/shared";
+import { acceptanceCounts } from "../llm/acceptance.js";
 import type { ReviewGate, ReviewOutcome, TaskManager, TaskRecord } from "../tasks.js";
 import {
   GitHubApi,
@@ -304,10 +305,9 @@ export function acceptanceNote(task: Pick<TaskRecord, "acceptance" | "commit">):
   if (!a || a.commit !== task.commit || a.result === "checking") return [];
   if (a.result === "undecided") return [`**Acceptance check:** couldn't decide (${a.reason ?? "no reason"}); check the criteria yourself`];
   const criteria = a.criteria ?? [];
-  const met = criteria.filter((c) => c.verdict === "met").length;
   const mark = { met: "✅", unmet: "❌", unclear: "❔" } as const;
   return [
-    `**Acceptance check** (${a.model ?? "model"}): ${met} of ${criteria.length} criteria met${a.summary ? `. ${a.summary}` : ""}`,
+    `**Acceptance check** (${a.model ?? "model"}): ${acceptanceCounts(criteria)}${a.summary ? `. ${a.summary}` : ""}`,
     ...criteria.map((c) => `- ${mark[c.verdict]} ${c.criterion}${c.verdict === "met" ? "" : `: ${c.reason}`}`),
   ];
 }
