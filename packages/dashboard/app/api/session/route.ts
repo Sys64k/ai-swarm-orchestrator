@@ -4,6 +4,7 @@ import {
   cleanSignInCode,
   constantTimeEqual,
   mismatchHint,
+  newSessionValue,
   normalizeToken,
   redirectTo,
   safeNext,
@@ -32,7 +33,7 @@ export async function POST(request: NextRequest) {
   const response = new NextResponse(null, { status: 303, headers: { location: new URL(next, browserOrigin(request.headers, request.nextUrl.origin)).href } });
   if (expected) {
     console.info(`[console] signed in from ${request.headers.get("x-forwarded-for") ?? "unknown address"}`);
-    response.cookies.set(SESSION_COOKIE, expected, {
+    response.cookies.set(SESSION_COOKIE, await newSessionValue(expected), {
       httpOnly: true,
       sameSite: "lax",
       // Behind an HTTPS proxy (e.g. Tailscale) the server itself only sees http.
