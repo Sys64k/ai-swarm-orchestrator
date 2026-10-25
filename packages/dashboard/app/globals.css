@@ -990,3 +990,30 @@ select.input {
   margin: 0;
   padding: 0 12px 12px 14px;
 }
+
+/* Providers page: the vision checkbox, and the price form (model, two prices, a button). */
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0;
+}
+.price-form {
+  display: grid;
+  grid-template-columns: 1fr 5.5rem 5.5rem auto;
+  gap: 8px;
+  align-items: center;
+  margin-top: 12px;
+}
+.price-form .banner {
+  grid-column: 1 / -1;
+}
+@media (max-width: 520px) {
+  .price-form {
+    grid-template-columns: 1fr 1fr;
+  }
+  .price-form > .input:first-child,
+  .price-form > .button {
+    grid-column: 1 / -1;
+  }
+}

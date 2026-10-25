@@ -16,6 +16,10 @@ aso providers                              # each provider and how many models i
 aso provider remove openai                 # forgets the key
 ```
 
+- **In the console:** **Model providers** (on the home page, next to the worker machines) lists
+  the providers and their prices, adds one (the key in a password field, sent once) and removes
+  one. Over plain HTTP it warns that a typed key crosses the network unencrypted: use HTTPS
+  (e.g. Tailscale) or `aso provider add` on the Hub machine.
 - **Models are named `<provider>/<model>`** (`anthropic/claude-haiku-5-5`, `ollama/qwen3-coder:30b`,
   `openrouter/meta-llama/llama-3.3-70b`), wherever a model is chosen: `--model`, `--agent-model`,
   `aso desk`, the console. A name only one provider offers works on its own
@@ -148,7 +152,7 @@ aso desks                            # each desk's model, and how busy each mode
 ```
 
 - **In the console:** a worker's page has a model picker under each desk, and one for all its
-  desks.
+  desks, with the models grouped by provider.
 - **What there is to choose:** every model your [providers](#providers) list. A name it doesn't
   know is refused with the closest matches.
 - **Calls at once per model:** 1 for local models by default (a local GPU serves few requests

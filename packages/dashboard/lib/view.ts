@@ -1,6 +1,8 @@
 import type {
   Desks,
-  Models, CheckState, DeployStatus, DiffFile, HubNode, HubUpdate, WorkerKey, Plan, PlannedTask, Project, ReviewChecks, Task, TaskDiff, TaskState, TranscriptEntry } from "./types.ts";
+  Models, Provider, ProviderPreset, CheckState, DeployStatus, DiffFile, HubNode, HubUpdate, WorkerKey, Plan, PlannedTask, Project, ReviewChecks, Task, TaskDiff, TaskState, TranscriptEntry } from "./types.ts";
+
+import { PROVIDER_ID } from "./hub-routes.ts";
 
 /** Colour family of a state badge. */
 export type Tone = "active" | "waiting" | "good" | "bad" | "muted";
@@ -333,39 +335,117 @@ export function agentRows(node: HubNode, tasks: readonly Task[]): AgentRow[] {
 }
 
 export interface DeskModelChoice {
-  /** What `POST /api/desks` takes: a listed model's name, an `openai:` spec, or `default`. */
+  /** What `POST /api/desks` takes: a model's spec (`<provider>/<model>`), or `default`. */
   value: string;
   label: string;
+  /** The provider it comes from, for grouping in the picker. */
+  group?: string;
 }
 
-/** The name a desk's model is chosen by: the listed name (`qwen3-coder:30b`), else its spec. */
-function choiceValue(spec: string, models: Pick<Models, "available">): string {
-  return models.available.find((m) => m.spec === spec)?.model ?? spec;
+/** A desk's model spec in today's form: older ones (`openai:<model>`, a bare `claude-…`) as the Hub reads them. */
+export function canonicalSpec(spec: string): string {
+  if (spec.startsWith("openai:")) return `local/${spec.slice("openai:".length)}`;
+  if (spec.startsWith("claude-")) return `anthropic/${spec}`;
+  return spec;
 }
 
 /**
- * The models a desk can be put on: the default first, then Claude, then local models, then any
- * model a desk already uses that the Hub no longer lists (so the picker still shows it).
+ * The models a desk can be put on: the default first, then each provider's models (grouped by
+ * provider), then any model a desk already uses that the Hub no longer lists (so it still shows).
  */
 export function deskModelChoices(models: Models, desks?: Pick<Desks, "desks">): DeskModelChoice[] {
   const choices: DeskModelChoice[] = [{ value: "default", label: `Default (${models.defaultAgent ?? "none"})` }];
-  for (const m of models.available) choices.push({ value: m.model, label: m.provider === "anthropic" ? m.model : `${m.model} (local)` });
+  for (const m of models.available) choices.push({ value: m.spec, label: m.model, group: m.providerLabel ?? m.providerId ?? m.provider });
   for (const { model } of desks?.desks ?? []) {
-    const value = choiceValue(model, models);
-    if (!choices.some((c) => c.value === value)) choices.push({ value, label: `${value} (not listed)` });
+    const value = canonicalSpec(model);
+    if (!choices.some((c) => c.value === value)) choices.push({ value, label: `${value} (not listed)`, group: "Not listed" });
   }
   return choices;
 }
 
-/** A desk's current choice: `default`, or the name its model is chosen by. */
-export function deskModelOf(desks: Pick<Desks, "desks"> | undefined, models: Pick<Models, "available">, host: string, slot: number): string {
+/** Choices in picker order: ungrouped first, then a group per provider in the order they come. */
+export function choiceGroups(choices: DeskModelChoice[]): Array<{ group?: string; choices: DeskModelChoice[] }> {
+  const out: Array<{ group?: string; choices: DeskModelChoice[] }> = [];
+  for (const c of choices) {
+    const existing = out.find((g) => g.group === c.group);
+    if (existing) existing.choices.push(c);
+    else out.push({ group: c.group, choices: [c] });
+  }
+  return out;
+}
+
+/** What each provider asks for when added (the Hub's preset table, as the console shows it). */
+export const PROVIDER_FORMS: Record<ProviderPreset, { label: string; key: "required" | "optional"; url: boolean; vision: boolean; hint?: string }> = {
+  anthropic: { label: "Anthropic (Claude)", key: "required", url: false, vision: false },
+  openai: { label: "OpenAI", key: "required", url: false, vision: true },
+  openrouter: { label: "OpenRouter", key: "required", url: false, vision: true, hint: "Many providers' models through one key; reports its prices" },
+  gemini: { label: "Google Gemini", key: "required", url: false, vision: true },
+  groq: { label: "Groq", key: "required", url: false, vision: true },
+  mistral: { label: "Mistral", key: "required", url: false, vision: true },
+  ollama: { label: "Ollama (a local server)", key: "optional", url: true, vision: true, hint: "e.g. http://avalon:11434/v1" },
+  custom: { label: "Other OpenAI-compatible API", key: "optional", url: true, vision: true, hint: "Its API root, e.g. http://lab:8000/v1" },
+};
+
+/** The provider's name on the Hub: the one given, else the preset's. */
+export function providerId(form: { preset: ProviderPreset; name: string }): string {
+  return form.name.trim() || form.preset;
+}
+
+/** The body for `POST /api/providers` from the form, or why it can't be sent yet. */
+export function providerBody(form: { preset: ProviderPreset; key: string; url: string; name: string; vision: boolean }): { body: Record<string, unknown> } | { error: string } {
+  const info = PROVIDER_FORMS[form.preset];
+  const key = form.key.trim();
+  const url = form.url.trim();
+  const name = form.name.trim();
+  if (info.key === "required" && !key) return { error: `${info.label} needs an API key` };
+  if (info.url && !url) return { error: "Give the server's address" };
+  if (name && !new RegExp(`^${PROVIDER_ID}$`).test(name)) return { error: "A name is lower-case letters, digits, . _ - (up to 40)" };
+  return {
+    body: {
+      preset: form.preset,
+      ...(name ? { id: name } : {}),
+      ...(key ? { key } : {}),
+      ...(info.url ? { baseUrl: url } : {}),
+      ...(form.vision && info.vision ? { vision: true } : {}),
+    },
+  };
+}
+
+/** A provider's line under its name: where it is, where it's set up, and how its model list went. */
+export function providerDetail(p: Provider): { detail: string; badge: { label: string; tone: "good" | "bad" } } {
+  const parts = [p.baseUrl && PROVIDER_FORMS[p.preset].url ? p.baseUrl : undefined, p.source === "environment" ? "from the Hub's .env" : undefined, p.hasKey ? "key stored" : undefined];
+  return {
+    detail: [p.error ?? `${p.models ?? 0} models`, ...parts].filter(Boolean).join(" · "),
+    badge: p.error ? { label: "Unreachable", tone: "bad" } : { label: "Working", tone: "good" },
+  };
+}
+
+/** The body for `POST /api/prices` from the form (dollars per million tokens), or what's wrong. */
+export function priceBody(form: { model: string; input: string; output: string }): { body: { model: string; input: number; output: number } } | { error: string } {
+  const model = form.model.trim();
+  const input = Number(form.input.trim().replace(",", "."));
+  const output = Number(form.output.trim().replace(",", "."));
+  if (!model) return { error: "Name the model" };
+  if (!form.input.trim() || !form.output.trim() || !Number.isFinite(input) || !Number.isFinite(output) || input < 0 || output < 0) {
+    return { error: "Give both prices in dollars per million tokens, e.g. 1.25 and 10" };
+  }
+  return { body: { model, input, output } };
+}
+
+/** Whether a key typed on this page would travel unencrypted: plain HTTP to anything but this machine. */
+export function keyTravelsInClear(location: { protocol: string; hostname: string }): boolean {
+  return location.protocol !== "https:" && !["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
+}
+
+/** A desk's current choice: `default`, or its model's spec. */
+export function deskModelOf(desks: Pick<Desks, "desks"> | undefined, host: string, slot: number): string {
   const spec = desks?.desks.find((d) => d.desk === `${host}#${slot}`)?.model;
-  return spec ? choiceValue(spec, models) : "default";
+  return spec ? canonicalSpec(spec) : "default";
 }
 
 /** The machine-wide choice: the model every desk shares, or undefined when they differ. */
-export function machineModelOf(desks: Pick<Desks, "desks"> | undefined, models: Pick<Models, "available">, host: string, slots: number): string | undefined {
-  const each = new Set(Array.from({ length: slots }, (_, i) => deskModelOf(desks, models, host, i + 1)));
+export function machineModelOf(desks: Pick<Desks, "desks"> | undefined, host: string, slots: number): string | undefined {
+  const each = new Set(Array.from({ length: slots }, (_, i) => deskModelOf(desks, host, i + 1)));
   return each.size === 1 ? [...each][0] : undefined;
 }
 

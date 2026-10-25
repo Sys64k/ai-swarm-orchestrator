@@ -159,7 +159,7 @@ flowchart LR
 | | `hardware.ts` | `systeminformation` profile and disk write benchmark |
 | | `git/agent-git-client.ts` | The only Git interface agents get |
 | `@aso/cli` | `index.ts`, `commands/*` | Argument parsing and process orchestration (native or Docker) |
-| `@aso/dashboard` | `app/**`, `components/*` | The console: home, task (live transcript), plan (approve/reject), new plan, sign-in, notifications (`public/sw.js`). Client pages poll the Hub through `app/api/hub/[...path]` |
+| `@aso/dashboard` | `app/**`, `components/*` | The console: home, task (live transcript), plan (approve/reject), new plan, worker (a model per desk, grouped by provider), worker machines, model providers (add with a key, remove, prices), sign-in, notifications (`public/sw.js`). Client pages poll the Hub through `app/api/hub/[...path]` |
 | | `lib/view.ts` | Pure view logic: home grouping, badges, transcript → terminal lines |
 | | `lib/auth.ts`, `lib/hub-routes.ts`, `proxy.ts` | Session cookie and Basic auth, browser-origin redirects, the allowlist of Hub endpoints the browser may reach |
 
