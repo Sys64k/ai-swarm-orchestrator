@@ -27,6 +27,8 @@ export interface StartHubOptions {
   docker: boolean;
   testCommand: string;
   qa: boolean;
+  /** Check QA-passed work against its acceptance criteria (`--no-acceptance-check` turns it off). */
+  acceptanceCheck: boolean;
   push: boolean;
   allowDeps?: string;
   consoleUrl?: string;
@@ -63,6 +65,7 @@ export async function startHubCommand(opts: StartHubOptions): Promise<void> {
     sync: { enabled: opts.push && process.env.ASO_PUSH !== "0", token: process.env.ASO_GIT_TOKEN || undefined },
     pullRequests: { enabled: process.env.ASO_PULL_REQUESTS !== "0", consoleUrl: opts.consoleUrl },
     qa: { enabled: qaEnabled, command: testCommand },
+    acceptanceCheck: opts.acceptanceCheck && process.env.ASO_ACCEPTANCE_CHECK !== "0",
     allowDependencies: parseList(opts.allowDeps),
     dist: { version: () => layout.distVersion(), tarball: () => layout.distTarball() },
     autoUpdate: process.env.ASO_AUTO_UPDATE !== "0",
@@ -127,6 +130,7 @@ async function startHubInDocker(root: string, opts: StartHubOptions, token: stri
       ASO_DASHBOARD_PORT: String(opts.dashboardPort),
       ASO_TEST_COMMAND: parseTestCommand(opts.testCommand).join(" "),
       ASO_QA: opts.qa ? "1" : "0",
+      ASO_ACCEPTANCE_CHECK: opts.acceptanceCheck ? "1" : "0",
       ASO_PUSH: opts.push && process.env.ASO_PUSH !== "0" ? "1" : "0",
       ASO_ALLOW_DEPS: parseList(opts.allowDeps)?.join(",") ?? "",
       ASO_CONSOLE_URL: opts.consoleUrl ?? "",

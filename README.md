@@ -669,6 +669,14 @@ Delete a project's `.git/aso/` while the Hub is stopped to start that project wi
 task list. A state file the
 Hub can't read is renamed to `state.json.unreadable-<time>` and the Hub starts empty.
 
+**The acceptance check.** Passing tests show the code runs, not that it does what the task
+asked. So after QA passes, the Architect's model reads the task, its acceptance criteria and the
+diff, and judges each criterion *met*, *unmet* or *unclear*. If any is unmet, the task goes back
+to its agent with what's missing (a rework round). Otherwise it moves on to review or merge, and
+the verdict, criterion by criterion, goes into the pull request. If the check can't decide (no
+model, a model error), the work moves on with a note. It costs one short call per round (a few
+cents with Opus), counted in the task's cost; `--no-acceptance-check` turns it off.
+
 ## Projects
 
 One Hub runs several projects at the same time. They share the workers and the Architect.
@@ -860,6 +868,7 @@ failure), and so do the dashboard and `aso sync`.
 | `--dashboard-port <port>` | `7421` | Dashboard port |
 | `--test-command <cmd>` | `npm test` | QA command, split on spaces, run without a shell |
 | `--no-qa` | | Merge verified work without a QA run |
+| `--no-acceptance-check` | | Don't check QA-passed work against its acceptance criteria (see [How a task flows](#how-a-task-flows)) |
 | `--no-push` | | Keep merges local (don't push `main` to `origin`) |
 | `--allow-deps <list>` | any | npm packages agents may request; `@scope/*` allows a scope |
 | `--console-url <url>` | *(none)* | The console's address. Pull requests then link to their task, e.g. for its QA screenshots |

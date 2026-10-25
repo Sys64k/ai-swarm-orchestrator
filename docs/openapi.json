@@ -1187,6 +1187,74 @@
           "qaSummary": {
             "type": "string"
           },
+          "acceptance": {
+            "type": "object",
+            "properties": {
+              "result": {
+                "type": "string",
+                "enum": [
+                  "checking",
+                  "met",
+                  "unmet",
+                  "undecided"
+                ],
+                "description": "checking: under way; undecided: the check couldn't tell, and the work went on"
+              },
+              "commit": {
+                "type": "string",
+                "description": "The commit it checked"
+              },
+              "at": {
+                "type": "string",
+                "description": "ISO 8601 time"
+              },
+              "model": {
+                "type": "string"
+              },
+              "summary": {
+                "type": "string"
+              },
+              "reason": {
+                "description": "Why it was undecided",
+                "type": "string"
+              },
+              "criteria": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "criterion": {
+                      "type": "string"
+                    },
+                    "verdict": {
+                      "type": "string",
+                      "enum": [
+                        "met",
+                        "unmet",
+                        "unclear"
+                      ]
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "criterion",
+                    "verdict",
+                    "reason"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "result",
+              "commit",
+              "at"
+            ],
+            "additionalProperties": false,
+            "description": "The check of the work against the task's acceptance criteria, after QA passed"
+          },
           "screenshots": {
             "description": "What the project's screenshots script saved in the last passing QA run; GET /api/tasks/{id}/screenshots/{name} serves each",
             "type": "object",
