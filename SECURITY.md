@@ -19,7 +19,8 @@ it and which version (`aso --version`) you ran.
 | **Join code** | random text | Nowhere: shown once by `aso worker-key new` or the console | Traded once, within 30 minutes, for a new worker key | Expires and works once. Revoke the key it was traded for if a stranger used it |
 | **Sign-in code** | `…/login?code=…` | Nowhere: made by `aso console-link` or *Sign in another device* | Signs one browser in to the core console or aso-ui, once, within minutes | Expires and works once |
 | **GitHub token** | `github_pat_…` | `ASO_GIT_TOKEN` on the Hub machine | The Hub pushes `main`, opens and merges pull requests and reads CI checks | Revoke it on GitHub and set a new one |
-| **Anthropic API key** | `sk-ant-…` | `ANTHROPIC_API_KEY` on the Hub machine only | Model calls, which cost money | Revoke it in the Anthropic console and set a new one |
+| **Anthropic API key** | `sk-ant-…` | `ANTHROPIC_API_KEY` on the Hub machine only, or added as a provider | Model calls, which cost money | Revoke it in the Anthropic console and set a new one |
+| **Provider keys** | `sk-…`, `sk-or-…`, … | `<projects root>/.aso/providers.json` on the Hub (mode 600), from `aso provider add` | Model calls at that provider, which may cost money | `aso provider remove <id>` forgets it; revoke it at the provider |
 
 `ASO_TOKEN`, `ASO_GIT_TOKEN` and `ANTHROPIC_API_KEY` are read from the environment or from
 `~/.config/aso/.env` (mode 600). Tokens are compared in constant time.

@@ -3,8 +3,7 @@ import path from "node:path";
 import { z } from "zod";
 import { createLogger, DeskSchema, DeskModelSettingsSchema, type Desks } from "@aso/shared";
 import { JsonFileWriter } from "../push/json-file.js";
-import { AnthropicApiAdapter, type Effort, type LlmAdapter } from "./adapter.js";
-import { OPENAI_PREFIX, openAiCompatibleFor, type OpenAiCompatibleEnv } from "./openai-compatible.js";
+import type { LlmAdapter } from "./adapter.js";
 import { Semaphore } from "./semaphore.js";
 
 const log = createLogger("models");
@@ -27,34 +26,16 @@ export function deskName(host: string, slot: number): string {
   return `${host}#${slot}`;
 }
 
-/** Calls a model may make at once: its own setting, else 1 for a local-style API, else the Hub's default. */
-export function modelConcurrency(spec: ModelSpec, settings: ModelSettings, hubDefault: number): number {
-  return settings.concurrency ?? (spec.startsWith(OPENAI_PREFIX) ? 1 : hubDefault);
+/** Calls a model may make at once: its own setting, else 1 on a local server (one GPU), else the Hub's default. */
+export function modelConcurrency(settings: ModelSettings, local: boolean, hubDefault: number): number {
+  return settings.concurrency ?? (local ? 1 : hubDefault);
 }
+
+/** Whether a spec's model runs on a local server (the providers know). */
+export type IsLocal = (spec: ModelSpec) => boolean;
 
 /** Builds the adapter for a model; throws when it can't (e.g. an openai: model without an address). */
 export type AdapterFactory = (spec: ModelSpec, settings: ModelSettings) => LlmAdapter;
-
-/**
- * The adapter for a model: an OpenAI-compatible API for `openai:` models (its own base URL and
- * vision override the Hub's ASO_LLM_* settings), else the Anthropic API, which needs
- * ANTHROPIC_API_KEY in `env`.
- */
-export function adapterForModel(
-  spec: ModelSpec,
-  settings: ModelSettings,
-  opts: { env: OpenAiCompatibleEnv & { ANTHROPIC_API_KEY?: string }; maxTokens: number; effort: Effort },
-): LlmAdapter {
-  const env: OpenAiCompatibleEnv = {
-    ...opts.env,
-    ...(settings.baseUrl ? { ASO_LLM_BASE_URL: settings.baseUrl } : {}),
-    ...(settings.vision === undefined ? {} : { ASO_LLM_VISION: settings.vision ? "1" : "0" }),
-  };
-  const openAi = openAiCompatibleFor(spec, env, opts.maxTokens);
-  if (openAi) return openAi;
-  if (!opts.env.ANTHROPIC_API_KEY) throw new Error(`${spec} is a Claude model, and the Hub has no ANTHROPIC_API_KEY`);
-  return new AnthropicApiAdapter({ model: spec, effort: opts.effort, maxTokens: opts.maxTokens, apiKey: opts.env.ANTHROPIC_API_KEY });
-}
 
 /** A model to call, with its limit on calls at once. */
 export interface Route {
@@ -79,12 +60,13 @@ export class DeskModels {
     private desks: Record<string, ModelSpec>,
     private readonly factory: AdapterFactory,
     private readonly hubConcurrency: number,
+    private readonly isLocal: IsLocal,
     file?: string,
   ) {
     this.writer = file ? new JsonFileWriter(file, 0o600) : undefined;
   }
 
-  static async open(dir: string | undefined, factory: AdapterFactory, hubConcurrency: number): Promise<DeskModels> {
+  static async open(dir: string | undefined, factory: AdapterFactory, hubConcurrency: number, isLocal: IsLocal): Promise<DeskModels> {
     const file = dir ? path.join(dir, FILE) : undefined;
     let data: z.infer<typeof ModelsFileSchema> = { models: {}, desks: {} };
     if (file) {
@@ -94,7 +76,7 @@ export class DeskModels {
         if ((err as NodeJS.ErrnoException).code !== "ENOENT") log.warn(`${file} is unreadable, starting with every desk on the default model: ${(err as Error).message}`);
       }
     }
-    return new DeskModels(data.models, data.desks, factory, hubConcurrency, file);
+    return new DeskModels(data.models, data.desks, factory, hubConcurrency, isLocal, file);
   }
 
   /** The model a desk uses, or undefined for the default agent model. */
@@ -152,7 +134,7 @@ export class DeskModels {
       return {
         model: spec,
         ...(settings.baseUrl ? { baseUrl: settings.baseUrl } : {}),
-        concurrency: modelConcurrency(spec, settings, this.hubConcurrency),
+        concurrency: modelConcurrency(settings, this.isLocal(spec), this.hubConcurrency),
         running: status?.running ?? 0,
         waiting: status?.waiting ?? 0,
       };
@@ -161,7 +143,7 @@ export class DeskModels {
   }
 
   private makeRoute(spec: ModelSpec, settings: ModelSettings): Route {
-    return { adapter: this.factory(spec, settings), slots: new Semaphore(modelConcurrency(spec, settings, this.hubConcurrency)) };
+    return { adapter: this.factory(spec, settings), slots: new Semaphore(modelConcurrency(settings, this.isLocal(spec), this.hubConcurrency)) };
   }
 }
 

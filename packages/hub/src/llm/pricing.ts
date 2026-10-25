@@ -1,4 +1,4 @@
-import type { LlmUsage } from "@aso/shared";
+import type { LlmUsage, PriceEntry } from "@aso/shared";
 
 /** USD per million tokens. Standard first-party API rates as of 2026-10; verify against the pricing page. */
 interface Price {
@@ -18,8 +18,35 @@ const PRICES: Record<string, Price> = {
   "claude-haiku-5-5": { input: 0.1, output: 0.5, cacheWrite: 0.125, cacheRead: 0.01 },
 };
 
+/** Prices providers report themselves (OpenRouter's), per million tokens; they apply after the built-in ones. */
+const reported = new Map<string, Price>();
+/** Prices set on the Hub (`aso price set`); they win over the others. */
+const custom = new Map<string, Price>();
+
+/** Replace the prices set on the Hub (input and output per million tokens; cache rates as input). */
+export function setCustomPrices(prices: Record<string, { input: number; output: number }>): void {
+  custom.clear();
+  for (const [model, p] of Object.entries(prices)) custom.set(model, { input: p.input, output: p.output, cacheWrite: p.input, cacheRead: p.input });
+}
+
+/** The built-in prices and those set on the Hub (a set one replaces a built-in one); not every reported one. */
+export function priceTable(): PriceEntry[] {
+  const builtIn = Object.entries(PRICES).filter(([m]) => !custom.has(m)).map(([model, p]) => ({ model, input: p.input, output: p.output, source: "built-in" as const }));
+  const set = [...custom].map(([model, p]) => ({ model, input: p.input, output: p.output, source: "set" as const }));
+  return [...builtIn, ...set].sort((a, b) => a.model.localeCompare(b.model));
+}
+
+/** Record prices a provider reported (input and output per million tokens; no cache rates). */
+export function registerPrices(prices: Record<string, { input: number; output: number }>): void {
+  for (const [model, p] of Object.entries(prices)) reported.set(model, { input: p.input, output: p.output, cacheWrite: p.input, cacheRead: p.input });
+}
+
+function priceOf(model: string): Price | undefined {
+  return custom.get(model) ?? PRICES[model] ?? reported.get(model);
+}
+
 export function hasPrice(model: string): boolean {
-  return Object.hasOwn(PRICES, model);
+  return priceOf(model) !== undefined;
 }
 
 export interface TokenCounts {
@@ -31,7 +58,7 @@ export interface TokenCounts {
 
 /** Estimated cost; unknown models count as 0 (the Hub warns at startup). */
 export function priceUsage(model: string, t: TokenCounts): LlmUsage {
-  const p = PRICES[model];
+  const p = priceOf(model);
   const costUsd = p
     ? (t.inputTokens * p.input + t.outputTokens * p.output + t.cacheWriteTokens * p.cacheWrite + t.cacheReadTokens * p.cacheRead) / 1e6
     : 0;

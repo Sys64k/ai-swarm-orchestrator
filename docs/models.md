@@ -2,6 +2,49 @@
 
 Which models the swarm uses: Claude through the Anthropic API, any OpenAI-compatible API (local models too), and a model per desk.
 
+## Providers
+
+A **provider** is where models come from. Add one with just its key (known providers know
+their own address), or a local server's address; the Hub then lists the models it offers:
+
+```bash
+aso provider add anthropic                 # asks for the key (hidden)
+aso provider add openai                    # also: openrouter, gemini, groq, mistral
+aso provider add ollama --url http://avalon:11434/v1
+aso provider add custom --name lab --url http://lab:8000/v1   # any OpenAI-compatible API
+aso providers                              # each provider and how many models it lists
+aso provider remove openai                 # forgets the key
+```
+
+- **Models are named `<provider>/<model>`** (`anthropic/claude-haiku-5-5`, `ollama/qwen3-coder:30b`,
+  `openrouter/meta-llama/llama-3.3-70b`), wherever a model is chosen: `--model`, `--agent-model`,
+  `aso desk`, the console. A name only one provider offers works on its own
+  (`aso desk avalon#4 qwen3-coder:30b`); one several offer asks you to choose.
+- **The lists come from the providers' own APIs** (Anthropic's `/v1/models`, the others'
+  `/models`), cached for 5 minutes, so a new model shows up without an ASO update. If Anthropic
+  can't be reached, the current Claude models are offered anyway.
+- **A provider is added only if it works:** its model list is fetched first, so a wrong key or
+  an unreachable server is refused with the reason, and nothing is saved.
+- **Keys stay on the Hub**, in `<projects root>/.aso/providers.json` (owner-only), and the API
+  never shows them. When asked, `aso provider add` reads the key at a hidden prompt (or from
+  stdin when piped), so it doesn't land in your shell history. See
+  [SECURITY.md](../SECURITY.md#the-credentials).
+- **Prices:** Claude models are priced from the Hub's table; OpenRouter reports its own prices,
+  which the Hub uses. For any other model, set one, so task budgets stop it too (otherwise it
+  reads $0 and only the turn limit does):
+  `aso price set openai/gpt-5 --input 1.25 --output 10` (USD per million tokens; `aso prices`
+  lists them).
+- **The Architect's model:** `--model <provider>/<model>`. Without it, the Hub uses Claude Opus
+  when Anthropic is a provider; with no Anthropic provider, give `--model` (and restart the Hub
+  after adding the provider it names).
+- **One way of calling for all:** every provider but Anthropic is called through the same
+  OpenAI-style Chat Completions API; only the address, key and model name differ. For OpenAI
+  the answer limit is sent as `max_completion_tokens` (its reasoning models refuse
+  `max_tokens`). Models only on OpenAI's newer Responses API aren't supported.
+- **The `.env` still works:** `ANTHROPIC_API_KEY` appears as the provider `anthropic`, and
+  `ASO_LLM_BASE_URL` as `local`; older names (`claude-haiku-5-5`, `openai:qwen3-coder:30b`) keep
+  working. An added provider with the same name takes over.
+
 ## Connecting Claude
 
 Agents call Claude through the **Hub only**, using the official Anthropic API.
@@ -60,8 +103,9 @@ turns and cost. Estimates use the Hub's price table. Your Console billing is aut
 ### Other models (OpenAI-compatible APIs)
 
 Any model behind an OpenAI-compatible Chat Completions API works too: OpenAI, Gemini, Mistral,
-Groq, OpenRouter, LiteLLM, or a local server such as Ollama, vLLM or LM Studio. Name the model
-with an `openai:` prefix and tell the Hub where the API is, in `~/.config/aso/.env`:
+Groq, OpenRouter, LiteLLM, or a local server such as Ollama, vLLM or LM Studio. The simplest is
+to [add it as a provider](#providers). The older way, one server in `~/.config/aso/.env`, still
+works; it becomes the provider `local`:
 
 ```bash
 ASO_LLM_BASE_URL=http://avalon:11434/v1   # the API's root (Ollama's OpenAI endpoint here)
@@ -70,14 +114,14 @@ ASO_LLM_VISION=                           # 1 if the model accepts images (QA sc
 ```
 
 ```bash
-aso llm-check --model openai:qwen3-coder:30b   # a reply and a tool call: can it drive an agent?
-aso hub-service install ... --agent-model openai:qwen3-coder:30b   # builders and QA on it
+aso llm-check --model local/qwen3-coder:30b   # a reply and a tool call: can it drive an agent?
+aso hub-service install ... --agent-model local/qwen3-coder:30b   # builders and QA on it
 ```
 
 - **Mix and match.** `--model` (the Architect, and agents without `--agent-model`) and
-  `--agent-model` each take a Claude model or an `openai:` one. Planning is the hardest job:
-  keeping the Architect on a strong model and running builders and QA on a cheaper or local one
-  is a good start. With both on `openai:` models, the Hub needs no Anthropic key at all.
+  `--agent-model` each take any provider's model. Planning is the hardest job: keeping the
+  Architect on a strong model and running builders and QA on a cheaper or local one is a good
+  start. With neither on a Claude model, the Hub needs no Anthropic key at all.
 - **Tool calling is required.** Agents work only through tool calls. `aso llm-check` tries one;
   a model that fails it can't work as an agent. Small local models often call tools poorly over
   long tasks; QA, review and the turn limit keep their mistakes out of `main`, at the cost of
@@ -96,7 +140,7 @@ Each desk (a job slot on a worker machine, `<host>#<slot>`, e.g. `avalon#1`) can
 model. Name the model as `aso models` lists it:
 
 ```bash
-aso models                           # what there is: Claude, and the local server's models
+aso models                           # what there is, from every provider
 aso desk avalon#4 qwen3-coder:30b    # one desk on the local model
 aso desk canfod claude-haiku-5-5     # every desk of a connected machine
 aso desk avalon#4 default            # back to the default (--agent-model)
@@ -105,15 +149,13 @@ aso desks                            # each desk's model, and how busy each mode
 
 - **In the console:** a worker's page has a model picker under each desk, and one for all its
   desks.
-- **What there is to choose:** the Claude models when the Hub has `ANTHROPIC_API_KEY`, and
-  whatever the OpenAI-compatible server at `ASO_LLM_BASE_URL` lists (Ollama, vLLM, LM Studio,
-  OpenRouter, OpenAI). A name it doesn't know is refused with the closest matches.
+- **What there is to choose:** every model your [providers](#providers) list. A name it doesn't
+  know is refused with the closest matches.
 - **Calls at once per model:** 1 for local models by default (a local GPU serves few requests
   in parallel; more would only queue or push the model out of GPU memory), `--llm-concurrency`
   for Claude; `--concurrency <n>` on `aso desk` sets it for that model. The Architect and desks
   without a model of their own share `--llm-concurrency`.
-- **A model on another server:** `aso desk avalon#4 openai:llama3.3:70b --base-url http://other:11434/v1`.
+- **A model on another server:** add that server as a provider (`aso provider add ollama --name ollama-lab --url …`).
 - **One model per round:** an agent keeps the model its desk had when its conversation started;
   a change applies from the next round. Each task's history says which model worked on it.
-- **Stored** in `<projects root>/.aso/models.json` (no secrets: keys come from the Hub's
-  `ANTHROPIC_API_KEY` and `ASO_LLM_API_KEY`).
+- **Stored** in `<projects root>/.aso/models.json` (no secrets: keys stay with the providers).

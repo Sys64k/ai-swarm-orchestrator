@@ -6,7 +6,7 @@ import {
   classifyHttp,
   fromChatAnswer,
   LlmError,
-  openAiCompatibleFor,
+  OpenAiCompatibleAdapter,
   sseData,
   startHub,
   toChatMessages,
@@ -119,15 +119,6 @@ describe("OpenAI-compatible models: translation", () => {
     assert.equal(classifyHttp(429, '{"error":{"code":"insufficient_quota"}}').pause, "credit");
     assert.equal(classifyHttp(402, "credit balance too low").pause, "credit");
   });
-
-  it("is chosen by an openai: model spec, and needs an address", () => {
-    assert.equal(openAiCompatibleFor("claude-haiku-5-5", {}, 1000), undefined, "Claude models stay on the Anthropic API");
-    assert.throws(() => openAiCompatibleFor("openai:qwen3", {}, 1000), /needs ASO_LLM_BASE_URL/);
-    assert.throws(() => openAiCompatibleFor("openai:", { ASO_LLM_BASE_URL: "http://x/v1" }, 1000), /names no model/);
-    const a = openAiCompatibleFor("openai:qwen3-coder:30b", { ASO_LLM_BASE_URL: "http://avalon:11434/v1" }, 1000)!;
-    assert.equal(a.model, "qwen3-coder:30b");
-    assert.equal(a.name, "openai-compatible");
-  });
 });
 
 /** A tiny OpenAI-compatible server that streams `reply` and records each request. */
@@ -160,7 +151,7 @@ describe("OpenAI-compatible models: over HTTP", () => {
       ],
     }));
     try {
-      const adapter = openAiCompatibleFor("openai:local-model", { ASO_LLM_BASE_URL: `${provider.url}/`, ASO_LLM_API_KEY: "sk-test" }, 2048)!;
+      const adapter = new OpenAiCompatibleAdapter({ baseUrl: `${provider.url}/`, model: "local-model", apiKey: "sk-test", maxTokens: 2048 });
       const res = await adapter.complete({ system: "sys", tools: [TOOL], messages: [{ role: "user", content: "go" }] });
       assert.deepEqual(res.content, [{ type: "tool_use", id: "c1", name: "read_file", input: { path: "README.md" } }]);
       assert.equal(res.stopReason, "tool_use");
@@ -171,6 +162,12 @@ describe("OpenAI-compatible models: over HTTP", () => {
       assert.equal(sent.body.stream, true);
       assert.equal(sent.body.max_tokens, 2048);
       assert.equal((sent.body.tools as unknown[]).length, 1);
+
+      // OpenAI's reasoning models refuse max_tokens: its provider sends the newer field.
+      const openAi = new OpenAiCompatibleAdapter({ baseUrl: provider.url, model: "local-model", maxTokens: 4096, maxTokensField: "max_completion_tokens" });
+      await openAi.complete({ system: "sys", tools: [TOOL], messages: [{ role: "user", content: "go" }] });
+      const last = provider.requests.at(-1)!.body;
+      assert.deepEqual([last.max_completion_tokens, "max_tokens" in last], [4096, false]);
     } finally {
       await provider.close();
     }
@@ -179,12 +176,12 @@ describe("OpenAI-compatible models: over HTTP", () => {
   it("reports HTTP errors and an unreachable server the way the Hub retries them", async () => {
     const provider = await fakeProvider(() => ({ status: 404, text: '{"error":"model \\"nope\\" not found"}' }));
     try {
-      const adapter = openAiCompatibleFor("openai:nope", { ASO_LLM_BASE_URL: provider.url }, 100)!;
+      const adapter = new OpenAiCompatibleAdapter({ baseUrl: provider.url, model: "nope", maxTokens: 100 });
       await assert.rejects(adapter.complete({ system: "s", tools: [], messages: [{ role: "user", content: "x" }] }), (e: unknown) => e instanceof LlmError && !e.retryable && /doesn't know this model/.test(e.message));
     } finally {
       await provider.close();
     }
-    const gone = openAiCompatibleFor("openai:m", { ASO_LLM_BASE_URL: "http://127.0.0.1:1/v1" }, 100)!;
+    const gone = new OpenAiCompatibleAdapter({ baseUrl: "http://127.0.0.1:1/v1", model: "m", maxTokens: 100 });
     await assert.rejects(gone.complete({ system: "s", tools: [], messages: [{ role: "user", content: "x" }] }), (e: unknown) => e instanceof LlmError && e.retryable && /unreachable/.test(e.message));
   });
 

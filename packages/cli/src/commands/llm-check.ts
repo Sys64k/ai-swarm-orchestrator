@@ -1,4 +1,5 @@
-import { AnthropicApiAdapter, LlmError, OPENAI_PREFIX, openAiCompatibleFor, priceUsage, type LlmAdapter } from "@aso/hub";
+import path from "node:path";
+import { LlmError, priceUsage, Providers, type LlmAdapter } from "@aso/hub";
 
 /** A tool the model must call: agents work only through tool calls, so this is what matters most. */
 const CHECK_TOOL = {
@@ -11,21 +12,20 @@ const CHECK_TOOL = {
   },
 };
 
-function adapterFor(model: string): LlmAdapter {
-  const openAi = openAiCompatibleFor(model, process.env, 1024);
-  if (openAi) return openAi;
-  if (!process.env.ANTHROPIC_API_KEY) {
-    throw new Error(`ANTHROPIC_API_KEY is not set (create a key in the Claude Console and export it), or check a model with ${OPENAI_PREFIX}<model> and ASO_LLM_BASE_URL`);
-  }
-  return new AnthropicApiAdapter({ model, effort: "low", maxTokens: 1024 });
+/** The model through the Hub's providers: the ones added on it (its state folder) and the .env's. */
+async function adapterFor(model: string | undefined, root: string): Promise<LlmAdapter> {
+  const providers = await Providers.open(path.join(path.resolve(root), ".aso"), process.env);
+  model ||= providers.defaultModel();
+  if (!model) throw new Error("no --model given, and no Anthropic provider to default to: name one, e.g. --model openai/gpt-5 (see aso models)");
+  return providers.adapterFor(model, { maxTokens: 1024, effort: "low" });
 }
 
 /**
  * Two tiny requests: a one-word reply (the endpoint, credentials, model and credit), then a tool
  * call (whether the model can drive an agent).
  */
-export async function llmCheckCommand(opts: { model: string }): Promise<void> {
-  const adapter = adapterFor(opts.model);
+export async function llmCheckCommand(opts: { model?: string; root: string }): Promise<void> {
+  const adapter = await adapterFor(opts.model, opts.root);
   console.log(`asking ${adapter.model} (${adapter.name}) for a one-word reply...`);
   try {
     const res = await adapter.complete({

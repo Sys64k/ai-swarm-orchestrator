@@ -142,7 +142,8 @@ flowchart LR
 | | `git/http-backend.ts` | Git smart-HTTP via a `git http-backend` CGI bridge, with the push policy |
 | | `git/hub-repo.ts` | `HubRepository`: verify task commits, merge and add dependencies on main under one lock |
 | | `llm/adapter.ts` | `LlmAdapter` interface; `AnthropicApiAdapter` (official SDK, streaming, caching, fallbacks) |
-| | `llm/openai-compatible.ts` | `OpenAiCompatibleAdapter` for `openai:<model>` specs: any Chat Completions API (OpenAI, OpenRouter, Ollama, vLLM…) |
+| | `llm/openai-compatible.ts` | `OpenAiCompatibleAdapter`: any Chat Completions API (OpenAI, OpenRouter, Ollama, vLLM…) |
+| | `llm/providers.ts` | `Providers`: the model providers (added with a key or address, plus the `.env`'s), their model lists, and the adapter for a `<provider>/<model>` spec |
 | | `llm/conversations.ts` | `ConversationManager`: Hub-held conversations, turn checks, budget, concurrency queue |
 | | `llm/prompts.ts`, `llm/pricing.ts` | Role system prompts, task prompt (with rework feedback), price table |
 | | `plans.ts` | `PlanManager`: plan queue, Architect assignment, validation, approval → tasks |
@@ -1071,7 +1072,7 @@ sequenceDiagram
 
 | Setting | Value | Why |
 |---|---|---|
-| Model | `claude-opus-5-5` (configurable) | Default current Opus; task agents can run on another model (`--agent-model`), the Architect always uses this one |
+| Model | `claude-opus-5-5` (configurable) | Default current Opus when Anthropic is a provider; task agents can run on another model (`--agent-model`), the Architect always uses this one |
 | Transport | `client.beta.messages.stream(...).finalMessage()` | Long agentic turns; streaming avoids HTTP timeouts |
 | `max_tokens` | 32,000 per turn (`DEFAULT_MAX_TOKENS`) | Room for large file writes in one tool call. Agents' instructions name the limit and ask for targeted edits and large files in parts, so answers stay under it |
 | `output_config.effort` | `high` (configurable) | Agentic coding benefits from effort; `medium` is Opus 5.5's default |
@@ -1082,9 +1083,9 @@ sequenceDiagram
 
 ### Other providers (`OpenAiCompatibleAdapter`)
 
-A model spec `openai:<model>` (for `--model` or `--agent-model`) selects the OpenAI-compatible
-adapter, at `ASO_LLM_BASE_URL` with `ASO_LLM_API_KEY`; anything else is a Claude model.
-Conversations keep the Messages API format, and each request is translated:
+Every provider except Anthropic uses the OpenAI-compatible adapter, at its base URL with its key
+(see [Providers](#providers-providers)). Conversations keep the Messages API format, and each
+request is translated:
 
 | Hub (Messages API) | Chat Completions |
 |---|---|
@@ -1102,22 +1103,53 @@ asked again), and finish reasons map to the Hub's: `stop` → `end_turn`, `tool_
 `tool_use`, `length` → `max_tokens` (the cut-off handling below applies), `content_filter` →
 `refusal`. HTTP errors: 401/403/404/400 aren't retried; 408, 429 and 5xx are; an
 `insufficient_quota` or credit error pauses model calls like Anthropic's credit error. Cached
-input reported in `prompt_tokens_details` counts as cache reads. Models without a price cost $0.
+input reported in `prompt_tokens_details` counts as cache reads. The answer limit goes in the
+field the provider's preset names (`maxTokensField`): `max_completion_tokens` for OpenAI, whose
+reasoning models refuse `max_tokens`, and `max_tokens` elsewhere.
 
-### A model per desk (`DeskModels`, `ModelCatalog`)
+Prices (`llm/pricing.ts`) are looked up per model name, in order: prices set on the Hub
+(`llm/custom-prices.ts`, `<state>/prices.json`, `aso price set`), the built-in Claude table, and
+prices a provider reports in its model list (OpenRouter's `pricing`, via `registerPrices`).
+Models with none cost $0, so only the turn limit stops them.
 
-`llm/desk-models.ts` maps desks (`<host>#<slot>`) to model specs (a Claude id or
-`openai:<name>`), with optional per-model settings (calls at once, base URL, vision), in
+### Providers (`Providers`)
+
+`llm/providers.ts` holds where models come from. A provider has an id (what specs start with),
+a preset (`anthropic`, `openai`, `openrouter`, `gemini`, `groq`, `mistral`, `ollama`,
+`custom`), which gives the kind of API and, for the cloud ones, its base URL, and a key and/or
+base URL. Added providers are saved with their keys in `<state>/providers.json` (mode 600); the
+`.env` adds `anthropic` (`ANTHROPIC_API_KEY`) and `local` (`ASO_LLM_BASE_URL`,
+`ASO_LLM_API_KEY`, `ASO_LLM_VISION`), unless an added provider has that id. API answers carry
+`hasKey`, never the key.
+
+- **Adding** fetches the provider's model list first, so a refused key or an unreachable
+  server fails the request (400) and nothing is saved.
+- **Model lists:** Anthropic's `GET /v1/models` (through the SDK), the others' `GET {base}/models`,
+  cached 5 minutes per provider. An Anthropic failure offers `CLAUDE_FALLBACK`; another
+  provider's failure lists no models and reports the error (`GET /api/providers`, and
+  `localError` on `GET /api/models`).
+- **Specs:** `<provider>/<model>`; the model part may contain `/` (OpenRouter). `parseSpec`
+  also reads the older forms: a bare `claude-…` is `anthropic`'s, `openai:<model>` is
+  `local`'s. `adapterFor(spec)` builds the adapter, or throws naming what's missing.
+- **Local or not:** `ollama` and `custom` providers are local (`isLocal`), which sets the
+  default calls at once for their models (below).
+- **The default model:** without `--model`, `defaultModel()` is `claude-opus-5-5` when
+  `anthropic` is a provider; otherwise there is none, and the Hub starts without an Architect
+  and says to give `--model`.
+
+### A model per desk (`DeskModels`)
+
+`llm/desk-models.ts` maps desks (`<host>#<slot>`) to model specs (`<provider>/<model>`), with
+optional per-model settings (calls at once, base URL, vision), in
 `<state>/models.json` (mode 600, no secrets; settings of models no desk uses are dropped). Each
 model gets its own adapter, built when a desk is put on it (so one the Hub can't use is
 refused then; a failed save changes nothing), and its own `Semaphore`. A machine target
 (`avalon`) becomes its desks from the connected worker's slot count (`desksOf`).
 
-`llm/catalog.ts` lists what can be chosen: the known Claude models when the Hub has an
-Anthropic key, and the OpenAI-compatible server's `GET {ASO_LLM_BASE_URL}/models` (cached
-30 s). `resolveModel` turns a typed name into a spec (`qwen3-coder:30b` →
-`openai:qwen3-coder:30b`), accepts an explicit `openai:` spec as is, and otherwise answers with
-the closest names (substring, then edit distance).
+What can be chosen is every provider's model list. `resolveModel` turns a typed name into a
+spec: a listed spec, a model name only one provider offers (`qwen3-coder:30b` →
+`ollama/qwen3-coder:30b`; one several offer asks to choose), or an explicit spec of a known
+provider as is; otherwise it answers with the closest names (substring, then edit distance).
 
 When a task's conversation starts, `ConversationManager` finds the desk from the task's crew
 (the latest member on that node: host and slot) and pins that desk's model on the
@@ -1127,8 +1159,8 @@ model's adapter and semaphore; without one, through the default agent adapter an
 longer use falls back to the default. The task's history notes the model when an agent
 conversation starts.
 
-Default calls at once: 1 for `openai:` models (one local GPU, where parallel requests would
-queue or spill the model out of GPU memory), `--llm-concurrency` for Claude models.
+Default calls at once: 1 for local providers' models (one local GPU, where parallel requests
+would queue or spill the model out of GPU memory), `--llm-concurrency` for cloud ones.
 
 ### Error handling
 

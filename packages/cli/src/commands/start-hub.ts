@@ -32,7 +32,7 @@ export interface StartHubOptions {
   push: boolean;
   allowDeps?: string;
   consoleUrl?: string;
-  model: string;
+  model?: string;
   agentModel?: string;
   effort: Effort;
   taskBudget: number;
@@ -134,7 +134,7 @@ async function startHubInDocker(root: string, opts: StartHubOptions, token: stri
       ASO_PUSH: opts.push && process.env.ASO_PUSH !== "0" ? "1" : "0",
       ASO_ALLOW_DEPS: parseList(opts.allowDeps)?.join(",") ?? "",
       ASO_CONSOLE_URL: opts.consoleUrl ?? "",
-      ASO_MODEL: opts.model,
+      ASO_MODEL: opts.model ?? "",
       ASO_AGENT_MODEL: opts.agentModel ?? "",
       ASO_EFFORT: opts.effort,
       ASO_TASK_BUDGET: String(opts.taskBudget),

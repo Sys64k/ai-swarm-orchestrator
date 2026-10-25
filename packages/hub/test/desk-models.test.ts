@@ -3,14 +3,15 @@ import http from "node:http";
 import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
-import { adapterForModel, DeskModels, desksOf, ModelCatalog, modelConcurrency, resolveModel, type LlmAdapter } from "@aso/hub";
+import { DeskModels, desksOf, modelConcurrency, type LlmAdapter } from "@aso/hub";
 import { createMessage, type AgentMessage, type AvailableModel } from "@aso/shared";
 import { postTask, reply, ScriptedModel, tempDir, text, TOKEN, waitFor, withHub, worker } from "./helpers.ts";
 
 delete process.env.ANTHROPIC_API_KEY; // tests must never reach the real API
 
 const fakeAdapter = (model: string): LlmAdapter => ({ name: "fake", model, complete: async () => reply([text("hi")], "end_turn") });
-const open = (dir?: string) => DeskModels.open(dir, (spec) => fakeAdapter(spec), 4);
+const isLocal = (spec: string) => /^(ollama\/|openai:)/.test(spec);
+const open = (dir?: string) => DeskModels.open(dir, (spec) => fakeAdapter(spec), 4, isLocal);
 
 describe("desk models", () => {
   it("saves which model each desk uses, owner-only and without secrets, and drops unused settings", async () => {
@@ -38,9 +39,9 @@ describe("desk models", () => {
   });
 
   it("gives a local model one call at once unless told otherwise; Claude gets the Hub's limit", async () => {
-    assert.equal(modelConcurrency("openai:m", {}, 4), 1);
-    assert.equal(modelConcurrency("openai:m", { concurrency: 3 }, 4), 3);
-    assert.equal(modelConcurrency("claude-haiku-5-5", {}, 4), 4);
+    assert.equal(modelConcurrency({}, true, 4), 1, "a local server");
+    assert.equal(modelConcurrency({ concurrency: 3 }, true, 4), 3);
+    assert.equal(modelConcurrency({}, false, 4), 4, "a cloud API");
     const desks = await open();
     await desks.assign(["avalon#1"], "openai:m");
     const slots = desks.route("openai:m").slots;
@@ -56,7 +57,7 @@ describe("desk models", () => {
     const strict = await DeskModels.open(undefined, (spec) => {
       if (spec.startsWith("claude")) throw new Error("no ANTHROPIC_API_KEY");
       return fakeAdapter(spec);
-    }, 4);
+    }, 4, isLocal);
     await assert.rejects(strict.assign(["avalon#1"], "claude-opus-5-5"), /ANTHROPIC_API_KEY/);
     assert.equal(strict.modelOf("avalon#1"), undefined);
 
@@ -79,62 +80,6 @@ describe("desk models", () => {
     assert.deepEqual(desksOf("canfod", workers), ["canfod#1", "canfod#2"]);
     const gone = desksOf("asusmini", workers);
     assert.ok(!Array.isArray(gone) && /asusmini isn't connected \(connected: avalon, canfod\); name a desk instead, e\.g\. asusmini#1/.test(gone.error));
-  });
-
-  it("builds a model's adapter from its own address, or the Anthropic API with a key", () => {
-    const opts = { maxTokens: 1000, effort: "high" as const };
-    const local = adapterForModel("openai:qwen3-coder:30b", { baseUrl: "http://avalon:11434/v1" }, { ...opts, env: {} });
-    assert.deepEqual([local.name, local.model], ["openai-compatible", "qwen3-coder:30b"]);
-    assert.throws(() => adapterForModel("openai:m", {}, { ...opts, env: {} }), /needs ASO_LLM_BASE_URL/);
-    assert.equal(adapterForModel("openai:m", {}, { ...opts, env: { ASO_LLM_BASE_URL: "http://x/v1" } }).model, "m");
-    assert.throws(() => adapterForModel("claude-haiku-5-5", {}, { ...opts, env: {} }), /no ANTHROPIC_API_KEY/);
-    assert.equal(adapterForModel("claude-haiku-5-5", {}, { ...opts, env: { ANTHROPIC_API_KEY: "sk-ant-test" } }).name, "anthropic-api");
-  });
-});
-
-describe("model catalog", () => {
-  const available: AvailableModel[] = [
-    { model: "claude-haiku-5-5", spec: "claude-haiku-5-5", provider: "anthropic" },
-    { model: "claude-opus-5-5", spec: "claude-opus-5-5", provider: "anthropic" },
-    { model: "qwen3-coder:30b", spec: "openai:qwen3-coder:30b", provider: "openai-compatible", baseUrl: "http://avalon:11434/v1" },
-  ];
-
-  it("takes a model by the name it's listed under, or an explicit openai: one", () => {
-    assert.deepEqual(resolveModel("qwen3-coder:30b", available), { spec: "openai:qwen3-coder:30b" });
-    assert.deepEqual(resolveModel(" claude-haiku-5-5 ", available), { spec: "claude-haiku-5-5" });
-    assert.deepEqual(resolveModel("openai:llama3.3:70b", available), { spec: "openai:llama3.3:70b" }, "on another server, with --base-url");
-    assert.deepEqual(resolveModel("claude-sonnet-5-5", available), { spec: "claude-sonnet-5-5" }, "a priced Claude model it doesn't list");
-  });
-
-  it("suggests the closest names for a typo", () => {
-    const qwen = resolveModel("qwen3", available);
-    assert.ok("error" in qwen && /Did you mean "qwen3-coder:30b"\?/.test(qwen.error));
-    const haiku = resolveModel("claude-hiaku-5-5", available);
-    assert.ok("error" in haiku && /Did you mean "claude-haiku-5-5"\?/.test(haiku.error));
-    const none = resolveModel("gpt", []);
-    assert.ok("error" in none && /set ANTHROPIC_API_KEY or ASO_LLM_BASE_URL/.test(none.error));
-  });
-
-  it("lists Claude with a key, and the local server's models", async () => {
-    const server = http.createServer((req, res) => {
-      assert.equal(req.url, "/v1/models");
-      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ data: [{ id: "qwen3-coder:30b" }, { id: "llama3.3:70b" }, { nope: 1 }] }));
-    });
-    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-    const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/v1`;
-    try {
-      const { models } = await new ModelCatalog({ ANTHROPIC_API_KEY: "k", ASO_LLM_BASE_URL: `${url}/` }).list();
-      assert.deepEqual(models.filter((m) => m.provider === "openai-compatible").map((m) => [m.model, m.spec, m.baseUrl]), [
-        ["llama3.3:70b", "openai:llama3.3:70b", url],
-        ["qwen3-coder:30b", "openai:qwen3-coder:30b", url],
-      ]);
-      assert.ok(models.some((m) => m.model === "claude-haiku-5-5"));
-      assert.ok(!(await new ModelCatalog({}).list()).models.length, "no key, no server: nothing to choose");
-    } finally {
-      server.close();
-    }
-    const down = await new ModelCatalog({ ASO_LLM_BASE_URL: "http://127.0.0.1:1/v1" }).list();
-    assert.match(down.localError ?? "", /can't be reached/);
   });
 });
 
@@ -183,7 +128,7 @@ describe("desks on their own models (Hub)", () => {
           const w = await worker(ctx.port, "dev");
           const set = await call(ctx.port, "/api/desks", { target: "test#1", model: "local-model" });
           assert.equal(set.status, 200, JSON.stringify(set.body));
-          assert.deepEqual(set.body.desks, [{ desk: "test#1", model: "openai:local-model" }]);
+          assert.deepEqual(set.body.desks, [{ desk: "test#1", model: "local/local-model" }]);
           assert.equal(set.body.models[0].concurrency, 1, "a local model gets one call at once");
           const typo = await call(ctx.port, "/api/desks", { target: "test#1", model: "local" });
           assert.equal(typo.status, 400);

@@ -116,6 +116,83 @@ export const JoinBodySchema = z.strictObject({
     .describe("The joining machine's hostname"),
 });
 export const DiscoveryProofBodySchema = DiscoveryClaimSchema.extend({ key: DiscoveryKeyIdSchema.describe("The key id from the worker's query") });
+/** The model providers ASO knows how to reach; `custom` is any OpenAI-compatible API by address. */
+export const PROVIDER_PRESETS = ["anthropic", "openai", "openrouter", "gemini", "groq", "mistral", "ollama", "custom"] as const;
+export type ProviderPreset = (typeof PROVIDER_PRESETS)[number];
+
+export interface PresetInfo {
+  label: string;
+  /** The API's root for cloud providers; `null` when the person gives it (or, for Anthropic, the SDK knows it). */
+  baseUrl: string | null;
+  kind: "anthropic" | "openai-compatible";
+  /** A server on your own network (one GPU): its models get one call at once by default. */
+  local: boolean;
+  keyRequired: boolean;
+  urlRequired: boolean;
+  /** The request field for the answer's token limit: OpenAI's reasoning models refuse `max_tokens`. */
+  maxTokensField: "max_tokens" | "max_completion_tokens";
+}
+
+/** Everything ASO knows about each provider preset; adding a preset means adding a row. */
+export const PRESET_INFO: Record<ProviderPreset, PresetInfo> = {
+  anthropic: { label: "Anthropic", baseUrl: null, kind: "anthropic", local: false, keyRequired: true, urlRequired: false, maxTokensField: "max_tokens" },
+  openai: { label: "OpenAI", baseUrl: "https://api.openai.com/v1", kind: "openai-compatible", local: false, keyRequired: true, urlRequired: false, maxTokensField: "max_completion_tokens" },
+  openrouter: { label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", kind: "openai-compatible", local: false, keyRequired: true, urlRequired: false, maxTokensField: "max_tokens" },
+  gemini: { label: "Google Gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", kind: "openai-compatible", local: false, keyRequired: true, urlRequired: false, maxTokensField: "max_tokens" },
+  groq: { label: "Groq", baseUrl: "https://api.groq.com/openai/v1", kind: "openai-compatible", local: false, keyRequired: true, urlRequired: false, maxTokensField: "max_tokens" },
+  mistral: { label: "Mistral", baseUrl: "https://api.mistral.ai/v1", kind: "openai-compatible", local: false, keyRequired: true, urlRequired: false, maxTokensField: "max_tokens" },
+  ollama: { label: "Ollama", baseUrl: null, kind: "openai-compatible", local: true, keyRequired: false, urlRequired: true, maxTokensField: "max_tokens" },
+  custom: { label: "Custom", baseUrl: null, kind: "openai-compatible", local: true, keyRequired: false, urlRequired: true, maxTokensField: "max_tokens" },
+};
+
+export function isProviderPreset(s: string): s is ProviderPreset {
+  return Object.hasOwn(PRESET_INFO, s);
+}
+/** A provider's name on the Hub: what model specs start with (`<provider>/<model>`). */
+export const ProviderIdSchema = z.string().regex(/^[a-z0-9][a-z0-9._-]{0,39}$/, "lower-case letters, digits, . _ - (up to 40)");
+export const ProviderAddBodySchema = z.strictObject({
+  preset: z.enum(PROVIDER_PRESETS).describe("Which provider; known ones know their own address"),
+  id: ProviderIdSchema.optional().describe("Its name on the Hub (default: the preset's), e.g. ollama-avalon for a second Ollama"),
+  key: z.string().min(1).max(500).optional().describe("The API key; stored on the Hub, never shown again"),
+  baseUrl: z.string().url().max(500).optional().describe("The API's root, for ollama and custom (e.g. http://avalon:11434/v1)"),
+  vision: z.boolean().optional().describe("Its models accept images (OpenAI-compatible)"),
+}).superRefine((body, ctx) => {
+  const info = PRESET_INFO[body.preset];
+  if (info.keyRequired && !body.key) ctx.addIssue({ code: "custom", path: ["key"], message: `${info.label} needs an API key` });
+  if (info.urlRequired && !body.baseUrl) ctx.addIssue({ code: "custom", path: ["baseUrl"], message: `${info.label} needs the server's address, e.g. http://avalon:11434/v1` });
+});
+export type ProviderAddBody = z.infer<typeof ProviderAddBodySchema>;
+export const ProviderViewSchema = z.object({
+  id: z.string(),
+  preset: z.enum(PROVIDER_PRESETS),
+  kind: z.enum(["anthropic", "openai-compatible"]),
+  label: z.string(),
+  source: z.enum(["added", "environment"]).describe("environment: from the Hub's .env (ANTHROPIC_API_KEY, ASO_LLM_BASE_URL); remove it there"),
+  hasKey: z.boolean().describe("Whether it has a key (the key itself is never shown)"),
+  baseUrl: z.string().optional(),
+  vision: z.boolean().optional(),
+  models: z.number().int().optional().describe("Models in its list"),
+  error: z.string().optional().describe("Why its model list couldn't be fetched"),
+});
+export type ProviderView = z.infer<typeof ProviderViewSchema>;
+export const ProviderRemovedSchema = z.object({ removed: z.string().describe("The provider removed; its key is forgotten") });
+
+/** USD per million tokens; cache reads and writes are charged at the input rate for prices set here. */
+export const PriceSetBodySchema = z.strictObject({
+  model: z.string().min(1).max(200).describe("The model: <provider>/<model> or its name; the price applies to that model name"),
+  input: z.number().min(0).max(10_000).describe("USD per million input tokens"),
+  output: z.number().min(0).max(10_000).describe("USD per million output tokens"),
+});
+export const PriceRemoveBodySchema = z.strictObject({ model: z.string().min(1).max(200) });
+export const PriceSchema = z.object({
+  model: z.string(),
+  input: z.number(),
+  output: z.number(),
+  source: z.enum(["built-in", "set"]).describe("set: a price set on this Hub (it wins over the built-in one)"),
+});
+export const PricesSchema = z.array(PriceSchema);
+export type PriceEntry = z.infer<typeof PriceSchema>;
+
 /** A desk: a worker machine's hostname and job slot, e.g. `avalon#1` (the Hub's `deskName` builds these). */
 export const DeskSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}#[1-9][0-9]?$/, "<hostname>#<slot>, e.g. avalon#1");
 /** Optional settings for one model desks use; everything has a default. */
@@ -501,8 +578,10 @@ export const WorkerKeySchema = z.object({
 export const DiscoveryProofSchema = z.object({ proof: z.string().describe("HMAC-SHA256 over the claim, keyed with the credential's secret (hex)") });
 export const AvailableModelSchema = z.object({
   model: z.string().describe("The name to choose it by"),
-  spec: z.string().describe("How the Hub calls it: a Claude id, or openai:<name>"),
-  provider: z.enum(["anthropic", "openai-compatible"]),
+  spec: z.string().describe("How the Hub calls it: <provider>/<model>"),
+  provider: z.enum(["anthropic", "openai-compatible"]).describe("The kind of API"),
+  providerId: z.string().optional().describe("The provider on the Hub that offers it"),
+  providerLabel: z.string().optional().describe("The provider's name to show, e.g. OpenAI or Ollama (avalon:11434)"),
   baseUrl: z.string().optional().describe("The OpenAI-compatible server it runs on"),
 });
 export type AvailableModel = z.infer<typeof AvailableModelSchema>;

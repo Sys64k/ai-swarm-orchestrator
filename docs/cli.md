@@ -17,8 +17,8 @@ Every `aso` command and its options.
 | `--no-push` | | Keep merges local (don't push `main` to `origin`) |
 | `--allow-deps <list>` | any | npm packages agents may request; `@scope/*` allows a scope |
 | `--console-url <url>` | *(none)* | The console's address. Pull requests then link to their task, e.g. for its QA screenshots |
-| `--model <id>` | `claude-opus-5-5` | Claude model for the Architect, and for agents without `--agent-model` |
-| `--agent-model <id>` | `--model` | Claude model for the builder and QA agents. The Architect keeps `--model`: a strong planner breaking work into small, clear tasks lets a cheaper model build them |
+| `--model <spec>` | `claude-opus-5-5` when Anthropic is a [provider](models.md#providers); otherwise required | The Architect's model, and agents' without `--agent-model`: `<provider>/<model>` |
+| `--agent-model <spec>` | `--model` | The builder and QA agents' model. The Architect keeps `--model`: a strong planner breaking work into small, clear tasks lets a cheaper model build them |
 | `--effort <level>` | `high` | `low`, `medium`, `high`, `xhigh`, `max` |
 | `--task-budget <usd>` | `5` | Estimated LLM spend cap per task |
 | `--plan-budget <usd>` | `3` | Estimated LLM spend cap per planning round |
@@ -94,8 +94,9 @@ while no Architect is connected.
 
 Sends two tiny requests: a one-word reply (the key, model access and credit balance), then a
 tool call, which agents can't work without. Prints the reply, the tokens used and the estimated
-cost (a fraction of a cent). `--model <id>` checks a different model, also an
-`openai:<model>` one (see [Other models](models.md#other-models-openai-compatible-apis)).
+cost (a fraction of a cent). `--model <spec>` checks a different model from any
+[provider](models.md#providers) (`openai/gpt-5`, `ollama/qwen3-coder:30b`); `--root` points at
+the Hub's projects folder when it isn't the default.
 
 ## `aso token`
 
@@ -135,9 +136,25 @@ machine reaches it, for downloading the package and for joining from another net
 this machine's hostname, which on Tailscale is its tailnet name). `--name` labels the key. `aso worker-keys` lists the
 keys, and `revoke` shuts a machine out.
 
+## `aso providers`, `aso provider add|remove`
+
+`aso providers` lists the model providers (added ones and the `.env`'s) and how many models
+each lists. `aso provider add <preset>` adds one: `anthropic`, `openai`, `openrouter`,
+`gemini`, `groq`, `mistral` (they ask for the key at a hidden prompt, or read it from stdin;
+`--key` works but lands in your shell history), or `ollama` / `custom` with `--url`. `--name`
+gives a second one of a kind its own name; `--vision` marks models that accept images.
+`aso provider remove <id>` forgets it and its key. See [Providers](models.md#providers).
+
+## `aso prices`, `aso price set|remove`
+
+`aso prices` lists the model prices the Hub knows (USD per million tokens): the built-in Claude
+ones and those set on the Hub. `aso price set <model> --input <usd> --output <usd>` sets one
+(`<provider>/<model>` or the name; it applies to that model name, and wins over a built-in or
+reported price), so task budgets stop that model too. `aso price remove <model>` removes it.
+
 ## `aso models`, `aso desks`, `aso desk`
 
-`aso models` lists the models desks can use (Claude, and the local server's). `aso desks` shows
+`aso models` lists the models desks can use, from every provider. `aso desks` shows
 each desk with a model of its own, and each such model's calls at once and load.
 `aso desk <host>#<slot>|<host> <model|default>` puts a desk, or every desk of a connected
 machine, on a model (`--concurrency`, `--base-url`, `--vision`). See
