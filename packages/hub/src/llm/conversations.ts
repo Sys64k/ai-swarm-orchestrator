@@ -257,7 +257,7 @@ export class ConversationManager {
     const fail = (error: string, retryable = false) =>
       this.respond(nodeId, { requestId: req.requestId, outcome: "error", error, retryable });
 
-    if (!this.adapter) return void fail("no LLM configured on the Hub (set ANTHROPIC_API_KEY and restart it)");
+    if (!this.adapter) return void fail("no LLM configured on the Hub (set ANTHROPIC_API_KEY, or an openai:<model> with ASO_LLM_BASE_URL, and restart it)");
     const subject = this.subjectFor(nodeId, req);
     if (typeof subject === "string") return void fail(subject);
 
