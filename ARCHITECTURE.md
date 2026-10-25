@@ -1085,6 +1085,32 @@ asked again), and finish reasons map to the Hub's: `stop` → `end_turn`, `tool_
 `insufficient_quota` or credit error pauses model calls like Anthropic's credit error. Cached
 input reported in `prompt_tokens_details` counts as cache reads. Models without a price cost $0.
 
+### A model per desk (`DeskModels`, `ModelCatalog`)
+
+`llm/desk-models.ts` maps desks (`<host>#<slot>`) to model specs (a Claude id or
+`openai:<name>`), with optional per-model settings (calls at once, base URL, vision), in
+`<state>/models.json` (mode 600, no secrets; settings of models no desk uses are dropped). Each
+model gets its own adapter, built when a desk is put on it (so one the Hub can't use is
+refused then; a failed save changes nothing), and its own `Semaphore`. A machine target
+(`avalon`) becomes its desks from the connected worker's slot count (`desksOf`).
+
+`llm/catalog.ts` lists what can be chosen: the known Claude models when the Hub has an
+Anthropic key, and the OpenAI-compatible server's `GET {ASO_LLM_BASE_URL}/models` (cached
+30 s). `resolveModel` turns a typed name into a spec (`qwen3-coder:30b` →
+`openai:qwen3-coder:30b`), accepts an explicit `openai:` spec as is, and otherwise answers with
+the closest names (substring, then edit distance).
+
+When a task's conversation starts, `ConversationManager` finds the desk from the task's crew
+(the latest member on that node: host and slot) and pins that desk's model on the
+conversation, saved with it across restarts. Every call of that conversation goes through the
+model's adapter and semaphore; without one, through the default agent adapter and the shared
+`--llm-concurrency` semaphore, which the Architect also uses. A desk model the Hub can no
+longer use falls back to the default. The task's history notes the model when an agent
+conversation starts.
+
+Default calls at once: 1 for `openai:` models (one local GPU, where parallel requests would
+queue or spill the model out of GPU memory), `--llm-concurrency` for Claude models.
+
 ### Error handling
 
 | Situation | Hub answer | Worker reaction |

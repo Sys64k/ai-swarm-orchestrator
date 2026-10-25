@@ -155,9 +155,36 @@ aso hub-service install ... --agent-model openai:qwen3-coder:30b   # builders an
 - **Ollama:** let the Hub reach it (`OLLAMA_HOST=0.0.0.0:11434` in its service) and give it room
   for the agents' instructions and files (`OLLAMA_CONTEXT_LENGTH=32768` or more): its default
   context is too small, and Ollama's OpenAI endpoint can't change it per request.
+- **A model per desk:** see [A model per desk](#a-model-per-desk).
 - **What's Claude-only:** effort levels, prompt caching control, extended thinking and fallbacks
   on refusal. Costs read $0 for models without a price in the Hub's table, so task budgets don't
   stop them; the turn limit does.
+
+### A model per desk
+
+Each desk (a job slot on a worker machine, `<host>#<slot>`, e.g. `avalon#1`) can use its own
+model. Name the model as `aso models` lists it:
+
+```bash
+aso models                           # what there is: Claude, and the local server's models
+aso desk avalon#4 qwen3-coder:30b    # one desk on the local model
+aso desk canfod claude-haiku-5-5     # every desk of a connected machine
+aso desk avalon#4 default            # back to the default (--agent-model)
+aso desks                            # each desk's model, and how busy each model is
+```
+
+- **What there is to choose:** the Claude models when the Hub has `ANTHROPIC_API_KEY`, and
+  whatever the OpenAI-compatible server at `ASO_LLM_BASE_URL` lists (Ollama, vLLM, LM Studio,
+  OpenRouter, OpenAI). A name it doesn't know is refused with the closest matches.
+- **Calls at once per model:** 1 for local models by default (a local GPU serves few requests
+  in parallel; more would only queue or push the model out of GPU memory), `--llm-concurrency`
+  for Claude; `--concurrency <n>` on `aso desk` sets it for that model. The Architect and desks
+  without a model of their own share `--llm-concurrency`.
+- **A model on another server:** `aso desk avalon#4 openai:llama3.3:70b --base-url http://other:11434/v1`.
+- **One model per round:** an agent keeps the model its desk had when its conversation started;
+  a change applies from the next round. Each task's history says which model worked on it.
+- **Stored** in `<projects root>/.aso/models.json` (no secrets: keys come from the Hub's
+  `ANTHROPIC_API_KEY` and `ASO_LLM_API_KEY`).
 
 ## Installation
 
@@ -952,6 +979,14 @@ machine reaches it, for downloading the package and for joining from another net
 this machine's hostname, which on Tailscale is its tailnet name). `--name` labels the key. `aso worker-keys` lists the
 keys, and `revoke` shuts a machine out.
 
+### `aso models`, `aso desks`, `aso desk`
+
+`aso models` lists the models desks can use (Claude, and the local server's). `aso desks` shows
+each desk with a model of its own, and each such model's calls at once and load.
+`aso desk <host>#<slot>|<host> <model|default>` puts a desk, or every desk of a connected
+machine, on a model (`--concurrency`, `--base-url`, `--vision`). See
+[A model per desk](#a-model-per-desk).
+
 ### `aso find-hub`
 
 Asks the LAN where the Hub is, with this machine's worker key, and prints its `host:port`.
@@ -1041,6 +1076,9 @@ Answers can gain fields over time: clients should ignore fields they don't know.
 | `POST` | `/api/worker-keys/join` | For the joining machine (public: the code is the credential): its worker key, shown once |
 | `GET` | `/api/worker-keys` | The worker keys: name, connected, last used, revoked |
 | `POST` | `/api/worker-keys/{id}/revoke` | Revoke a key: its machine is disconnected and can't come back with it |
+| `GET` | `/api/models` | The models desks can use, and the Architect's and default ones |
+| `GET` | `/api/desks` | Each desk with a model of its own, and each such model's calls at once and load |
+| `POST` | `/api/desks` | Put a desk (`<host>#<slot>`) or a machine (`<host>`) on a model, or back on `default` |
 | `POST` | `/api/discovery/proof` | For the Hub machine's LAN discovery: the proof answering a worker's query, if the Hub holds its credential |
 | `GET` / `POST` | `/api/hub/update` | Where the Hub's own update stands (`off` without `--update-from`) / the updater on the Hub machine reports it |
 | `GET` | `/api/openapi.json` | This API as an OpenAPI 3.1 document (public) |

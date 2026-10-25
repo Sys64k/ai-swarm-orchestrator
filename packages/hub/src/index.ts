@@ -44,3 +44,5 @@ export { encryptPayload, generateVapidKeys, sendPush, vapidAuthorization, MAX_PA
 export { hubUpdateNotification } from "./hub-update.js";
 export { apiChanges, apiFileContents, apiHash, API_COPY_PATH, syncApiCopies, syncTaskId, syncTaskSpec, type ApiChanges } from "./api-sync.js";
 export { OpenAiCompatibleAdapter, OPENAI_PREFIX, accumulateChunks, classifyHttp, fromChatAnswer, openAiCompatibleFor, sseData, toChatMessages, toChatTools, type ChatAnswer, type ChatMessage } from "./llm/openai-compatible.js";
+export { adapterForModel, deskName, DeskModels, desksOf, modelConcurrency, type ModelSettings, type Route } from "./llm/desk-models.js";
+export { CLAUDE_MODELS, ModelCatalog, resolveModel } from "./llm/catalog.js";

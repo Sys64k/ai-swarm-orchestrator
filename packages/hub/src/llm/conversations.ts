@@ -21,6 +21,8 @@ type PlanDirectory = ProjectSet["plans"];
 import type { AgentTurn } from "../tasks.js";
 import { LlmError, type LlmAdapter } from "./adapter.js";
 import { priceUsage } from "./pricing.js";
+import { Semaphore } from "./semaphore.js";
+import { deskName, type DeskModels, type Route } from "./desk-models.js";
 import { architectSystemPrompt, CONTINUE_PROMPT, planPrompt, systemPrompt, taskPrompt } from "./prompts.js";
 
 const log = createLogger("llm");
@@ -41,8 +43,10 @@ export interface ConversationOptions {
   planBudgetUsd?: number;
   /** Model turns per conversation. */
   maxTurns?: number;
-  /** Concurrent API requests across all workers. */
+  /** Concurrent API requests across all workers (desks with a model profile have their own limit). */
   concurrency?: number;
+  /** Each desk's model; desks without one use `agentAdapter`. */
+  deskModels?: DeskModels;
   /** Called when model calls go on hold (out of credit), and when they work again. */
   onPause?: (reason: string) => void;
   onResume?: () => void;
@@ -87,6 +91,8 @@ interface Conversation {
   waitingNoted?: boolean;
   /** The current turn's last answer was cut off at the output limit (and thrown away). */
   cutOff?: { outputTokens: number };
+  /** Its desk's model when it started (unset: the default); kept for the whole round. */
+  deskModel?: string;
 }
 
 /** A conversation as saved on disk: the subject and tools are rebuilt from the kind, id and role. */
@@ -99,6 +105,7 @@ interface SavedConversation {
   pendingToolUseIds: string[];
   /** Answer to the last turn, for a worker that lost it in the restart and asks again. */
   lastResult?: OkResult;
+  deskModel?: string;
 }
 
 /**
@@ -129,7 +136,7 @@ export class ConversationManager {
     private readonly tasks: TaskDirectory,
     private readonly registry: NodeRegistry,
     private readonly plans: PlanDirectory,
-    opts: ConversationOptions = {},
+    private readonly opts: ConversationOptions = {},
   ) {
     this.agentAdapter = opts.agentAdapter ?? adapter;
     this.taskBudgetUsd = opts.taskBudgetUsd ?? 5;
@@ -164,6 +171,7 @@ export class ConversationManager {
         pendingToolUseIds: c.pendingToolUseIds,
         results: c.lastResult ? new Map([[c.lastResult.turn, c.lastResult]]) : new Map(),
         lastActivity: Date.now(),
+        ...(c.deskModel ? { deskModel: c.deskModel } : {}),
       });
     }
     if (this.conversations.size) log.info(`restored ${this.conversations.size} agent conversation(s)`);
@@ -222,9 +230,27 @@ export class ConversationManager {
     };
   }
 
-  /** The Architect plans on the main model; task agents use the agent model. */
-  private adapterFor(role: AgentRole): LlmAdapter | undefined {
-    return role === "architect" ? this.adapter : this.agentAdapter;
+  /**
+   * The model a conversation calls, with its limit on calls at once: the Architect plans on the
+   * main model; a task agent on its desk's model, else the default agent model. A desk model the
+   * Hub can no longer use (say its key was removed) falls back to the default.
+   */
+  private routeFor(conv: Conversation): Route | undefined {
+    if (conv.subject.role === "architect") return this.adapter && { adapter: this.adapter, slots: this.slots };
+    if (conv.deskModel && this.opts.deskModels) {
+      try {
+        return this.opts.deskModels.route(conv.deskModel);
+      } catch (err) {
+        log.warn(`${conv.subject.id}: can't use desk model ${conv.deskModel} (${(err as Error).message}); using the default`);
+      }
+    }
+    return this.agentAdapter && { adapter: this.agentAdapter, slots: this.slots };
+  }
+
+  /** The model of the desk a task's agent works at on `nodeId` (from the task's crew), if any. */
+  private deskModelOf(taskId: string, nodeId: string): string | undefined {
+    const member = [...(this.tasks.get(taskId)?.crew ?? [])].reverse().find((m) => m.nodeId === nodeId);
+    return member && this.opts.deskModels?.modelOf(deskName(member.host, member.slot));
   }
 
   status() {
@@ -276,8 +302,12 @@ export class ConversationManager {
         results: new Map(),
         lastActivity: Date.now(),
       };
+      const deskModel = subject.kind === "task" ? this.deskModelOf(subject.id, nodeId) : undefined;
+      if (deskModel) conv.deskModel = deskModel;
       this.conversations.set(conv.id, conv);
-      subject.recordEvent(`agent conversation started on ${nodeId}`);
+      const model = this.routeFor(conv)?.adapter.model;
+      const on = model && subject.kind === "task" ? ` (${model}${deskModel ? ", this desk's model" : ""})` : "";
+      subject.recordEvent(`agent conversation started on ${nodeId}${on}`);
     } else if (conv.nodeId !== nodeId || conv.subject.kind !== subject.kind || conv.subject.id !== subject.id) {
       return void fail(`conversation ${req.conversationId} belongs to another ${conv.subject.kind} or node`);
     }
@@ -333,9 +363,9 @@ export class ConversationManager {
     };
     try {
       const messages = [...conv.messages, userMessage];
-      const response = await this.slots.run(() =>
-        this.adapterFor(conv.subject.role)!.complete({ system: conv.system, tools: conv.tools, messages }),
-      );
+      const route = this.routeFor(conv);
+      if (!route) return fail("no LLM configured on the Hub for this agent", false);
+      const response = await route.slots.run(() => route.adapter.complete({ system: conv.system, tools: conv.tools, messages }));
 
       if (this.paused) {
         log.info(`model calls work again after waiting since ${this.paused.since}`);
@@ -431,34 +461,13 @@ export class ConversationManager {
       turn: conv.turn,
       pendingToolUseIds: conv.pendingToolUseIds,
       lastResult,
+      ...(conv.deskModel ? { deskModel: conv.deskModel } : {}),
     };
     this.store?.saveConversation(conv.id, saved);
   }
 
   private respond(nodeId: string, result: Result): void {
     if (this.registry.has(nodeId)) this.registry.send(nodeId, "PROMPT_RESULT", result);
-  }
-}
-
-/** Limits concurrent API calls; excess requests wait in FIFO order. */
-class Semaphore {
-  private running = 0;
-  private readonly waiting: Array<() => void> = [];
-  constructor(private readonly limit: number) {}
-
-  async run<T>(fn: () => Promise<T>): Promise<T> {
-    if (this.running >= this.limit) await new Promise<void>((r) => this.waiting.push(r));
-    this.running++;
-    try {
-      return await fn();
-    } finally {
-      this.running--;
-      this.waiting.shift()?.();
-    }
-  }
-
-  status() {
-    return { running: this.running, waiting: this.waiting.length, limit: this.limit };
   }
 }
 

@@ -2605,6 +2605,151 @@
         ],
         "additionalProperties": false
       },
+      "Models": {
+        "type": "object",
+        "properties": {
+          "architect": {
+            "description": "The Architect's model",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "defaultAgent": {
+            "description": "The model of desks without one of their own",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "available": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "description": "The name to choose it by"
+                },
+                "spec": {
+                  "type": "string",
+                  "description": "How the Hub calls it: a Claude id, or openai:<name>"
+                },
+                "provider": {
+                  "type": "string",
+                  "enum": [
+                    "anthropic",
+                    "openai-compatible"
+                  ]
+                },
+                "baseUrl": {
+                  "description": "The OpenAI-compatible server it runs on",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "model",
+                "spec",
+                "provider"
+              ],
+              "additionalProperties": false
+            },
+            "description": "The models desks can use"
+          },
+          "localError": {
+            "description": "Why the local models couldn't be listed",
+            "type": "string"
+          }
+        },
+        "required": [
+          "architect",
+          "defaultAgent",
+          "available"
+        ],
+        "additionalProperties": false
+      },
+      "Desks": {
+        "type": "object",
+        "properties": {
+          "architect": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "defaultAgent": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "desks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "desk": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,99}#[1-9][0-9]?$"
+                },
+                "model": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "desk",
+                "model"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Desks with a model of their own; the others use the default"
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "model": {
+                  "type": "string"
+                },
+                "baseUrl": {
+                  "type": "string"
+                },
+                "concurrency": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "running": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "waiting": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "model",
+                "concurrency",
+                "running",
+                "waiting"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Each model desks use, with its calls at once and how busy it is"
+          }
+        },
+        "required": [
+          "architect",
+          "defaultAgent",
+          "desks",
+          "models"
+        ],
+        "additionalProperties": false
+      },
       "SignedIn": {
         "type": "object",
         "properties": {
@@ -2895,6 +3040,43 @@
           "port",
           "addresses",
           "key"
+        ],
+        "additionalProperties": false
+      },
+      "DeskAssignment": {
+        "type": "object",
+        "properties": {
+          "concurrency": {
+            "description": "Calls at once (default: 1 for local/OpenAI-compatible models, the Hub's --llm-concurrency for Claude)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 64
+          },
+          "baseUrl": {
+            "description": "For a model on another OpenAI-compatible server than the Hub's ASO_LLM_BASE_URL",
+            "type": "string",
+            "maxLength": 500,
+            "format": "uri"
+          },
+          "vision": {
+            "description": "For OpenAI-compatible models, whether the model accepts images",
+            "type": "boolean"
+          },
+          "target": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,99}(#[1-9][0-9]?)?$",
+            "description": "A desk, e.g. avalon#4, or a connected machine, e.g. avalon, for all its desks"
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "A model from GET /api/models (e.g. claude-haiku-5-5, qwen3-coder:30b), openai:<name>, or default"
+          }
+        },
+        "required": [
+          "target",
+          "model"
         ],
         "additionalProperties": false
       },
@@ -4990,6 +5172,106 @@
           },
           "404": {
             "description": "No credential with that id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models": {
+      "get": {
+        "operationId": "getModels",
+        "tags": [
+          "Workers"
+        ],
+        "summary": "The models desks can use (Claude, and the local OpenAI-compatible server's), and the Architect's and default ones",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Models"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          }
+        }
+      }
+    },
+    "/api/desks": {
+      "get": {
+        "operationId": "getDesks",
+        "tags": [
+          "Workers"
+        ],
+        "summary": "Which desks use a model of their own, and each such model's calls at once and load",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Desks"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postDesks",
+        "tags": [
+          "Workers"
+        ],
+        "summary": "Put a desk (<host>#<slot>) or a whole machine (<host>) on a model, or back on the default",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeskAssignment"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Desks"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body, unknown model, or a model the Hub can't use",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "That machine isn't connected",
             "content": {
               "application/json": {
                 "schema": {

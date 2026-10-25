@@ -35,6 +35,7 @@ import {
 } from "./commands/service.js";
 import { startWorkerCommand } from "./commands/start-worker.js";
 import { findHubCommand } from "./commands/find-hub.js";
+import { deskCommand, desksCommand, modelsCommand } from "./commands/models.js";
 import { updateCommand } from "./commands/update.js";
 import { rollbackUnconfirmed, updatePaths } from "./self-update.js";
 import { userTool } from "./systemd.js";
@@ -58,6 +59,12 @@ function parsePort(value: string): number {
   if (!Number.isInteger(n) || n < 1 || n > 65535) {
     throw new InvalidArgumentError("must be an integer between 1 and 65535");
   }
+  return n;
+}
+
+function parsePositiveInt(value: string): number {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1) throw new InvalidArgumentError("must be a whole number of 1 or more");
   return n;
 }
 
@@ -297,6 +304,25 @@ program
   .description("List the worker keys: which machine, whether connected, revoked ones too")
   .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
   .action(listWorkerKeysCommand);
+
+program
+  .command("models")
+  .description("The models desks can use: Claude, and the local server's (ASO_LLM_BASE_URL)")
+  .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
+  .action(modelsCommand);
+program
+  .command("desks")
+  .description("Which desks use a model of their own, and how busy each model is")
+  .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
+  .action(desksCommand);
+program
+  .command("desk <target> <model>")
+  .description("Put a desk (avalon#4) or a whole machine (avalon) on a model from `aso models`, or `default`")
+  .option("--concurrency <n>", "that model's calls at once (default: 1 for local models, --llm-concurrency for Claude)", parsePositiveInt)
+  .option("--base-url <url>", "for a model on another OpenAI-compatible server than the Hub's ASO_LLM_BASE_URL")
+  .option("--vision", "a local model that accepts images")
+  .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
+  .action(deskCommand);
 
 program
   .command("find-hub")

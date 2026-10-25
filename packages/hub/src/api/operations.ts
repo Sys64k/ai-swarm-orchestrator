@@ -5,6 +5,9 @@ import {
   CreateProjectBodySchema,
   CreateTaskBodySchema,
   DiscoveryProofBodySchema,
+  DeskAssignmentBodySchema,
+  DesksSchema,
+  ModelsSchema,
   DiscoveryProofSchema,
   DeployNextSchema,
   DeployResultAcceptedSchema,
@@ -60,6 +63,7 @@ export const REQUEST_SCHEMAS = {
   JoinCode: JoinCodeBodySchema,
   Join: JoinBodySchema,
   DiscoveryProofBody: DiscoveryProofBodySchema,
+  DeskAssignment: DeskAssignmentBodySchema,
   PushSubscription: PushSubscriptionSchema,
   PushEndpoint: PushEndpointSchema,
   PushTest: PushTestSchema,
@@ -93,6 +97,8 @@ export const ANSWER_SCHEMAS = {
   WorkerKeyJoined: WorkerKeyJoinedSchema,
   WorkerKey: WorkerKeySchema,
   DiscoveryProof: DiscoveryProofSchema,
+  Models: ModelsSchema,
+  Desks: DesksSchema,
   SignedIn: SignedInSchema,
 } as const;
 
@@ -245,6 +251,12 @@ const WORKERS: ApiOperation[] = [
     method: "post", path: "/api/discovery/proof", tag: "Workers",
     summary: "For the Hub machine's LAN discovery: prove the Hub holds the credential a worker's query names (its token, a worker key or a join code)", body: "DiscoveryProofBody",
     responses: { 200: ok("DiscoveryProof"), 400: err("Invalid body"), 404: err("No credential with that id") },
+  },
+  { method: "get", path: "/api/models", tag: "Workers", summary: "The models desks can use (Claude, and the local OpenAI-compatible server's), and the Architect's and default ones", responses: { 200: ok("Models") } },
+  { method: "get", path: "/api/desks", tag: "Workers", summary: "Which desks use a model of their own, and each such model's calls at once and load", responses: { 200: ok("Desks") } },
+  {
+    method: "post", path: "/api/desks", tag: "Workers", summary: "Put a desk (<host>#<slot>) or a whole machine (<host>) on a model, or back on the default", body: "DeskAssignment",
+    responses: { 200: ok("Desks"), 400: err("Invalid body, unknown model, or a model the Hub can't use"), 404: err("That machine isn't connected") },
   },
 ];
 
