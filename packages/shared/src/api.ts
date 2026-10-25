@@ -116,6 +116,20 @@ export const JoinBodySchema = z.strictObject({
     .describe("The joining machine's hostname"),
 });
 export const DiscoveryProofBodySchema = DiscoveryClaimSchema.extend({ key: DiscoveryKeyIdSchema.describe("The key id from the worker's query") });
+/** A model profile's name: what desks are assigned. */
+export const ModelProfileNameSchema = z.string().regex(/^[a-z0-9][a-z0-9._-]{0,39}$/, "lower-case letters, digits, . _ - (up to 40)");
+/** A desk: a worker machine's hostname and job slot, e.g. `avalon#1` (the Hub's `deskName` builds these). */
+export const DeskSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}#[1-9][0-9]?$/, "<hostname>#<slot>, e.g. avalon#1");
+export const ModelProfileBodySchema = z.strictObject({
+  model: z.string().min(1).max(200).describe("A Claude model id, or openai:<model> for an OpenAI-compatible API"),
+  baseUrl: z.string().url().max(500).optional().describe("For openai: models, the API's root (default: the Hub's ASO_LLM_BASE_URL)"),
+  concurrency: z.number().int().min(1).max(64).optional().describe("Calls at once (default: 1 for openai: models, the Hub's --llm-concurrency for Claude)"),
+  vision: z.boolean().optional().describe("For openai: models, whether the model accepts images"),
+});
+export const DeskAssignmentBodySchema = z.strictObject({
+  desk: DeskSchema,
+  profile: ModelProfileNameSchema.nullable().describe("The profile to use, or null for the default agent model"),
+});
 export const ApproveTaskBodySchema = z.object({
   force: z.boolean().optional().describe("Merge even when the pull request's checks are failing, still running or can't be read"),
 });
@@ -469,4 +483,17 @@ export const WorkerKeySchema = z.object({
   connected: z.boolean().describe("Whether a worker is connected with it now"),
 });
 export const DiscoveryProofSchema = z.object({ proof: z.string().describe("HMAC-SHA256 over the claim, keyed with the credential's secret (hex)") });
+export const ModelProfileSchema = ModelProfileBodySchema.extend({
+  name: ModelProfileNameSchema,
+  concurrency: z.number().int().describe("Calls at once"),
+  running: z.number().int().describe("Calls running now"),
+  waiting: z.number().int().describe("Calls waiting for a free place"),
+});
+export const ModelsSchema = z.object({
+  architect: z.string().nullable().describe("The Architect's model"),
+  defaultAgent: z.string().nullable().describe("The model of desks without a profile"),
+  profiles: z.array(ModelProfileSchema),
+  desks: z.array(z.object({ desk: DeskSchema, profile: ModelProfileNameSchema })).describe("Desks with a profile; the others use the default agent model"),
+});
+export type Models = z.infer<typeof ModelsSchema>;
 export const SignedInSchema = z.object({ ok: z.literal(true) });

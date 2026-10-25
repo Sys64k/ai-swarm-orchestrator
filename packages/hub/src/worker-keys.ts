@@ -1,7 +1,8 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
+import { JsonFileWriter } from "./push/json-file.js";
 import { createLogger, discoveryKeyId, discoverySecret, WORKER_KEY_PREFIX } from "@aso/shared";
 
 const log = createLogger("worker-keys");
@@ -46,12 +47,14 @@ export class WorkerKeys {
   private readonly codes = new Map<string, { expiresAt: number; name?: string }>();
   private readonly lastUsedSaved = new Map<string, number>();
 
-  private saving: Promise<unknown> = Promise.resolve();
+  private readonly writer: JsonFileWriter | undefined;
 
   private constructor(
     private records: WorkerKeyRecord[],
-    private readonly file?: string,
-  ) {}
+    file?: string,
+  ) {
+    this.writer = file ? new JsonFileWriter(file, 0o600) : undefined;
+  }
 
   /** Keys saved in `<dir>/worker-keys.json` (owner-only), or in memory without a `dir`. */
   static async open(dir?: string): Promise<WorkerKeys> {
@@ -154,21 +157,12 @@ export class WorkerKeys {
   }
 
   /**
-   * Write the keys (temporary file, owner-only, then rename), one save at a time. Unlike other
-   * state, a failure is thrown: a join that wasn't saved would lose its key, and a revocation that
-   * wasn't saved would let the key back in after a restart.
+   * Write the keys (owner-only). Unlike other state, a failure is thrown: a join that wasn't
+   * saved would lose its key, and a revocation that wasn't saved would let the key back in after
+   * a restart.
    */
   private save(): Promise<void> {
-    const file = this.file;
-    if (!file) return Promise.resolve();
-    const json = JSON.stringify(this.records, null, 2);
-    const run = this.saving.then(async () => {
-      await mkdir(path.dirname(file), { recursive: true });
-      await writeFile(`${file}.tmp`, json, { mode: 0o600 });
-      await rename(`${file}.tmp`, file);
-    });
-    this.saving = run.catch(() => undefined);
-    return run;
+    return this.writer ? this.writer.save(this.records) : Promise.resolve();
   }
 }
 

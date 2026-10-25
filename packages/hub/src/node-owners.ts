@@ -1,7 +1,8 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { createLogger } from "@aso/shared";
+import { JsonFileWriter } from "./push/json-file.js";
 
 const log = createLogger("node-owners");
 
@@ -27,12 +28,14 @@ const OwnersSchema = z.record(z.string(), z.string().nullable());
  * start to the node ids a task still names, so it doesn't grow with every worker start.
  */
 export class NodeOwners {
-  private saving: Promise<unknown> = Promise.resolve();
+  private readonly writer: JsonFileWriter | undefined;
 
   private constructor(
     private readonly owners: Map<string, Owner>,
-    private readonly file?: string,
-  ) {}
+    file?: string,
+  ) {
+    this.writer = file ? new JsonFileWriter(file, 0o600) : undefined;
+  }
 
   /** Owners saved in `<dir>/node-owners.json` (owner-only), or in memory without a `dir`. */
   static async open(dir?: string): Promise<NodeOwners> {
@@ -76,20 +79,6 @@ export class NodeOwners {
   }
 
   private persist(): void {
-    this.save().catch((err: Error) => log.warn(`could not save node owners: ${err.message}`));
-  }
-
-  /** One save at a time, owner-only, renamed into place. */
-  private save(): Promise<void> {
-    const file = this.file;
-    if (!file) return Promise.resolve();
-    const json = JSON.stringify(Object.fromEntries(this.owners), null, 2);
-    const run = this.saving.then(async () => {
-      await mkdir(path.dirname(file), { recursive: true });
-      await writeFile(`${file}.tmp`, json, { mode: 0o600 });
-      await rename(`${file}.tmp`, file);
-    });
-    this.saving = run.catch(() => undefined);
-    return run;
+    void this.writer?.write(Object.fromEntries(this.owners));
   }
 }

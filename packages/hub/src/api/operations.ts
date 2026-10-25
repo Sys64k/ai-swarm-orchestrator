@@ -5,6 +5,9 @@ import {
   CreateProjectBodySchema,
   CreateTaskBodySchema,
   DiscoveryProofBodySchema,
+  DeskAssignmentBodySchema,
+  ModelProfileBodySchema,
+  ModelsSchema,
   DiscoveryProofSchema,
   DeployNextSchema,
   DeployResultAcceptedSchema,
@@ -60,6 +63,8 @@ export const REQUEST_SCHEMAS = {
   JoinCode: JoinCodeBodySchema,
   Join: JoinBodySchema,
   DiscoveryProofBody: DiscoveryProofBodySchema,
+  ModelProfileBody: ModelProfileBodySchema,
+  DeskAssignment: DeskAssignmentBodySchema,
   PushSubscription: PushSubscriptionSchema,
   PushEndpoint: PushEndpointSchema,
   PushTest: PushTestSchema,
@@ -93,6 +98,7 @@ export const ANSWER_SCHEMAS = {
   WorkerKeyJoined: WorkerKeyJoinedSchema,
   WorkerKey: WorkerKeySchema,
   DiscoveryProof: DiscoveryProofSchema,
+  Models: ModelsSchema,
   SignedIn: SignedInSchema,
 } as const;
 
@@ -245,6 +251,19 @@ const WORKERS: ApiOperation[] = [
     method: "post", path: "/api/discovery/proof", tag: "Workers",
     summary: "For the Hub machine's LAN discovery: prove the Hub holds the credential a worker's query names (its token, a worker key or a join code)", body: "DiscoveryProofBody",
     responses: { 200: ok("DiscoveryProof"), 400: err("Invalid body"), 404: err("No credential with that id") },
+  },
+  { method: "get", path: "/api/models", tag: "Workers", summary: "The model profiles, which desks use them, and each profile's calls at once", responses: { 200: ok("Models") } },
+  {
+    method: "post", path: "/api/models/profiles/{name}", tag: "Workers", summary: "Add or replace a model profile (a model with its own address and limit on calls at once)", body: "ModelProfileBody",
+    responses: { 200: ok("Models"), 400: err("Invalid name or body, or the Hub can't use that model (e.g. no API key)") },
+  },
+  {
+    method: "post", path: "/api/models/profiles/{name}/remove", tag: "Workers", summary: "Remove a model profile; its desks go back to the default agent model",
+    responses: { 200: ok("Models"), 404: err("No such profile") },
+  },
+  {
+    method: "post", path: "/api/models/desks", tag: "Workers", summary: "Give a desk (<host>#<slot>) a model profile, or null for the default agent model", body: "DeskAssignment",
+    responses: { 200: ok("Models"), 400: err("Invalid body"), 404: err("No such profile") },
   },
 ];
 

@@ -21,6 +21,9 @@ import {
   credentialOf,
   JoinBodySchema,
   DiscoveryProofBodySchema,
+  DeskAssignmentBodySchema,
+  ModelProfileBodySchema,
+  ModelProfileNameSchema,
   discoveryKeyId,
   discoveryProof,
   discoverySecret,
@@ -49,6 +52,7 @@ import { syncApiCopies } from "./api-sync.js";
 import type { z } from "zod";
 import { AnthropicApiAdapter, DEFAULT_MAX_TOKENS, type Effort, type LlmAdapter } from "./llm/adapter.js";
 import { openAiCompatibleFor } from "./llm/openai-compatible.js";
+import { adapterForProfile, ModelProfiles } from "./llm/profiles.js";
 import { ConversationManager } from "./llm/conversations.js";
 import { hasPrice } from "./llm/pricing.js";
 import { gitHttpHandler } from "./git/http-backend.js";
@@ -266,8 +270,15 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       if (a && !hasPrice(a.model)) log.warn(`no price known for ${a.model}; cost estimates will read $0, so task budgets won't stop it (the turn limit still does)`);
     }
   }
+  // Desks can use their own model profiles; each profile's adapter is built from its definition.
+  const modelProfiles = await ModelProfiles.open(
+    conversationDir,
+    (def) => adapterForProfile(def, { env: process.env, maxTokens, effort: llm.effort ?? "high" }),
+    llm.concurrency ?? 4,
+  );
   const conversations = new ConversationManager(adapter, tasks, registry, plans, {
     agentAdapter,
+    profiles: modelProfiles,
     taskBudgetUsd: llm.taskBudgetUsd,
     planBudgetUsd: llm.planBudgetUsd,
     maxTurns: llm.maxTurns,
@@ -612,6 +623,32 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   });
 
   app.get("/api/llm", (c) => c.json(conversations.status()));
+  // Model profiles for desks: which model each desk's agents use, and each profile's call limit.
+  const modelsView = () => modelProfiles.view(adapter?.model ?? null, (agentAdapter ?? adapter)?.model ?? null);
+  app.get("/api/models", (c) => c.json(modelsView()));
+  app.post("/api/models/profiles/:name", async (c) => {
+    const name = ModelProfileNameSchema.safeParse(c.req.param("name"));
+    if (!name.success) return c.json({ error: "a profile name is lower-case letters, digits, . _ - (up to 40)" }, 400);
+    const req = await parsed(c, ModelProfileBodySchema);
+    if (!req.ok) return c.json({ error: req.error }, 400);
+    try {
+      await modelProfiles.setProfile(name.data, req.data);
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 400);
+    }
+    return c.json(modelsView());
+  });
+  app.post("/api/models/profiles/:name/remove", async (c) => {
+    if (!(await modelProfiles.removeProfile(c.req.param("name")))) return c.json({ error: "no such model profile" }, 404);
+    return c.json(modelsView());
+  });
+  app.post("/api/models/desks", async (c) => {
+    const req = await parsed(c, DeskAssignmentBodySchema);
+    if (!req.ok) return c.json({ error: req.error }, 400);
+    if (req.data.profile !== null && !modelProfiles.has(req.data.profile)) return c.json({ error: `no model profile named ${req.data.profile}` }, 404);
+    await modelProfiles.assign(req.data.desk, req.data.profile);
+    return c.json(modelsView());
+  });
 
   /** Maps the errors a request can hit to HTTP statuses. */
   const fail = (c: Context, err: unknown) => {

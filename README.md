@@ -155,9 +155,34 @@ aso hub-service install ... --agent-model openai:qwen3-coder:30b   # builders an
 - **Ollama:** let the Hub reach it (`OLLAMA_HOST=0.0.0.0:11434` in its service) and give it room
   for the agents' instructions and files (`OLLAMA_CONTEXT_LENGTH=32768` or more): its default
   context is too small, and Ollama's OpenAI endpoint can't change it per request.
+- **A model per desk:** see [Model profiles for desks](#model-profiles-for-desks).
 - **What's Claude-only:** effort levels, prompt caching control, extended thinking and fallbacks
   on refusal. Costs read $0 for models without a price in the Hub's table, so task budgets don't
   stop them; the turn limit does.
+
+### Model profiles for desks
+
+Each desk (a job slot on a worker machine, named `<host>#<slot>`, e.g. `avalon#1`) can use its
+own model. A **profile** is a model with its own address and its own limit on calls at once:
+
+```bash
+aso model-profile set local-qwen openai:qwen3-coder:30b --base-url http://avalon:11434/v1
+aso model-profile set haiku claude-haiku-5-5
+aso desk avalon#1 local-qwen      # avalon's first desk builds on the local model
+aso desk avalon#1 default         # back to the default agent model
+aso models                        # what uses what, and how busy each profile is
+```
+
+- **Desks without a profile** use `--agent-model` (or `--model`), as before. The Architect
+  always uses `--model`.
+- **Calls at once:** a profile's own `--concurrency`; by default 1 for `openai:` models (a local
+  GPU serves few requests in parallel; more would only queue or push the model out of GPU
+  memory) and `--llm-concurrency` for Claude. The Architect and desks without a profile share
+  `--llm-concurrency`.
+- **One model per round:** an agent keeps the profile its desk had when its conversation
+  started, until the round ends; a change applies from the next round.
+- **Stored** in `<projects root>/.aso/models.json` (no secrets: keys come from the Hub's
+  `ANTHROPIC_API_KEY` and `ASO_LLM_API_KEY`). Each task's history says which model worked on it.
 
 ## Installation
 
@@ -952,6 +977,14 @@ machine reaches it, for downloading the package and for joining from another net
 this machine's hostname, which on Tailscale is its tailnet name). `--name` labels the key. `aso worker-keys` lists the
 keys, and `revoke` shuts a machine out.
 
+### `aso models`, `aso model-profile set|remove`, `aso desk`
+
+`aso models` shows the Architect's model, the default for desks, each profile (model, address,
+calls at once, how many run and wait) and which desks use it. `aso model-profile set <name>
+<model>` adds or replaces a profile (`--base-url`, `--concurrency`, `--vision`); `remove` drops
+it and its desks go back to the default. `aso desk <host>#<slot> <profile|default>` assigns a
+desk. See [Model profiles for desks](#model-profiles-for-desks).
+
 ### `aso find-hub`
 
 Asks the LAN where the Hub is, with this machine's worker key, and prints its `host:port`.
@@ -1041,6 +1074,10 @@ Answers can gain fields over time: clients should ignore fields they don't know.
 | `POST` | `/api/worker-keys/join` | For the joining machine (public: the code is the credential): its worker key, shown once |
 | `GET` | `/api/worker-keys` | The worker keys: name, connected, last used, revoked |
 | `POST` | `/api/worker-keys/{id}/revoke` | Revoke a key: its machine is disconnected and can't come back with it |
+| `GET` | `/api/models` | The model profiles, which desks use them, and each profile's calls at once |
+| `POST` | `/api/models/profiles/{name}` | Add or replace a model profile |
+| `POST` | `/api/models/profiles/{name}/remove` | Remove a profile; its desks go back to the default |
+| `POST` | `/api/models/desks` | Give a desk (`<host>#<slot>`) a profile, or `null` for the default |
 | `POST` | `/api/discovery/proof` | For the Hub machine's LAN discovery: the proof answering a worker's query, if the Hub holds its credential |
 | `GET` / `POST` | `/api/hub/update` | Where the Hub's own update stands (`off` without `--update-from`) / the updater on the Hub machine reports it |
 | `GET` | `/api/openapi.json` | This API as an OpenAPI 3.1 document (public) |

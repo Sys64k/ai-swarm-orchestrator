@@ -35,6 +35,7 @@ import {
 } from "./commands/service.js";
 import { startWorkerCommand } from "./commands/start-worker.js";
 import { findHubCommand } from "./commands/find-hub.js";
+import { deskCommand, modelsCommand, removeModelProfileCommand, setModelProfileCommand } from "./commands/models.js";
 import { updateCommand } from "./commands/update.js";
 import { rollbackUnconfirmed, updatePaths } from "./self-update.js";
 import { userTool } from "./systemd.js";
@@ -58,6 +59,12 @@ function parsePort(value: string): number {
   if (!Number.isInteger(n) || n < 1 || n > 65535) {
     throw new InvalidArgumentError("must be an integer between 1 and 65535");
   }
+  return n;
+}
+
+function parsePositiveInt(value: string): number {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1) throw new InvalidArgumentError("must be a whole number of 1 or more");
   return n;
 }
 
@@ -297,6 +304,32 @@ program
   .description("List the worker keys: which machine, whether connected, revoked ones too")
   .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
   .action(listWorkerKeysCommand);
+
+program
+  .command("models")
+  .description("Show the models: the Architect's, the default for desks, each model profile and which desks use it")
+  .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
+  .action(modelsCommand);
+
+const modelProfileCmd = program.command("model-profile").description("Model profiles: a model with its own address and limit on calls at once, for desks to use");
+modelProfileCmd
+  .command("set <name> <model>")
+  .description("Add or replace a profile. <model> is a Claude model id or openai:<model>")
+  .option("--base-url <url>", "for openai: models, the API's root (default: the Hub's ASO_LLM_BASE_URL)")
+  .option("--concurrency <n>", "calls at once (default: 1 for openai: models, --llm-concurrency for Claude)", parsePositiveInt)
+  .option("--vision", "for openai: models, the model accepts images")
+  .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
+  .action(setModelProfileCommand);
+modelProfileCmd
+  .command("remove <name>")
+  .description("Remove a profile; its desks go back to the default agent model")
+  .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
+  .action(removeModelProfileCommand);
+program
+  .command("desk <desk> <profile>")
+  .description("Give a desk (<host>#<slot>, e.g. avalon#1) a model profile, or `default` for the default agent model")
+  .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
+  .action(deskCommand);
 
 program
   .command("find-hub")

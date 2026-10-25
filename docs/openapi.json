@@ -2605,6 +2605,108 @@
         ],
         "additionalProperties": false
       },
+      "Models": {
+        "type": "object",
+        "properties": {
+          "architect": {
+            "description": "The Architect's model",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "defaultAgent": {
+            "description": "The model of desks without a profile",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "profiles": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200,
+                  "description": "A Claude model id, or openai:<model> for an OpenAI-compatible API"
+                },
+                "baseUrl": {
+                  "description": "For openai: models, the API's root (default: the Hub's ASO_LLM_BASE_URL)",
+                  "type": "string",
+                  "maxLength": 500,
+                  "format": "uri"
+                },
+                "concurrency": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Calls at once"
+                },
+                "vision": {
+                  "description": "For openai: models, whether the model accepts images",
+                  "type": "boolean"
+                },
+                "name": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9._-]{0,39}$"
+                },
+                "running": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Calls running now"
+                },
+                "waiting": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Calls waiting for a free place"
+                }
+              },
+              "required": [
+                "model",
+                "concurrency",
+                "name",
+                "running",
+                "waiting"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "desks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "desk": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,99}#[1-9][0-9]?$"
+                },
+                "profile": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9._-]{0,39}$"
+                }
+              },
+              "required": [
+                "desk",
+                "profile"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Desks with a profile; the others use the default agent model"
+          }
+        },
+        "required": [
+          "architect",
+          "defaultAgent",
+          "profiles",
+          "desks"
+        ],
+        "additionalProperties": false
+      },
       "SignedIn": {
         "type": "object",
         "properties": {
@@ -2895,6 +2997,63 @@
           "port",
           "addresses",
           "key"
+        ],
+        "additionalProperties": false
+      },
+      "ModelProfileBody": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "A Claude model id, or openai:<model> for an OpenAI-compatible API"
+          },
+          "baseUrl": {
+            "description": "For openai: models, the API's root (default: the Hub's ASO_LLM_BASE_URL)",
+            "type": "string",
+            "maxLength": 500,
+            "format": "uri"
+          },
+          "concurrency": {
+            "description": "Calls at once (default: 1 for openai: models, the Hub's --llm-concurrency for Claude)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 64
+          },
+          "vision": {
+            "description": "For openai: models, whether the model accepts images",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "model"
+        ],
+        "additionalProperties": false
+      },
+      "DeskAssignment": {
+        "type": "object",
+        "properties": {
+          "desk": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,99}#[1-9][0-9]?$"
+          },
+          "profile": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9._-]{0,39}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The profile to use, or null for the default agent model"
+          }
+        },
+        "required": [
+          "desk",
+          "profile"
         ],
         "additionalProperties": false
       },
@@ -4990,6 +5149,182 @@
           },
           "404": {
             "description": "No credential with that id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models": {
+      "get": {
+        "operationId": "getModels",
+        "tags": [
+          "Workers"
+        ],
+        "summary": "The model profiles, which desks use them, and each profile's calls at once",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Models"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          }
+        }
+      }
+    },
+    "/api/models/profiles/{name}": {
+      "post": {
+        "operationId": "postModelsProfile",
+        "tags": [
+          "Workers"
+        ],
+        "summary": "Add or replace a model profile (a model with its own address and limit on calls at once)",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelProfileBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Models"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid name or body, or the Hub can't use that model (e.g. no API key)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          }
+        }
+      }
+    },
+    "/api/models/profiles/{name}/remove": {
+      "post": {
+        "operationId": "postModelsProfileRemove",
+        "tags": [
+          "Workers"
+        ],
+        "summary": "Remove a model profile; its desks go back to the default agent model",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Models"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "No such profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/desks": {
+      "post": {
+        "operationId": "postModelsDesks",
+        "tags": [
+          "Workers"
+        ],
+        "summary": "Give a desk (<host>#<slot>) a model profile, or null for the default agent model",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeskAssignment"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Models"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "No such profile",
             "content": {
               "application/json": {
                 "schema": {

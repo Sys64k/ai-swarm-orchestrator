@@ -1085,6 +1085,24 @@ asked again), and finish reasons map to the Hub's: `stop` → `end_turn`, `tool_
 `insufficient_quota` or credit error pauses model calls like Anthropic's credit error. Cached
 input reported in `prompt_tokens_details` counts as cache reads. Models without a price cost $0.
 
+### Model profiles for desks (`ModelProfiles`)
+
+`llm/profiles.ts` keeps named profiles (a model spec, an optional base URL for `openai:` models,
+vision, and calls at once) and a map of desks (`<host>#<slot>`) to profiles, in
+`<state>/models.json` (mode 600, no secrets). Each profile gets its own adapter, built when the
+profile is set (so one the Hub can't use is refused then), and its own `Semaphore`.
+
+When a task's conversation starts, `ConversationManager` finds the desk from the task's crew
+(the latest member on that node: host and slot) and pins that desk's profile on the
+conversation, saved with it across restarts. Every call of that conversation goes through the
+profile's adapter and semaphore; without a profile, through the default agent adapter and the
+shared `--llm-concurrency` semaphore, which the Architect also uses. A profile removed while a
+conversation still runs falls back to the default. The task's history notes the model when an
+agent conversation starts.
+
+Default calls at once: 1 for `openai:` models (one local GPU, where parallel requests would
+queue or spill the model out of GPU memory), `--llm-concurrency` for Claude models.
+
 ### Error handling
 
 | Situation | Hub answer | Worker reaction |
