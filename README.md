@@ -173,6 +173,8 @@ aso desk avalon#4 default            # back to the default (--agent-model)
 aso desks                            # each desk's model, and how busy each model is
 ```
 
+- **In the console:** a worker's page has a model picker under each desk, and one for all its
+  desks.
 - **What there is to choose:** the Claude models when the Hub has `ANTHROPIC_API_KEY`, and
   whatever the OpenAI-compatible server at `ASO_LLM_BASE_URL` lists (Ollama, vLLM, LM Studio,
   OpenRouter, OpenAI). A name it doesn't know is refused with the closest matches.

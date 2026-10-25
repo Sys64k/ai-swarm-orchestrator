@@ -975,3 +975,18 @@ select.input {
   overflow-y: auto;
   margin: 0.5rem 0;
 }
+
+.model-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 4px 0 12px;
+}
+.model-picker select {
+  max-width: 100%;
+}
+/* Under a desk row: indented like the row, and part of the same desk (no line between them). */
+.card-list .model-picker {
+  margin: 0;
+  padding: 0 12px 12px 14px;
+}

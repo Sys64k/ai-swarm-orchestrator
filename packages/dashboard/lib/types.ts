@@ -235,3 +235,26 @@ export interface TaskDiff {
   files: DiffFile[];
   truncated: boolean;
 }
+
+/** A model desks can use (`GET /api/models`). */
+export interface AvailableModel {
+  model: string;
+  spec: string;
+  provider: "anthropic" | "openai-compatible";
+  baseUrl?: string;
+}
+
+export interface Models {
+  architect: string | null;
+  defaultAgent: string | null;
+  available: AvailableModel[];
+  localError?: string;
+}
+
+/** Which desks use a model of their own (`GET /api/desks`). */
+export interface Desks {
+  architect: string | null;
+  defaultAgent: string | null;
+  desks: Array<{ desk: string; model: string }>;
+  models: Array<{ model: string; baseUrl?: string; concurrency: number; running: number; waiting: number }>;
+}

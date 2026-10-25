@@ -4,13 +4,16 @@ import Link from "next/link";
 import { hubAction, usePoll } from "./use-poll.ts";
 import { ActionButton, Badge, Banner, LoadingPage, Row, Section, TopBar } from "./ui.tsx";
 import type { WorkerAction } from "../lib/hub-routes.ts";
-import type { HubNode, Task } from "../lib/types.ts";
-import { agentRows, workerView, type AgentRow } from "../lib/view.ts";
+import { useState } from "react";
+import type { Desks, HubNode, Models, Task } from "../lib/types.ts";
+import { agentRows, deskModelChoices, deskModelOf, machineModelOf, workerView, type AgentRow, type DeskModelChoice } from "../lib/view.ts";
 
 /** One worker: what it runs, and draining or restarting it. */
 export function WorkerPage({ id }: { id: string }) {
   const { data: nodes, error, refresh } = usePoll<HubNode[]>("nodes", 3000);
   const { data: tasks } = usePoll<Task[]>("tasks", 5000);
+  const { data: models } = usePoll<Models>("models", 30000);
+  const { data: desks, refresh: refreshDesks } = usePoll<Desks>("desks", 5000);
 
   if (!nodes) return <LoadingPage title="Worker" back="/" error={error} />;
   const node = nodes.find((n) => n.nodeId === id && n.nodeKind === "worker");
@@ -29,6 +32,15 @@ export function WorkerPage({ id }: { id: string }) {
   }
 
   const w = workerView(node);
+  const host = node.hardware?.hostname ?? "";
+  const slots = node.slots ?? 1;
+  const choices = models ? deskModelChoices(models, desks) : undefined;
+  /** Put `target` (a desk or the whole machine) on a model; the Hub's error, if any. */
+  const choose = async (target: string, model: string) => {
+    const err = await hubAction("desks", { target, model });
+    refreshDesks();
+    return err;
+  };
   const act = (action: WorkerAction) => async () => {
     const err = await hubAction(`nodes/${id}/${action}`);
     refresh();
@@ -55,16 +67,39 @@ export function WorkerPage({ id }: { id: string }) {
           </div>
           {w.actions.restartNote && <p className="muted small">{w.actions.restartNote}</p>}
         </div>
+        {choices && models && (
+          <ModelPicker
+            label="Model for all desks"
+            choices={choices}
+            value={machineModelOf(desks, models, host, slots)}
+            onChoose={(model) => choose(host, model)}
+          />
+        )}
         <Section title="Agents" count={agentRows(node, tasks ?? []).length}>
           <div className="card-list">
             {agentRows(node, tasks ?? []).map((agent) => (
-              <AgentLine key={agent.slot} agent={agent} />
+              <div key={agent.slot}>
+                <AgentLine agent={agent} />
+                {choices && models && (
+                  <ModelPicker
+                    label={`Model for ${agent.name}`}
+                    choices={choices}
+                    value={deskModelOf(desks, models, host, agent.slot)}
+                    onChoose={(model) => choose(`${host}#${agent.slot}`, model)}
+                  />
+                )}
+              </div>
             ))}
           </div>
         </Section>
+        {models?.localError && <p className="muted small">Local models: {models.localError}</p>}
         <p className="muted small">
           <strong>Drain</strong> lets the current job finish but gives this worker no new ones, for example before you take the machine offline.{" "}
           <strong>Restart</strong> drains it, then restarts it on the aso build installed there, so it also finishes an <code>aso update</code>.
+        </p>
+        <p className="muted small">
+          <strong>Model</strong>: each desk builds and tests with the model you pick; a local model takes one request at a time. A
+          change applies to the desk&apos;s next job.
         </p>
       </main>
     </>
@@ -93,4 +128,33 @@ function AgentLine({ agent }: { agent: AgentRow }) {
     );
   }
   return <Row href={`/tasks/${taskId}`} title={agent.name} sub={doing ?? last} badge={badge} />;
+}
+
+/** A model dropdown; shows the Hub's error under it when a choice is refused. */
+function ModelPicker({ label, choices, value, onChoose }: { label: string; choices: DeskModelChoice[]; value?: string; onChoose: (model: string) => Promise<string | undefined> }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  return (
+    <label className="model-picker">
+      <span className="muted small">{label}</span>
+      <select
+        className="input"
+        value={value ?? ""}
+        disabled={busy}
+        onChange={async (e) => {
+          setBusy(true);
+          setError(await onChoose(e.target.value));
+          setBusy(false);
+        }}
+      >
+        {value === undefined && <option value="">Mixed</option>}
+        {choices.map((c) => (
+          <option key={c.value} value={c.value}>
+            {c.label}
+          </option>
+        ))}
+      </select>
+      {error && <Banner tone="bad">{error}</Banner>}
+    </label>
+  );
 }
