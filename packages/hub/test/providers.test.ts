@@ -3,7 +3,7 @@ import http from "node:http";
 import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
-import { environmentProviders, fetchModels, parseModelList, parseSpec, priceUsage, Providers, resolveModel, type Provider } from "@aso/hub";
+import { CustomPrices, environmentProviders, fetchModels, parseModelList, parseSpec, priceTable, priceUsage, Providers, resolveModel, type Provider } from "@aso/hub";
 import type { AvailableModel } from "@aso/shared";
 import { tempDir, TOKEN, withHub } from "./helpers.ts";
 
@@ -12,13 +12,21 @@ delete process.env.ANTHROPIC_API_KEY; // tests must never reach the real API
 /** An OpenAI-compatible API: lists `ids` (with OpenRouter-style prices) to the right key, refuses a wrong one. */
 async function fakeApi(ids: string[], key?: string) {
   const seen: string[] = [];
-  const server = http.createServer((req, res) => {
+  const bodies: Array<Record<string, unknown>> = [];
+  const server = http.createServer(async (req, res) => {
     seen.push(`${req.method} ${req.url} ${req.headers.authorization ?? ""}`);
     if (key && req.headers.authorization !== `Bearer ${key}`) return void res.writeHead(401).end('{"error":"bad key"}');
+    if (req.url?.endsWith("/chat/completions")) {
+      let raw = "";
+      for await (const chunk of req) raw += chunk;
+      bodies.push(JSON.parse(raw) as Record<string, unknown>);
+      const chunk = { choices: [{ delta: { content: "ok" }, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1 } };
+      return void res.writeHead(200, { "content-type": "text/event-stream" }).end(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`);
+    }
     res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ data: ids.map((id) => ({ id, pricing: { prompt: "0.000001", completion: "0.000002" } })) }));
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-  return { url: `http://127.0.0.1:${(server.address() as { port: number }).port}/v1`, seen, close: () => new Promise<void>((r) => server.close(() => r())) };
+  return { url: `http://127.0.0.1:${(server.address() as { port: number }).port}/v1`, seen, bodies, close: () => new Promise<void>((r) => server.close(() => r())) };
 }
 
 describe("providers", () => {
@@ -127,6 +135,46 @@ describe("providers", () => {
     assert.deepEqual(parseModelList({ data: [] }).ids, [], "a server with no models yet");
   });
 
+  it("defaults the Architect to Claude Opus only when Anthropic is a provider", async () => {
+    assert.equal((await Providers.open(undefined, { ANTHROPIC_API_KEY: "sk-ant-test" })).defaultModel(), "claude-opus-5-5");
+    assert.equal((await Providers.open(undefined, { ASO_LLM_BASE_URL: "http://avalon:11434/v1" })).defaultModel(), undefined, "the person chooses");
+  });
+
+  it("asks OpenAI's models with max_completion_tokens, others with max_tokens", async () => {
+    const api = await fakeApi(["gpt-5"], "sk-oa");
+    try {
+      const providers = await Providers.open(undefined, {});
+      await providers.add({ preset: "openai", key: "sk-oa", baseUrl: api.url });
+      await providers.add({ preset: "custom", id: "lab", baseUrl: api.url, key: "sk-oa" });
+      const opts = { maxTokens: 1000, effort: "high" as const };
+      await providers.adapterFor("openai/gpt-5", opts).complete({ system: "s", tools: [], messages: [{ role: "user", content: "x" }] });
+      await providers.adapterFor("lab/gpt-5", opts).complete({ system: "s", tools: [], messages: [{ role: "user", content: "x" }] });
+      const [openAi, lab] = api.bodies;
+      assert.deepEqual([openAi.max_completion_tokens, "max_tokens" in openAi], [1000, false]);
+      assert.deepEqual([lab.max_tokens, "max_completion_tokens" in lab], [1000, false]);
+    } finally {
+      await api.close();
+    }
+  });
+
+  it("keeps prices set on the Hub, which win over the built-in ones, and charges with them", async () => {
+    const dir = tempDir();
+    const prices = await CustomPrices.open(dir);
+    const million = { inputTokens: 1e6, outputTokens: 1e6, cacheReadTokens: 0, cacheWriteTokens: 0 };
+    assert.equal(priceUsage("qwen3-coder:30b", million).costUsd, 0, "unknown: $0");
+    await prices.set("qwen3-coder:30b", { input: 0.5, output: 1 });
+    await prices.set("claude-haiku-5-5", { input: 1, output: 2 });
+    assert.equal(priceUsage("qwen3-coder:30b", million).costUsd, 1.5);
+    assert.equal(priceUsage("claude-haiku-5-5", million).costUsd, 3, "a set price wins over the built-in one");
+    assert.deepEqual(priceTable().filter((p) => p.model === "claude-haiku-5-5").map((p) => p.source), ["set"]);
+    await CustomPrices.open(dir); // a restart reads them back
+    assert.equal(priceUsage("qwen3-coder:30b", million).costUsd, 1.5);
+    assert.equal(await prices.remove("claude-haiku-5-5"), true);
+    assert.equal(priceUsage("claude-haiku-5-5", million).costUsd, 0.6, "back to the built-in price");
+    assert.equal(await prices.remove("claude-haiku-5-5"), false);
+    await prices.remove("qwen3-coder:30b");
+  });
+
   it("keeps .env providers removable only there", async () => {
     const providers = await Providers.open(undefined, { ANTHROPIC_API_KEY: "sk-ant-test" });
     assert.equal(await providers.remove("anthropic"), "environment");
@@ -167,6 +215,11 @@ describe("providers (Hub)", () => {
         const models = (await call(ctx.port, "/api/models")).body;
         assert.deepEqual(models.available.map((m: AvailableModel) => [m.spec, m.providerLabel]), [["remote/llama3.3:70b", `Custom (${new URL(api.url).host})`]]);
         assert.equal((await call(ctx.port, "/api/desks", { target: "test#1", model: "llama3.3:70b" })).status, 200, "a desk on it by name");
+        const priced = await call(ctx.port, "/api/prices", { model: "remote/llama3.3:70b", input: 0.2, output: 0.4 });
+        assert.deepEqual(priced.body, { model: "llama3.3:70b", input: 0.2, output: 0.4, source: "set" }, "priced per model name");
+        assert.equal((await call(ctx.port, "/api/prices", { model: "x", input: -1, output: 0 })).status, 400);
+        assert.equal((await call(ctx.port, "/api/prices/remove", { model: "llama3.3:70b" })).status, 200);
+        assert.equal((await call(ctx.port, "/api/prices/remove", { model: "llama3.3:70b" })).status, 404);
         assert.equal((await call(ctx.port, "/api/providers/remote/remove", {})).status, 200);
         assert.equal((await call(ctx.port, "/api/providers/remote/remove", {})).status, 404);
       });

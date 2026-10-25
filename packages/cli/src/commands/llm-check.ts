@@ -13,8 +13,10 @@ const CHECK_TOOL = {
 };
 
 /** The model through the Hub's providers: the ones added on it (its state folder) and the .env's. */
-async function adapterFor(model: string, root: string): Promise<LlmAdapter> {
+async function adapterFor(model: string | undefined, root: string): Promise<LlmAdapter> {
   const providers = await Providers.open(path.join(path.resolve(root), ".aso"), process.env);
+  model ||= providers.defaultModel();
+  if (!model) throw new Error("no --model given, and no Anthropic provider to default to: name one, e.g. --model openai/gpt-5 (see aso models)");
   return providers.adapterFor(model, { maxTokens: 1024, effort: "low" });
 }
 
@@ -22,7 +24,7 @@ async function adapterFor(model: string, root: string): Promise<LlmAdapter> {
  * Two tiny requests: a one-word reply (the endpoint, credentials, model and credit), then a tool
  * call (whether the model can drive an agent).
  */
-export async function llmCheckCommand(opts: { model: string; root: string }): Promise<void> {
+export async function llmCheckCommand(opts: { model?: string; root: string }): Promise<void> {
   const adapter = await adapterFor(opts.model, opts.root);
   console.log(`asking ${adapter.model} (${adapter.name}) for a one-word reply...`);
   try {

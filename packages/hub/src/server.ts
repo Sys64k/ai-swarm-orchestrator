@@ -23,6 +23,8 @@ import {
   DiscoveryProofBodySchema,
   DeskAssignmentBodySchema,
   ProviderAddBodySchema,
+  PriceRemoveBodySchema,
+  PriceSetBodySchema,
   discoveryKeyId,
   discoveryProof,
   discoverySecret,
@@ -53,8 +55,9 @@ import { DEFAULT_MAX_TOKENS, type Effort, type LlmAdapter } from "./llm/adapter.
 import { AcceptanceChecker } from "./llm/acceptance.js";
 import { DeskModels, desksOf } from "./llm/desk-models.js";
 import { Providers, resolveModel } from "./llm/providers.js";
+import { CustomPrices } from "./llm/custom-prices.js";
 import { ConversationManager } from "./llm/conversations.js";
-import { hasPrice } from "./llm/pricing.js";
+import { hasPrice, priceTable } from "./llm/pricing.js";
 import { gitHttpHandler } from "./git/http-backend.js";
 import { type DependencyInstaller } from "./git/hub-repo.js";
 import type { GitSync } from "./git/sync.js";
@@ -265,12 +268,14 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   // A copy that looks out of date is checked again after catching up with GitHub. `close` waits for it.
   const apiSyncing = opts.apiSync === false ? Promise.resolve() : syncApiCopies(projects.list(), openApiDocument(API_DOC_VERSION), (p) => projects.followForPlanning(p));
   const llm = opts.llm ?? {};
-  const model = llm.model ?? "claude-opus-5-5";
   const maxTokens = llm.maxTokens ?? DEFAULT_MAX_TOKENS;
   const effort = llm.effort ?? "high";
   // Every model comes from a provider: one added on the Hub, or the .env's (ANTHROPIC_API_KEY, ASO_LLM_BASE_URL).
   const providers = await Providers.open(conversationDir, process.env);
-  const unusable: string[] = [];
+  const customPrices = await CustomPrices.open(conversationDir);
+  // Without --model: Claude Opus when Anthropic is a provider; otherwise the person chooses one.
+  const model = llm.model || providers.defaultModel();
+  const unusable: string[] = model ? [] : ["no --model given, and no Anthropic provider to default to: choose the Architect's model with --model <provider>/<model> (see aso models)"];
   const adapterFor = (spec: string): LlmAdapter | undefined => {
     try {
       return providers.adapterFor(spec, { maxTokens, effort });
@@ -279,11 +284,11 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       return undefined;
     }
   };
-  const adapter = llm.adapter ?? adapterFor(model);
+  const adapter = llm.adapter ?? (model ? adapterFor(model) : undefined);
   const agentAdapter = llm.agentAdapter ?? (llm.agentModel && llm.agentModel !== model ? adapterFor(llm.agentModel) : undefined);
   setReviewModel(adapter);
   if (adapter && acceptance) log.info(`acceptance check: on (${adapter.model})`);
-  if (!adapter) log.warn(`no LLM configured${unusable.length ? ` (${unusable.join("; ")})` : ""}: add a provider (aso provider add …) or set ANTHROPIC_API_KEY, to let agents work`);
+  if (!adapter) log.warn(`no LLM configured${unusable.length ? ` (${unusable.join("; ")})` : ""}: add a provider (aso provider add …) and restart with --model if it isn't Anthropic, to let agents work`);
   else {
     log.info(`LLM: ${adapter.name} ${adapter.model}${agentAdapter ? ` (Architect); ${agentAdapter.model} (agents)` : ""}`);
     for (const a of [adapter, agentAdapter]) {
@@ -652,6 +657,22 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   });
   // Providers: added with a key (or a local server's address); the API never shows a key.
   app.get("/api/providers", async (c) => c.json(await providers.views()));
+  // Prices: built-in ones and those set here, per model name (a spec's provider is dropped).
+  app.get("/api/prices", (c) => c.json(priceTable()));
+  app.post("/api/prices", async (c) => {
+    const req = await parsed(c, PriceSetBodySchema);
+    if (!req.ok) return c.json({ error: req.error }, 400);
+    const name = providers.modelName(req.data.model);
+    await customPrices.set(name, req.data);
+    return c.json(priceTable().find((p) => p.model === name));
+  });
+  app.post("/api/prices/remove", async (c) => {
+    const req = await parsed(c, PriceRemoveBodySchema);
+    if (!req.ok) return c.json({ error: req.error }, 400);
+    const name = providers.modelName(req.data.model);
+    if (!(await customPrices.remove(name))) return c.json({ error: `no price set for ${name}` }, 404);
+    return c.json(priceTable());
+  });
   app.post("/api/providers", async (c) => {
     const req = await parsed(c, ProviderAddBodySchema);
     if (!req.ok) return c.json({ error: req.error }, 400);

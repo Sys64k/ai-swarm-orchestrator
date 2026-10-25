@@ -1072,7 +1072,7 @@ sequenceDiagram
 
 | Setting | Value | Why |
 |---|---|---|
-| Model | `claude-opus-5-5` (configurable) | Default current Opus; task agents can run on another model (`--agent-model`), the Architect always uses this one |
+| Model | `claude-opus-5-5` (configurable) | Default current Opus when Anthropic is a provider; task agents can run on another model (`--agent-model`), the Architect always uses this one |
 | Transport | `client.beta.messages.stream(...).finalMessage()` | Long agentic turns; streaming avoids HTTP timeouts |
 | `max_tokens` | 32,000 per turn (`DEFAULT_MAX_TOKENS`) | Room for large file writes in one tool call. Agents' instructions name the limit and ask for targeted edits and large files in parts, so answers stay under it |
 | `output_config.effort` | `high` (configurable) | Agentic coding benefits from effort; `medium` is Opus 5.5's default |
@@ -1103,9 +1103,14 @@ asked again), and finish reasons map to the Hub's: `stop` → `end_turn`, `tool_
 `tool_use`, `length` → `max_tokens` (the cut-off handling below applies), `content_filter` →
 `refusal`. HTTP errors: 401/403/404/400 aren't retried; 408, 429 and 5xx are; an
 `insufficient_quota` or credit error pauses model calls like Anthropic's credit error. Cached
-input reported in `prompt_tokens_details` counts as cache reads. Models without a price cost
-$0; prices a provider reports in its model list (OpenRouter's `pricing`) are registered with
-`registerPrices` and used after the built-in table.
+input reported in `prompt_tokens_details` counts as cache reads. The answer limit goes in the
+field the provider's preset names (`maxTokensField`): `max_completion_tokens` for OpenAI, whose
+reasoning models refuse `max_tokens`, and `max_tokens` elsewhere.
+
+Prices (`llm/pricing.ts`) are looked up per model name, in order: prices set on the Hub
+(`llm/custom-prices.ts`, `<state>/prices.json`, `aso price set`), the built-in Claude table, and
+prices a provider reports in its model list (OpenRouter's `pricing`, via `registerPrices`).
+Models with none cost $0, so only the turn limit stops them.
 
 ### Providers (`Providers`)
 
@@ -1128,6 +1133,9 @@ base URL. Added providers are saved with their keys in `<state>/providers.json` 
   `local`'s. `adapterFor(spec)` builds the adapter, or throws naming what's missing.
 - **Local or not:** `ollama` and `custom` providers are local (`isLocal`), which sets the
   default calls at once for their models (below).
+- **The default model:** without `--model`, `defaultModel()` is `claude-opus-5-5` when
+  `anthropic` is a provider; otherwise there is none, and the Hub starts without an Architect
+  and says to give `--model`.
 
 ### A model per desk (`DeskModels`)
 

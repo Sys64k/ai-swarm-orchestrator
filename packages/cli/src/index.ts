@@ -39,6 +39,7 @@ import { startWorkerCommand } from "./commands/start-worker.js";
 import { findHubCommand } from "./commands/find-hub.js";
 import { deskCommand, desksCommand, modelsCommand } from "./commands/models.js";
 import { addProviderCommand, providersCommand, removeProviderCommand } from "./commands/providers.js";
+import { pricesCommand, removePriceCommand, setPriceCommand } from "./commands/prices.js";
 import { updateCommand } from "./commands/update.js";
 import { rollbackUnconfirmed, updatePaths } from "./self-update.js";
 import { userTool } from "./systemd.js";
@@ -142,8 +143,8 @@ function hubOptions(cmd: Command): Command {
       process.env.ASO_ALLOW_DEPS || undefined,
     )
     .option("--console-url <url>", "the console's address, for links from pull requests to their tasks (e.g. QA screenshots)", parseUrl, process.env.ASO_CONSOLE_URL || undefined)
-    .option("--model <id>", "Claude model for the Architect (and agents without --agent-model)", process.env.ASO_MODEL || "claude-opus-5-5")
-    .option("--agent-model <id>", "Claude model for the builder and QA agents (default: --model)", process.env.ASO_AGENT_MODEL || undefined)
+    .option("--model <spec>", "the Architect's model, and agents' without --agent-model: <provider>/<model> (see aso models); default: Claude Opus when Anthropic is a provider", process.env.ASO_MODEL || undefined)
+    .option("--agent-model <spec>", "the builder and QA agents' model (default: --model)", process.env.ASO_AGENT_MODEL || undefined)
     .option("--effort <level>", `model effort: ${EFFORTS.join(", ")}`, parseEffort, (process.env.ASO_EFFORT as Effort) || "high")
     .option("--task-budget <usd>", "estimated LLM spend cap per task", parseUsd, Number(process.env.ASO_TASK_BUDGET) || 5)
     .option("--plan-budget <usd>", "estimated LLM spend cap per planning round", parseUsd, Number(process.env.ASO_PLAN_BUDGET) || 3)
@@ -337,6 +338,25 @@ providerCmd
   .action(removeProviderCommand);
 
 program
+  .command("prices")
+  .description("Model prices (USD per million tokens): the built-in ones and those set on the Hub")
+  .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
+  .action(pricesCommand);
+const priceCmd = program.command("price").description("Set a model's price so task budgets stop it too, or remove one");
+priceCmd
+  .command("set <model>")
+  .description("Set a model's price (<provider>/<model> or its name); cache reads and writes count at the input rate")
+  .requiredOption("--input <usd>", "USD per million input tokens", parseUsd)
+  .requiredOption("--output <usd>", "USD per million output tokens", parseUsd)
+  .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
+  .action(setPriceCommand);
+priceCmd
+  .command("remove <model>")
+  .description("Remove a price set on the Hub")
+  .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
+  .action(removePriceCommand);
+
+program
   .command("models")
   .description("The models desks can use: Claude, and the local server's (ASO_LLM_BASE_URL)")
   .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
@@ -373,7 +393,7 @@ program
 program
   .command("llm-check")
   .description("Send one tiny request to verify ANTHROPIC_API_KEY and model access (costs a fraction of a cent)")
-  .option("--model <id>", "model to check: <provider>/<model> (see aso models), or a Claude id", process.env.ASO_MODEL || "claude-opus-5-5")
+  .option("--model <spec>", "model to check: <provider>/<model> (see aso models); default: Claude Opus when Anthropic is a provider", process.env.ASO_MODEL || undefined)
   .option("-r, --root <dir>", "the Hub's projects folder, whose .aso/providers.json lists the added providers", DEFAULT_ROOT)
   .action(llmCheckCommand);
 

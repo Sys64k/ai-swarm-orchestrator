@@ -13,6 +13,8 @@ const log = createLogger("providers");
 const FILE = "providers.json";
 /** How long a provider's model list is reused. */
 const LIST_TTL_MS = 5 * 60_000;
+/** The Architect's model when none is given and Anthropic is a provider. */
+export const DEFAULT_CLAUDE_MODEL = "claude-opus-5-5";
 /** Claude models offered when Anthropic's list can't be fetched. */
 export const CLAUDE_FALLBACK = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"];
 
@@ -301,6 +303,17 @@ export class Providers {
     return provider ? { provider, parsed } : { error: missingProviderMessage(parsed) };
   }
 
+  /** The Architect's model when none is given: Claude Opus when Anthropic is a provider; otherwise none, and the person chooses. */
+  defaultModel(): string | undefined {
+    return this.get("anthropic") ? DEFAULT_CLAUDE_MODEL : undefined;
+  }
+
+  /** The model name a spec or name refers to (prices are per model name). */
+  modelName(typed: string): string {
+    const parsed = parseSpec(typed, this.list());
+    return "error" in parsed ? typed.trim() : parsed.model;
+  }
+
   /** Whether a spec's model runs on a local server (Ollama, a custom address, the .env's): one GPU, one call at once. */
   isLocal(spec: string): boolean {
     const r = this.resolve(spec);
@@ -315,7 +328,14 @@ export class Providers {
     if (p.kind === "anthropic") return new AnthropicApiAdapter({ model: parsed.model, effort: opts.effort, maxTokens: opts.maxTokens, apiKey: p.key });
     const baseUrl = opts.baseUrl ?? p.baseUrl;
     if (!baseUrl) throw new Error(`${p.label} has no address`);
-    return new OpenAiCompatibleAdapter({ baseUrl, model: parsed.model, apiKey: p.key, maxTokens: opts.maxTokens, vision: opts.vision ?? p.vision ?? false });
+    return new OpenAiCompatibleAdapter({
+      baseUrl,
+      model: parsed.model,
+      apiKey: p.key,
+      maxTokens: opts.maxTokens,
+      maxTokensField: PRESET_INFO[p.preset].maxTokensField,
+      vision: opts.vision ?? p.vision ?? false,
+    });
   }
 }
 

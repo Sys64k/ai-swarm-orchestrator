@@ -129,18 +129,20 @@ export interface PresetInfo {
   local: boolean;
   keyRequired: boolean;
   urlRequired: boolean;
+  /** The request field for the answer's token limit: OpenAI's reasoning models refuse `max_tokens`. */
+  maxTokensField: "max_tokens" | "max_completion_tokens";
 }
 
 /** Everything ASO knows about each provider preset; adding a preset means adding a row. */
 export const PRESET_INFO: Record<ProviderPreset, PresetInfo> = {
-  anthropic: { label: "Anthropic", baseUrl: null, kind: "anthropic", local: false, keyRequired: true, urlRequired: false },
-  openai: { label: "OpenAI", baseUrl: "https://api.openai.com/v1", kind: "openai-compatible", local: false, keyRequired: true, urlRequired: false },
-  openrouter: { label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", kind: "openai-compatible", local: false, keyRequired: true, urlRequired: false },
-  gemini: { label: "Google Gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", kind: "openai-compatible", local: false, keyRequired: true, urlRequired: false },
-  groq: { label: "Groq", baseUrl: "https://api.groq.com/openai/v1", kind: "openai-compatible", local: false, keyRequired: true, urlRequired: false },
-  mistral: { label: "Mistral", baseUrl: "https://api.mistral.ai/v1", kind: "openai-compatible", local: false, keyRequired: true, urlRequired: false },
-  ollama: { label: "Ollama", baseUrl: null, kind: "openai-compatible", local: true, keyRequired: false, urlRequired: true },
-  custom: { label: "Custom", baseUrl: null, kind: "openai-compatible", local: true, keyRequired: false, urlRequired: true },
+  anthropic: { label: "Anthropic", baseUrl: null, kind: "anthropic", local: false, keyRequired: true, urlRequired: false, maxTokensField: "max_tokens" },
+  openai: { label: "OpenAI", baseUrl: "https://api.openai.com/v1", kind: "openai-compatible", local: false, keyRequired: true, urlRequired: false, maxTokensField: "max_completion_tokens" },
+  openrouter: { label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", kind: "openai-compatible", local: false, keyRequired: true, urlRequired: false, maxTokensField: "max_tokens" },
+  gemini: { label: "Google Gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", kind: "openai-compatible", local: false, keyRequired: true, urlRequired: false, maxTokensField: "max_tokens" },
+  groq: { label: "Groq", baseUrl: "https://api.groq.com/openai/v1", kind: "openai-compatible", local: false, keyRequired: true, urlRequired: false, maxTokensField: "max_tokens" },
+  mistral: { label: "Mistral", baseUrl: "https://api.mistral.ai/v1", kind: "openai-compatible", local: false, keyRequired: true, urlRequired: false, maxTokensField: "max_tokens" },
+  ollama: { label: "Ollama", baseUrl: null, kind: "openai-compatible", local: true, keyRequired: false, urlRequired: true, maxTokensField: "max_tokens" },
+  custom: { label: "Custom", baseUrl: null, kind: "openai-compatible", local: true, keyRequired: false, urlRequired: true, maxTokensField: "max_tokens" },
 };
 
 export function isProviderPreset(s: string): s is ProviderPreset {
@@ -174,6 +176,22 @@ export const ProviderViewSchema = z.object({
 });
 export type ProviderView = z.infer<typeof ProviderViewSchema>;
 export const ProviderRemovedSchema = z.object({ removed: z.string().describe("The provider removed; its key is forgotten") });
+
+/** USD per million tokens; cache reads and writes are charged at the input rate for prices set here. */
+export const PriceSetBodySchema = z.strictObject({
+  model: z.string().min(1).max(200).describe("The model: <provider>/<model> or its name; the price applies to that model name"),
+  input: z.number().min(0).max(10_000).describe("USD per million input tokens"),
+  output: z.number().min(0).max(10_000).describe("USD per million output tokens"),
+});
+export const PriceRemoveBodySchema = z.strictObject({ model: z.string().min(1).max(200) });
+export const PriceSchema = z.object({
+  model: z.string(),
+  input: z.number(),
+  output: z.number(),
+  source: z.enum(["built-in", "set"]).describe("set: a price set on this Hub (it wins over the built-in one)"),
+});
+export const PricesSchema = z.array(PriceSchema);
+export type PriceEntry = z.infer<typeof PriceSchema>;
 
 /** A desk: a worker machine's hostname and job slot, e.g. `avalon#1` (the Hub's `deskName` builds these). */
 export const DeskSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}#[1-9][0-9]?$/, "<hostname>#<slot>, e.g. avalon#1");

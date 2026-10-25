@@ -9,6 +9,10 @@ import {
   ProviderAddBodySchema,
   ProviderViewSchema,
   ProviderRemovedSchema,
+  PriceRemoveBodySchema,
+  PriceSetBodySchema,
+  PriceSchema,
+  PricesSchema,
   DesksSchema,
   ModelsSchema,
   DiscoveryProofSchema,
@@ -68,6 +72,8 @@ export const REQUEST_SCHEMAS = {
   DiscoveryProofBody: DiscoveryProofBodySchema,
   DeskAssignment: DeskAssignmentBodySchema,
   ProviderAdd: ProviderAddBodySchema,
+  PriceSet: PriceSetBodySchema,
+  PriceRemove: PriceRemoveBodySchema,
   PushSubscription: PushSubscriptionSchema,
   PushEndpoint: PushEndpointSchema,
   PushTest: PushTestSchema,
@@ -105,6 +111,8 @@ export const ANSWER_SCHEMAS = {
   Desks: DesksSchema,
   Provider: ProviderViewSchema,
   ProviderRemoved: ProviderRemovedSchema,
+  Price: PriceSchema,
+  Prices: PricesSchema,
   SignedIn: SignedInSchema,
 } as const;
 
@@ -267,6 +275,15 @@ const WORKERS: ApiOperation[] = [
   {
     method: "post", path: "/api/providers/{id}/remove", tag: "Workers", summary: "Remove an added provider and forget its key",
     responses: { 200: ok("ProviderRemoved"), 404: err("No such provider"), 409: err("It comes from the Hub's .env") },
+  },
+  { method: "get", path: "/api/prices", tag: "Workers", summary: "Model prices: the built-in ones and those set on this Hub (USD per million tokens)", responses: { 200: ok("Prices") } },
+  {
+    method: "post", path: "/api/prices", tag: "Workers", summary: "Set a model's price, so task budgets stop it too; it wins over a built-in or reported one", body: "PriceSet",
+    responses: { 200: ok("Price"), 400: err("Invalid body") },
+  },
+  {
+    method: "post", path: "/api/prices/remove", tag: "Workers", summary: "Remove a price set on this Hub", body: "PriceRemove",
+    responses: { 200: ok("Prices"), 400: err("Invalid body"), 404: err("No price set for it") },
   },
   { method: "get", path: "/api/desks", tag: "Workers", summary: "Which desks use a model of their own, and each such model's calls at once and load", responses: { 200: ok("Desks") } },
   {

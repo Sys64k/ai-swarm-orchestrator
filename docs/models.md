@@ -30,8 +30,17 @@ aso provider remove openai                 # forgets the key
   stdin when piped), so it doesn't land in your shell history. See
   [SECURITY.md](../SECURITY.md#the-credentials).
 - **Prices:** Claude models are priced from the Hub's table; OpenRouter reports its own prices,
-  which the Hub uses. Other models count tokens and read $0, so task budgets don't stop them
-  (the turn limit does).
+  which the Hub uses. For any other model, set one, so task budgets stop it too (otherwise it
+  reads $0 and only the turn limit does):
+  `aso price set openai/gpt-5 --input 1.25 --output 10` (USD per million tokens; `aso prices`
+  lists them).
+- **The Architect's model:** `--model <provider>/<model>`. Without it, the Hub uses Claude Opus
+  when Anthropic is a provider; with no Anthropic provider, give `--model` (and restart the Hub
+  after adding the provider it names).
+- **One way of calling for all:** every provider but Anthropic is called through the same
+  OpenAI-style Chat Completions API; only the address, key and model name differ. For OpenAI
+  the answer limit is sent as `max_completion_tokens` (its reasoning models refuse
+  `max_tokens`). Models only on OpenAI's newer Responses API aren't supported.
 - **The `.env` still works:** `ANTHROPIC_API_KEY` appears as the provider `anthropic`, and
   `ASO_LLM_BASE_URL` as `local`; older names (`claude-haiku-5-5`, `openai:qwen3-coder:30b`) keep
   working. An added provider with the same name takes over.

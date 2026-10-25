@@ -22,7 +22,8 @@ export {
 } from "./routing.js";
 export { AnthropicApiAdapter, apiErrorText, classify, CREDIT_MESSAGE, LlmError, type Effort, type LlmAdapter, type LlmRequest, type LlmResponse } from "./llm/adapter.js";
 export { ConversationManager, DEFAULT_PLAN_BUDGET_USD, TURN_WARNING, describeCutOff, toolResultBlocks, withCutOffNote, withTurnWarning } from "./llm/conversations.js";
-export { priceUsage } from "./llm/pricing.js";
+export { priceTable, priceUsage } from "./llm/pricing.js";
+export { CustomPrices } from "./llm/custom-prices.js";
 export { architectSystemPrompt, planPrompt, systemPrompt, taskPrompt } from "./llm/prompts.js";
 export { PlanError, PlanManager, type PlanRecord, type PlanState } from "./plans.js";
 export { GitSync, sanitizeUrl, type SyncStatus } from "./git/sync.js";
@@ -43,7 +44,7 @@ export { notableChanges, type ProjectState, type PushNotification } from "./push
 export { encryptPayload, generateVapidKeys, sendPush, vapidAuthorization, MAX_PAYLOAD_BYTES, type PushResult, type VapidKeys } from "./push/web-push.js";
 export { hubUpdateNotification } from "./hub-update.js";
 export { apiChanges, apiFileContents, apiHash, API_COPY_PATH, syncApiCopies, syncTaskId, syncTaskSpec, type ApiChanges } from "./api-sync.js";
-export { OpenAiCompatibleAdapter, OPENAI_PREFIX, accumulateChunks, classifyHttp, fromChatAnswer, openAiCompatibleFor, sseData, toChatMessages, toChatTools, type ChatAnswer, type ChatMessage } from "./llm/openai-compatible.js";
+export { OpenAiCompatibleAdapter, OPENAI_PREFIX, accumulateChunks, classifyHttp, fromChatAnswer, sseData, toChatMessages, toChatTools, type ChatAnswer, type ChatMessage } from "./llm/openai-compatible.js";
 export { deskName, DeskModels, desksOf, modelConcurrency, type ModelSettings, type Route } from "./llm/desk-models.js";
-export { CLAUDE_FALLBACK, environmentProviders, fetchModels, parseModelList, parseSpec, providerView, Providers, resolveModel, type Provider, type ProviderInput, type ProviderStatus } from "./llm/providers.js";
+export { CLAUDE_FALLBACK, DEFAULT_CLAUDE_MODEL, environmentProviders, fetchModels, parseModelList, parseSpec, providerView, Providers, resolveModel, type Provider, type ProviderInput, type ProviderStatus } from "./llm/providers.js";
 export { ACCEPTANCE_DIFF_LIMIT, AcceptanceChecker, acceptanceCounts, acceptancePrompt, diffText, readVerdict, unmetReason, type AcceptanceVerdict, type CriterionVerdict } from "./llm/acceptance.js";

@@ -18,6 +18,8 @@ export interface OpenAiCompatibleOptions {
   /** Sent as a Bearer token; local servers usually need none. */
   apiKey?: string;
   maxTokens: number;
+  /** The request field for `maxTokens` (default `max_tokens`; OpenAI's reasoning models need `max_completion_tokens`). */
+  maxTokensField?: "max_tokens" | "max_completion_tokens";
   /** Whether the model accepts images; without it, view_image results reach it as text only. */
   vision?: boolean;
   /** How long one answer may take. Local models on a CPU can be slow. */
@@ -226,7 +228,7 @@ export class OpenAiCompatibleAdapter implements LlmAdapter {
           model: this.model,
           messages: toChatMessages(req.system, req.messages, { vision: this.opts.vision ?? false }),
           tools: toChatTools(req.tools),
-          max_tokens: this.opts.maxTokens,
+          [this.opts.maxTokensField ?? "max_tokens"]: this.opts.maxTokens,
           // Streamed, so a slow answer keeps the connection alive past HTTP timeouts.
           stream: true,
           stream_options: { include_usage: true },
@@ -241,25 +243,4 @@ export class OpenAiCompatibleAdapter implements LlmAdapter {
     if (!res.ok) throw classifyHttp(res.status, body);
     return fromChatAnswer(accumulateChunks(sseData(body)), this.model);
   }
-}
-
-/** Settings for OpenAI-compatible models, from the Hub's environment. */
-export interface OpenAiCompatibleEnv {
-  ASO_LLM_BASE_URL?: string;
-  ASO_LLM_API_KEY?: string;
-  /** `1`: the model accepts images (view_image). */
-  ASO_LLM_VISION?: string;
-}
-
-/**
- * The adapter for an `openai:<model>` spec, or undefined for any other spec (a Claude model).
- * Throws when the spec asks for an OpenAI-compatible model but no base URL is set.
- */
-export function openAiCompatibleFor(spec: string, env: OpenAiCompatibleEnv, maxTokens: number): OpenAiCompatibleAdapter | undefined {
-  if (!spec.startsWith(OPENAI_PREFIX)) return undefined;
-  const model = spec.slice(OPENAI_PREFIX.length);
-  if (!model) throw new Error(`"${spec}" names no model: use openai:<model>, e.g. openai:qwen3-coder:30b`);
-  const baseUrl = env.ASO_LLM_BASE_URL?.trim();
-  if (!baseUrl) throw new Error(`${spec} needs ASO_LLM_BASE_URL, the OpenAI-compatible API's root (e.g. http://avalon:11434/v1 for Ollama)`);
-  return new OpenAiCompatibleAdapter({ baseUrl, model, apiKey: env.ASO_LLM_API_KEY || undefined, maxTokens, vision: env.ASO_LLM_VISION === "1" });
 }
