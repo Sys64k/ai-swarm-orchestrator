@@ -1,4 +1,6 @@
-import type { CheckState, DeployStatus, DiffFile, HubNode, HubUpdate, WorkerKey, Plan, PlannedTask, Project, ReviewChecks, Task, TaskDiff, TaskState, TranscriptEntry } from "./types.ts";
+import type {
+  Desks,
+  Models, CheckState, DeployStatus, DiffFile, HubNode, HubUpdate, WorkerKey, Plan, PlannedTask, Project, ReviewChecks, Task, TaskDiff, TaskState, TranscriptEntry } from "./types.ts";
 
 /** Colour family of a state badge. */
 export type Tone = "active" | "waiting" | "good" | "bad" | "muted";
@@ -328,6 +330,43 @@ export function agentRows(node: HubNode, tasks: readonly Task[]): AgentRow[] {
       ...(worked ? { last: { taskId: worked.t.spec.taskId, title: worked.t.spec.title, job: worked.m.job, badge: taskBadge(worked.t) } } : {}),
     };
   });
+}
+
+export interface DeskModelChoice {
+  /** What `POST /api/desks` takes: a listed model's name, an `openai:` spec, or `default`. */
+  value: string;
+  label: string;
+}
+
+/** The name a desk's model is chosen by: the listed name (`qwen3-coder:30b`), else its spec. */
+function choiceValue(spec: string, models: Pick<Models, "available">): string {
+  return models.available.find((m) => m.spec === spec)?.model ?? spec;
+}
+
+/**
+ * The models a desk can be put on: the default first, then Claude, then local models, then any
+ * model a desk already uses that the Hub no longer lists (so the picker still shows it).
+ */
+export function deskModelChoices(models: Models, desks?: Pick<Desks, "desks">): DeskModelChoice[] {
+  const choices: DeskModelChoice[] = [{ value: "default", label: `Default (${models.defaultAgent ?? "none"})` }];
+  for (const m of models.available) choices.push({ value: m.model, label: m.provider === "anthropic" ? m.model : `${m.model} (local)` });
+  for (const { model } of desks?.desks ?? []) {
+    const value = choiceValue(model, models);
+    if (!choices.some((c) => c.value === value)) choices.push({ value, label: `${value} (not listed)` });
+  }
+  return choices;
+}
+
+/** A desk's current choice: `default`, or the name its model is chosen by. */
+export function deskModelOf(desks: Pick<Desks, "desks"> | undefined, models: Pick<Models, "available">, host: string, slot: number): string {
+  const spec = desks?.desks.find((d) => d.desk === `${host}#${slot}`)?.model;
+  return spec ? choiceValue(spec, models) : "default";
+}
+
+/** The machine-wide choice: the model every desk shares, or undefined when they differ. */
+export function machineModelOf(desks: Pick<Desks, "desks"> | undefined, models: Pick<Models, "available">, host: string, slots: number): string | undefined {
+  const each = new Set(Array.from({ length: slots }, (_, i) => deskModelOf(desks, models, host, i + 1)));
+  return each.size === 1 ? [...each][0] : undefined;
 }
 
 /**
