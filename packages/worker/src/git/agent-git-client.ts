@@ -7,12 +7,11 @@ import {
   CommitShaSchema,
   TaskIdSchema,
   createLogger,
+  gitHeaderConfigFile,
   isProtectedPath,
   taskBranchName,
   type TaskId,
 } from "@aso/shared";
-
-import { authConfigFile } from "./auth-config.js";
 
 const log = createLogger("git");
 
@@ -52,18 +51,18 @@ export interface AgentGitClientOptions {
   author?: { name: string; email: string };
   /**
    * ASO token for the Hub's Git endpoint; sent as a header per command from an owner-only
-   * config file (`authConfigFile`), never stored in .git/config or shown in the process list.
+   * config file (`gitHeaderConfigFile`), never stored in .git/config or shown in the process list.
    */
   token?: string;
 }
 
-/** simple-git refuses `include.path` by default; ours only ever names the file `authConfigFile` wrote. */
+/** simple-git refuses `include.path` by default; ours only ever names the file `gitHeaderConfigFile` wrote. */
 const UNSAFE = { allowUnsafeInclude: true };
 
 function gitConfig(opts: AgentGitClientOptions): string[] {
   const author = opts.author ?? { name: "ASO Agent", email: "aso-agent@localhost" };
   const config = [`user.name=${author.name}`, `user.email=${author.email}`];
-  if (opts.token) config.push(`include.path=${authConfigFile(opts.token)}`);
+  if (opts.token) config.push(`include.path=${gitHeaderConfigFile(`Authorization: Bearer ${opts.token}`)}`);
   return config;
 }
 

@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { describe, it } from "node:test";
 import { checkPushPolicy, parseReceivePackCommands } from "@aso/hub";
+import { gitBasicAuthConfig } from "@aso/shared";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { TOKEN, git, gitAsync, pushTaskBranch, tempDir, withHub, writeFiles } from "./helpers.ts";
 
 const A = "a".repeat(40);
@@ -47,6 +50,17 @@ describe("receive-pack policy", () => {
 });
 
 describe("Hub git endpoint", () => {
+  it("authenticates with a token from a config file, not the command line (as the Hub reaches GitHub)", () =>
+    withHub(async (ctx) => {
+      const url = `http://127.0.0.1:${ctx.port}/git/project.git`;
+      const lsRemote = (config: string[]) =>
+        promisify(execFile)("git", [...config, "ls-remote", "--heads", url], { env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
+      const entry = gitBasicAuthConfig(url, TOKEN)!;
+      assert.match((await lsRemote(["-c", entry])).stdout, /refs\/heads\/main/);
+      await assert.rejects(lsRemote([]), "the endpoint needs the token");
+      await assert.rejects(lsRemote(["-c", gitBasicAuthConfig(url, "wrong-token")!]));
+    }));
+
   it("serves clones and accepts task branch pushes", () =>
     withHub(async ({ gitUrl, repoDir }) => {
       const commit = await pushTaskBranch(gitUrl, "feat-1", { "src/a.ts": "export {};\n" });

@@ -1562,15 +1562,16 @@ The core works without any separate UI: both are in the console and the CLI.
   `checkHub` (the CLI's `checkTransport`) before each attempt when `--hub` was given, because a
   name can resolve to another address later. A refusal is logged and retried with the usual
   back-off. Discovered addresses are private by construction.
-- **The credential stays out of the process list.** `AgentGitClient` passes git
-  `-c include.path=<file>` instead of `-c http.extraHeader=...`: `authConfigFile`
-  (`worker/src/git/auth-config.ts`) writes the header into an owner-only file in a private
-  folder (mode 700) under the temp directory, removed when the process exits (a killed process
-  leaves it, still owner-only). The value is quoted, and a token with a control character is
-  refused. The Architect's checkout uses the same client.
+- **Credentials stay out of the process list.** Git gets them as `-c include.path=<file>`
+  instead of `-c http.extraHeader=...`: `gitHeaderConfigFile` (`shared/src/git-auth.ts`) writes
+  the header into an owner-only file in a private folder (mode 700) under the temp directory,
+  removed when the process exits (a killed process leaves it, still owner-only). Values are
+  quoted, and a credential with a control character is refused. Workers and the Architect
+  (`AgentGitClient`) send their key to every remote; the Hub sends its GitHub token
+  (`gitBasicAuthConfig`, in `GitSync` and when connecting a project to GitHub) only to the
+  remote's host, through an `[http "<origin>/"]` section.
 - **Known limits.** `100.64.0.0/10` counts as private for Tailscale, but carrier-grade NAT uses it
-  too. The Hub's own push to GitHub still passes its GitHub token as `-c http.extraHeader` on the
-  Hub's machine. With `--sandbox none`, job commands run as the worker's user and can read the
+  too. With `--sandbox none`, job commands run as the worker's user and can read the
   credential file, as they could read the key before.
 - **Transport.** Workers dial out, so their location doesn't matter. `checkTransport`
   (`cli/src/join.ts`) refuses plain `ws://` when the Hub's address resolves to a public IP

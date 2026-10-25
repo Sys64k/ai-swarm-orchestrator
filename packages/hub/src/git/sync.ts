@@ -1,5 +1,5 @@
 import { simpleGit, type SimpleGit } from "simple-git";
-import { createLogger } from "@aso/shared";
+import { createLogger, gitBasicAuthConfig } from "@aso/shared";
 import type { HubRepository } from "./hub-repo.js";
 
 const log = createLogger("sync");
@@ -177,14 +177,11 @@ export class GitSync {
   }
 
   private async client(): Promise<SimpleGit> {
-    const config: string[] = [];
     const url = (await simpleGit(this.repo.dir).raw(["remote", "get-url", this.remote])).trim();
-    if (this.opts.token && /^https?:\/\//.test(url)) {
-      const { origin } = new URL(url);
-      const basic = Buffer.from(`x-access-token:${this.opts.token}`).toString("base64");
-      config.push(`http.${origin}/.extraHeader=Authorization: Basic ${basic}`);
-    }
-    return simpleGit({ baseDir: this.repo.dir, config });
+    // The token from an owner-only file, scoped to the remote's host: never in .git/config or the process list.
+    const auth = this.opts.token ? gitBasicAuthConfig(url, this.opts.token) : undefined;
+    const config = auth ? [auth] : [];
+    return simpleGit({ baseDir: this.repo.dir, config, unsafe: { allowUnsafeInclude: true } });
   }
 }
 
