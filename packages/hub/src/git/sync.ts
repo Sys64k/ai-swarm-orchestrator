@@ -88,8 +88,11 @@ export class GitSync {
     return this.running;
   }
 
-  stop(): void {
+  /** Stop retrying, and let a push already under way finish (a shutdown shouldn't cut it off). */
+  async stop(): Promise<void> {
     clearTimeout(this.retryTimer);
+    this.again = false;
+    await this.running?.catch(() => undefined);
   }
 
   /** The remote's URL (with any credentials), or undefined when it has none. */

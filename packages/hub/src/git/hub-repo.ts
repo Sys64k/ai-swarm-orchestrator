@@ -153,7 +153,38 @@ export class HubRepository {
     }
   }
 
-  /** Remove a task's branch (e.g. one seeded for a task that couldn't be queued). */
+  /** The task branches: task id → the commit its branch points at. */
+  async taskBranches(): Promise<Map<string, string>> {
+    const out = await this.git.raw(["for-each-ref", "--format=%(refname:strip=3) %(objectname)", "refs/heads/task/"]);
+    return new Map(out.split("\n").filter(Boolean).map((line) => line.split(" ") as [string, string]));
+  }
+
+  /** Whether `commit` is already part of main. */
+  async isInMain(commit: string): Promise<boolean> {
+    return this.git.raw(["merge-base", "--is-ancestor", commit, this.mainBranch]).then(
+      () => true,
+      () => false,
+    );
+  }
+
+  /**
+   * Remove a merged task's branch, if it still points at `commit` (a branch someone moved since
+   * stays). Under the main lock, so it never runs at the same time as a merge.
+   */
+  forgetMergedBranch(taskId: TaskId, commit?: string): Promise<void> {
+    const ref = `refs/heads/${taskBranchName(taskId)}`;
+    return this.withMainLock(() => this.deleteBranchAt(taskId, commit));
+  }
+
+  /** Delete `task/<id>` if it exists (and, with `commit`, still points there); no git command fails. */
+  private async deleteBranchAt(taskId: TaskId, commit?: string): Promise<void> {
+    const ref = `refs/heads/${taskBranchName(taskId)}`;
+    const head = await this.resolve(ref);
+    if (!head || (commit && head !== commit)) return;
+    await this.git.raw(["update-ref", "-d", ref, head]).catch(() => undefined);
+  }
+
+  /** Remove a task's branch (one seeded for a task that couldn't be queued). */
   async deleteTaskBranch(taskId: TaskId): Promise<void> {
     await this.git.raw(["update-ref", "-d", `refs/heads/${taskBranchName(taskId)}`]).catch(() => undefined);
   }
@@ -181,6 +212,8 @@ export class HubRepository {
       }
       const mainCommit = await this.mainHead();
       log.info(`merged ${taskBranchName(taskId)} into ${this.mainBranch} @ ${mainCommit.slice(0, 8)}`);
+      // Its commits are in main now (a merge commit keeps them reachable): the branch only clutters.
+      await this.deleteBranchAt(taskId, commit);
       return { ok: true, mainCommit };
     });
   }
