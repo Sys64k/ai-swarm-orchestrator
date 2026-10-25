@@ -66,7 +66,7 @@ There are two layers on a worker:
 - **Everything a job runs goes into a throwaway container**: the agent's commands, `npm ci`
   with its install scripts, builds and QA tests. That container sees only the task's
   checkout, so an agent can't reach the rest of the machine. See
-  [Security notes](#security-notes); `--sandbox none` turns this off.
+  [SECURITY.md](SECURITY.md#agents-and-their-code); `--sandbox none` turns this off.
 
 Workers need no LLM credentials and no manual copy of the project. They clone it from the Hub
 automatically into `~/.aso/work/project`. Every model call goes through the Hub, which holds
@@ -258,7 +258,7 @@ Workers need **Docker**, usable by the worker's user (in the `docker` group). Ev
 job runs goes into a throwaway container: agent commands, `npm ci` with its install scripts,
 and QA tests. That container sees only the task checkout. The first start builds the sandbox
 image, which is about 2 GB: Node plus the libraries headless Chromium needs. See
-[Security notes](#security-notes). Without Docker, `--sandbox none` runs those commands
+[SECURITY.md](SECURITY.md#agents-and-their-code). Without Docker, `--sandbox none` runs those commands
 directly on the machine instead.
 
 #### Keep a worker running (systemd)
@@ -1115,72 +1115,17 @@ For the scoring formula, see [ARCHITECTURE.md](ARCHITECTURE.md#6-hardware-aware-
 
 ## Security notes
 
-- **Token authentication.** Every node, CLI call, Git operation and dashboard visit needs the
-  ASO token. Tokens are compared in constant time.
-- **Worker keys.** Each worker machine can have its own key (`--join`), which only allows worker
-  work (the worker connection and Git) and can be revoked on its own. The Hub's main token is for
-  you, the CLI and the console. See [Worker machines](#worker-machines). Which credential
-  registered each worker is saved, so after a Hub restart no other credential can claim a
-  worker's held jobs. Workers pass their key to `git` through an owner-only file, so other users
-  on the machine can't read it in the process list.
-- **LAN discovery.** A worker without `--hub` connects only to an answer proven with its own
-  key (or join code) and sent from an address the proof covers, so an impostor on the LAN can't
-  draw its key out. The query names the key by a hash, never the key. The Hub's machine answers at
-  most 30 queries per 10 s, and stays silent for a key it doesn't know. Plain HTTP (below) still
-  applies once connected.
-- **Plain HTTP.** Traffic is unencrypted, so anyone able to sniff your LAN could read the
-  token and code. Use a trusted network, or put the Hub behind a TLS reverse proxy or VPN
-  (e.g. WireGuard/Tailscale) if the LAN isn't trusted. Workers refuse plain `ws://` to a public
-  address (`--allow-insecure` overrides).
-- **Rotating the token.** Delete `~/.config/aso/token`, restart the Hub, and update `ASO_TOKEN`
-  on the workers.
-- **Push restrictions.** The Git endpoint refuses pushes to `main`, tags, deletions, and
-  anything outside `refs/heads/task/<id>`. Only the Hub writes `main`.
-- **Deploy commands run on the Hub machine.** Only the operator sets them, in
-  `<projects root>/.aso/deploy.json`, never a project's repository, which agents change. The code
-  they build is the agents' merged work, so it runs after your review when pull requests are on.
-  A deploy sees a reduced environment without the Hub's tokens. Prefer commands that build in
-  containers (`docker build`) over running project scripts directly on the host.
-- **Checks on both sides.** Workers' `AgentGitClient` refuses to commit `package.json` or
-  lockfiles. The Hub checks again before QA, so a misbehaving worker can't get around it.
-- **Dependency installs.** On the Hub they never execute package code
-  (`--package-lock-only --ignore-scripts`). Agents can still choose *which* packages get added,
-  and workers run their install scripts during `npm ci`. Use `--allow-deps` if you want to
-  control that.
-- **Message validation.** All WebSocket traffic is validated against strict Zod schemas:
-  - Unknown fields are rejected.
-  - Paths can't escape the repository.
-  - Dependency requests accept only registry package names and semver ranges.
-  - Nodes can't supply their own system prompts.
-- **Test commands.** QA commands come from the Hub's configuration, never from workers. They
-  run without a shell, in their own process group, with a timeout.
-- **Job sandbox.** Every command a job runs gets a throwaway Docker container. This covers
-  agent `run_command`, `npm ci` and its install scripts, and QA setup and tests. The container:
-  - sees only the task checkout, with `.git` read-only, so it can't plant hooks or config that
-    the worker's own git would run on the host
-  - sees a shared npm/browser cache, but not the home directory, SSH keys or the ASO token
-  - gets none of the worker's environment variables
-  - runs as the worker's user, with no capabilities, no privilege escalation, a read-only
-    root filesystem and a process limit
+[SECURITY.md](SECURITY.md) covers the credentials (the Hub token, worker keys, join and sign-in
+codes, the GitHub and Anthropic keys), what each machine holds, how to revoke and rotate them, what
+contains a misbehaving agent, and the known limits. In short:
 
-  It does have network access by default (`bridge`), which npm and browser downloads need.
-  That means it can reach your LAN, though not the Hub's API or Git without the token. It
-  also can't use Docker, so DevOps agents can write Dockerfiles but can't build them on a
-  worker. `--sandbox none` turns all of this off.
-- **Agent tools are guardrails.** On top of the sandbox, the worker's tools catch a
-  cooperative model's mistakes:
-  - paths are confined to the checkout, including through symlinks
-  - protected files are refused
-  - `git`, shells, `sudo` and package installs are blocked in `run_command`
+- **The Hub token stays on the Hub machine.** Workers have their own revocable keys, browsers
+  sign in with one-time codes, and model calls go through the Hub.
+- **Every job command runs in a throwaway Docker container** that sees only its checkout.
+- **Only the Hub writes `main`,** and with pull requests on, only after you approve.
+- **Traffic is plain HTTP on the LAN:** use Tailscale or a TLS proxy if the network isn't trusted.
 
-  These checks go by program name, so they aren't a boundary on their own: `node -e` can start
-  anything. What contains a misbehaving agent is the sandbox. What protects `main` is the Hub
-  (push policy, protected-file verification, QA).
-- **GitHub token.** `ASO_GIT_TOKEN` should be a fine-grained token limited to the one
-  repository, with only *Contents* and *Pull requests* write access. Remote URLs are shown with credentials stripped.
-- **API key.** It lives only on the Hub. With `--docker` it is passed into the container
-  through the environment, so anyone who can run `docker inspect` on the Hub machine can read
-  it.
+Report vulnerabilities privately (see [SECURITY.md](SECURITY.md#reporting-a-vulnerability)).
 
 ## Development
 
