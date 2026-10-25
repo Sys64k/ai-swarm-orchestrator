@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { createLogger, gitBasicAuthConfig, ProjectIdSchema, type LlmUsage } from "@aso/shared";
 import { DependencyManager, type DependencyManagerOptions } from "./dependencies.js";
 import { GitHubApi, GitHubError, parseGitHubRepo, type RepoSlug } from "./git/github.js";
+import { pruneMergedTaskBranches } from "./git/task-branches.js";
 import { HubRepository } from "./git/hub-repo.js";
 import { PullRequests, type PullRequestOptions, type PullRequestStatus } from "./git/pull-requests.js";
 import { GitSync } from "./git/sync.js";
@@ -337,8 +338,10 @@ export class ProjectSet {
   async close(): Promise<void> {
     for (const state of this.follows.values()) clearInterval(state.timer);
     for (const p of this.list()) {
-      p.sync.stop();
       this.reviewers.get(p.id)?.stopPolling();
+      await p.sync.stop();
+      // Git work already queued on main (a merge, a branch deletion) finishes before the Hub goes.
+      await p.repo.withMainLock(async () => undefined);
       await p.store?.close();
       await p.transcripts.close();
       await p.screenshots.flush();
@@ -375,6 +378,10 @@ export class ProjectSet {
       onDispatchNeeded: () => this.dispatchAll(),
       isIdTaken: (taskId) => !!this.taskOwner(taskId),
       onMerged: (task) => {
+        // A pull request merged on GitHub; the Hub's own merges remove the branch themselves.
+        if (task.review?.pr) {
+          repo.forgetMergedBranch(task.spec.taskId, task.commit).catch((err: Error) => log.debug(`could not delete ${task.spec.taskId}'s branch: ${err.message}`));
+        }
         this.opts.onMerged?.(project);
         if (!sync.status().enabled) return;
         unpushed.add(task.spec.taskId);
@@ -404,6 +411,10 @@ export class ProjectSet {
       project.tasks.restore(saved.tasks);
       project.plans.restore(saved.plans);
     }
+    // Branches left from before merged tasks' branches were deleted, or from a crash in between.
+    void pruneMergedTaskBranches(repo, (taskId) => project.tasks.get(taskId)?.state).catch((err: Error) =>
+      log.warn(`project ${id}: could not clean up merged task branches: ${err.message}`),
+    );
     if (gate) {
       this.reviewers.set(id, gate);
       gate.startPolling(project.tasks);

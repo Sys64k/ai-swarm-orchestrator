@@ -711,6 +711,20 @@ lock it shares with dependency installs:
 | Conflict with `main` | `merge --abort`, checkout left clean → rework round asking the worker to rebase |
 | Checkout dirty or on another branch | `failed: merge blocked` (an operator problem, not a code problem) |
 
+**After a merge** the task's branch is deleted: its commits stay reachable from `main` through
+the merge commit, so only the name goes. The Hub's own merge deletes `task/<id>` inside the same
+`main` lock; a pull request merged on GitHub (or from the console) deletes it from the
+`onMerged` hook, also under the lock. Either way only a branch still pointing at the merged
+commit is deleted, and failed or cancelled tasks keep theirs (their unfinished work is there).
+When a project opens, `pruneMergedTaskBranches` removes leftovers: branches of merged tasks, and
+branches no task owns whose tip is already in `main`. The GitHub copies of pull-request
+branches are GitHub's to delete: turn on *Automatically delete head branches* in the
+repository's settings.
+
+**Shutting down** waits for Git work already under way: a push to `origin` in progress finishes
+(`GitSync.stop()`), and so does anything queued on the `main` lock (a merge, a branch deletion),
+so a restart never cuts one off halfway.
+
 ### Worker side: `AgentGitClient`
 
 Agents cannot run `git`. The worker wraps `simple-git`.

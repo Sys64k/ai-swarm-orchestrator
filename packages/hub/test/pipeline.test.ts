@@ -55,6 +55,8 @@ describe("QA pipeline (fake nodes)", () => {
       assert.equal(git(ctx.repoDir, "show", "main:greeting.txt"), "hello");
       assert.equal(git(ctx.repoDir, "log", "-1", "--format=%s|%an", "main"), "Merge task/greet: Task greet|ASO Hub");
       assert.equal(git(ctx.repoDir, "status", "--porcelain"), "");
+      await waitFor(() => git(ctx.repoDir, "branch", "--list", "task/greet") === "" || undefined);
+      assert.equal(git(ctx.repoDir, "merge-base", "--is-ancestor", commit, "main"), "", "the task's commit stays reachable from main");
       dev.ws.close();
       qa.ws.close();
     }));
@@ -220,7 +222,9 @@ describe("QA pipeline (fake nodes)", () => {
       assert.match(pullRequestBody(record, "https://hub.example.ts.net/"), /\[see them in the ASO console\]\(https:\/\/hub\.example\.ts\.net\/tasks\/shots\)/);
 
       // A later passing run without screenshots: the old ones would show the wrong commit.
-      // (Set up by hand: the first run merged the task, and no review gate sends it back.)
+      // (Set up by hand: the first run merged the task, and no review gate sends it back.) The
+      // first merge must be done, or its "merged" would end the wait below before the second's.
+      await waitFor(() => ctx.hub.tasks.get("shots")?.state === "merged" || undefined);
       Object.assign(ctx.hub.tasks.get("shots")!, { state: "testing", qaNodeId: "qa" });
       assert.equal(ctx.hub.projects.taskOwner("shots")!.tasks.handleFeedback("qa", { taskId: "shots", commit, outcome: "pass", summary: "ok" }), undefined);
       assert.equal(ctx.hub.tasks.get("shots")!.screenshots, undefined);
