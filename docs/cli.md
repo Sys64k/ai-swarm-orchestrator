@@ -94,8 +94,9 @@ while no Architect is connected.
 
 Sends two tiny requests: a one-word reply (the key, model access and credit balance), then a
 tool call, which agents can't work without. Prints the reply, the tokens used and the estimated
-cost (a fraction of a cent). `--model <id>` checks a different model, also an
-`openai:<model>` one (see [Other models](models.md#other-models-openai-compatible-apis)).
+cost (a fraction of a cent). `--model <spec>` checks a different model from any
+[provider](models.md#providers) (`openai/gpt-5`, `ollama/qwen3-coder:30b`); `--root` points at
+the Hub's projects folder when it isn't the default.
 
 ## `aso token`
 
@@ -135,9 +136,18 @@ machine reaches it, for downloading the package and for joining from another net
 this machine's hostname, which on Tailscale is its tailnet name). `--name` labels the key. `aso worker-keys` lists the
 keys, and `revoke` shuts a machine out.
 
+## `aso providers`, `aso provider add|remove`
+
+`aso providers` lists the model providers (added ones and the `.env`'s) and how many models
+each lists. `aso provider add <preset>` adds one: `anthropic`, `openai`, `openrouter`,
+`gemini`, `groq`, `mistral` (they ask for the key at a hidden prompt, or read it from stdin;
+`--key` works but lands in your shell history), or `ollama` / `custom` with `--url`. `--name`
+gives a second one of a kind its own name; `--vision` marks models that accept images.
+`aso provider remove <id>` forgets it and its key. See [Providers](models.md#providers).
+
 ## `aso models`, `aso desks`, `aso desk`
 
-`aso models` lists the models desks can use (Claude, and the local server's). `aso desks` shows
+`aso models` lists the models desks can use, from every provider. `aso desks` shows
 each desk with a model of its own, and each such model's calls at once and load.
 `aso desk <host>#<slot>|<host> <model|default>` puts a desk, or every desk of a connected
 machine, on a model (`--concurrency`, `--base-url`, `--vision`). See

@@ -2701,14 +2701,23 @@
                 },
                 "spec": {
                   "type": "string",
-                  "description": "How the Hub calls it: a Claude id, or openai:<name>"
+                  "description": "How the Hub calls it: <provider>/<model>"
                 },
                 "provider": {
                   "type": "string",
                   "enum": [
                     "anthropic",
                     "openai-compatible"
-                  ]
+                  ],
+                  "description": "The kind of API"
+                },
+                "providerId": {
+                  "description": "The provider on the Hub that offers it",
+                  "type": "string"
+                },
+                "providerLabel": {
+                  "description": "The provider's name to show, e.g. OpenAI or Ollama (avalon:11434)",
+                  "type": "string"
                 },
                 "baseUrl": {
                   "description": "The OpenAI-compatible server it runs on",
@@ -2815,6 +2824,87 @@
           "defaultAgent",
           "desks",
           "models"
+        ],
+        "additionalProperties": false
+      },
+      "Provider": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "preset": {
+            "type": "string",
+            "enum": [
+              "anthropic",
+              "openai",
+              "openrouter",
+              "gemini",
+              "groq",
+              "mistral",
+              "ollama",
+              "custom"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "anthropic",
+              "openai-compatible"
+            ]
+          },
+          "label": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "added",
+              "environment"
+            ],
+            "description": "environment: from the Hub's .env (ANTHROPIC_API_KEY, ASO_LLM_BASE_URL); remove it there"
+          },
+          "hasKey": {
+            "type": "boolean",
+            "description": "Whether it has a key (the key itself is never shown)"
+          },
+          "baseUrl": {
+            "type": "string"
+          },
+          "vision": {
+            "type": "boolean"
+          },
+          "models": {
+            "description": "Models in its list",
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "error": {
+            "description": "Why its model list couldn't be fetched",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "preset",
+          "kind",
+          "label",
+          "source",
+          "hasKey"
+        ],
+        "additionalProperties": false
+      },
+      "ProviderRemoved": {
+        "type": "object",
+        "properties": {
+          "removed": {
+            "type": "string",
+            "description": "The provider removed; its key is forgotten"
+          }
+        },
+        "required": [
+          "removed"
         ],
         "additionalProperties": false
       },
@@ -3145,6 +3235,50 @@
         "required": [
           "target",
           "model"
+        ],
+        "additionalProperties": false
+      },
+      "ProviderAdd": {
+        "type": "object",
+        "properties": {
+          "preset": {
+            "type": "string",
+            "enum": [
+              "anthropic",
+              "openai",
+              "openrouter",
+              "gemini",
+              "groq",
+              "mistral",
+              "ollama",
+              "custom"
+            ],
+            "description": "Which provider; known ones know their own address"
+          },
+          "id": {
+            "description": "Its name on the Hub (default: the preset's), e.g. ollama-avalon for a second Ollama",
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._-]{0,39}$"
+          },
+          "key": {
+            "description": "The API key; stored on the Hub, never shown again",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "baseUrl": {
+            "description": "The API's root, for ollama and custom (e.g. http://avalon:11434/v1)",
+            "type": "string",
+            "maxLength": 500,
+            "format": "uri"
+          },
+          "vision": {
+            "description": "Its models accept images (OpenAI-compatible)",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "preset"
         ],
         "additionalProperties": false
       },
@@ -5271,6 +5405,129 @@
           },
           "401": {
             "description": "Missing or wrong token"
+          }
+        }
+      }
+    },
+    "/api/providers": {
+      "get": {
+        "operationId": "getProviders",
+        "tags": [
+          "Workers"
+        ],
+        "summary": "The model providers (added ones and the .env's), with how many models each lists; never a key",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Provider"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postProviders",
+        "tags": [
+          "Workers"
+        ],
+        "summary": "Add (or replace) a provider with its key or address; its model list is fetched first, so a wrong key is refused",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderAdd"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Added",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Provider"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body, or the provider refused the key or can't be reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          }
+        }
+      }
+    },
+    "/api/providers/{id}/remove": {
+      "post": {
+        "operationId": "postProviderRemove",
+        "tags": [
+          "Workers"
+        ],
+        "summary": "Remove an added provider and forget its key",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderRemoved"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "No such provider",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "It comes from the Hub's .env",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         }
       }

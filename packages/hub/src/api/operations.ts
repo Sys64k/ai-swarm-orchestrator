@@ -6,6 +6,9 @@ import {
   CreateTaskBodySchema,
   DiscoveryProofBodySchema,
   DeskAssignmentBodySchema,
+  ProviderAddBodySchema,
+  ProviderViewSchema,
+  ProviderRemovedSchema,
   DesksSchema,
   ModelsSchema,
   DiscoveryProofSchema,
@@ -64,6 +67,7 @@ export const REQUEST_SCHEMAS = {
   Join: JoinBodySchema,
   DiscoveryProofBody: DiscoveryProofBodySchema,
   DeskAssignment: DeskAssignmentBodySchema,
+  ProviderAdd: ProviderAddBodySchema,
   PushSubscription: PushSubscriptionSchema,
   PushEndpoint: PushEndpointSchema,
   PushTest: PushTestSchema,
@@ -99,6 +103,8 @@ export const ANSWER_SCHEMAS = {
   DiscoveryProof: DiscoveryProofSchema,
   Models: ModelsSchema,
   Desks: DesksSchema,
+  Provider: ProviderViewSchema,
+  ProviderRemoved: ProviderRemovedSchema,
   SignedIn: SignedInSchema,
 } as const;
 
@@ -253,6 +259,15 @@ const WORKERS: ApiOperation[] = [
     responses: { 200: ok("DiscoveryProof"), 400: err("Invalid body"), 404: err("No credential with that id") },
   },
   { method: "get", path: "/api/models", tag: "Workers", summary: "The models desks can use (Claude, and the local OpenAI-compatible server's), and the Architect's and default ones", responses: { 200: ok("Models") } },
+  { method: "get", path: "/api/providers", tag: "Workers", summary: "The model providers (added ones and the .env's), with how many models each lists; never a key", responses: { 200: ok(["Provider"]) } },
+  {
+    method: "post", path: "/api/providers", tag: "Workers", summary: "Add (or replace) a provider with its key or address; its model list is fetched first, so a wrong key is refused", body: "ProviderAdd",
+    responses: { 201: ok("Provider", "Added"), 400: err("Invalid body, or the provider refused the key or can't be reached") },
+  },
+  {
+    method: "post", path: "/api/providers/{id}/remove", tag: "Workers", summary: "Remove an added provider and forget its key",
+    responses: { 200: ok("ProviderRemoved"), 404: err("No such provider"), 409: err("It comes from the Hub's .env") },
+  },
   { method: "get", path: "/api/desks", tag: "Workers", summary: "Which desks use a model of their own, and each such model's calls at once and load", responses: { 200: ok("Desks") } },
   {
     method: "post", path: "/api/desks", tag: "Workers", summary: "Put a desk (<host>#<slot>) or a whole machine (<host>) on a model, or back on the default", body: "DeskAssignment",

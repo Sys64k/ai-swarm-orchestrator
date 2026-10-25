@@ -22,6 +22,7 @@ import {
   JoinBodySchema,
   DiscoveryProofBodySchema,
   DeskAssignmentBodySchema,
+  ProviderAddBodySchema,
   discoveryKeyId,
   discoveryProof,
   discoverySecret,
@@ -48,11 +49,10 @@ import {
 import { API_DOC_VERSION, openApiDocument } from "./api/openapi.js";
 import { syncApiCopies } from "./api-sync.js";
 import type { z } from "zod";
-import { AnthropicApiAdapter, DEFAULT_MAX_TOKENS, type Effort, type LlmAdapter } from "./llm/adapter.js";
-import { openAiCompatibleFor } from "./llm/openai-compatible.js";
+import { DEFAULT_MAX_TOKENS, type Effort, type LlmAdapter } from "./llm/adapter.js";
 import { AcceptanceChecker } from "./llm/acceptance.js";
-import { adapterForModel, DeskModels, desksOf } from "./llm/desk-models.js";
-import { ModelCatalog, resolveModel } from "./llm/catalog.js";
+import { DeskModels, desksOf } from "./llm/desk-models.js";
+import { Providers, resolveModel } from "./llm/providers.js";
 import { ConversationManager } from "./llm/conversations.js";
 import { hasPrice } from "./llm/pricing.js";
 import { gitHttpHandler } from "./git/http-backend.js";
@@ -267,15 +267,23 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   const llm = opts.llm ?? {};
   const model = llm.model ?? "claude-opus-5-5";
   const maxTokens = llm.maxTokens ?? DEFAULT_MAX_TOKENS;
-  // `openai:<model>` goes to the OpenAI-compatible API at ASO_LLM_BASE_URL; anything else is a Claude model.
-  const adapterFor = (spec: string): LlmAdapter | undefined =>
-    openAiCompatibleFor(spec, process.env, maxTokens) ??
-    (process.env.ANTHROPIC_API_KEY ? new AnthropicApiAdapter({ model: spec, effort: llm.effort ?? "high", maxTokens }) : undefined);
+  const effort = llm.effort ?? "high";
+  // Every model comes from a provider: one added on the Hub, or the .env's (ANTHROPIC_API_KEY, ASO_LLM_BASE_URL).
+  const providers = await Providers.open(conversationDir, process.env);
+  const unusable: string[] = [];
+  const adapterFor = (spec: string): LlmAdapter | undefined => {
+    try {
+      return providers.adapterFor(spec, { maxTokens, effort });
+    } catch (err) {
+      unusable.push((err as Error).message);
+      return undefined;
+    }
+  };
   const adapter = llm.adapter ?? adapterFor(model);
   const agentAdapter = llm.agentAdapter ?? (llm.agentModel && llm.agentModel !== model ? adapterFor(llm.agentModel) : undefined);
   setReviewModel(adapter);
   if (adapter && acceptance) log.info(`acceptance check: on (${adapter.model})`);
-  if (!adapter) log.warn("no LLM configured: set ANTHROPIC_API_KEY, or use an openai:<model> with ASO_LLM_BASE_URL, to let agents work");
+  if (!adapter) log.warn(`no LLM configured${unusable.length ? ` (${unusable.join("; ")})` : ""}: add a provider (aso provider add …) or set ANTHROPIC_API_KEY, to let agents work`);
   else {
     log.info(`LLM: ${adapter.name} ${adapter.model}${agentAdapter ? ` (Architect); ${agentAdapter.model} (agents)` : ""}`);
     for (const a of [adapter, agentAdapter]) {
@@ -285,10 +293,10 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   // Desks can each use their own model; the catalog says which models there are to choose from.
   const deskModels = await DeskModels.open(
     conversationDir,
-    (spec, settings) => adapterForModel(spec, settings, { env: process.env, maxTokens, effort: llm.effort ?? "high" }),
+    (spec, settings) => providers.adapterFor(spec, { maxTokens, effort, vision: settings.vision, baseUrl: settings.baseUrl }),
     llm.concurrency ?? 4,
+    (spec) => providers.isLocal(spec),
   );
-  const modelCatalog = new ModelCatalog(process.env);
   const conversations = new ConversationManager(adapter, tasks, registry, plans, {
     agentAdapter,
     deskModels,
@@ -639,8 +647,26 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   // Which model each desk's agents use: the models to choose from, and the desks' choices.
   const defaultAgentModel = () => (agentAdapter ?? adapter)?.model ?? null;
   app.get("/api/models", async (c) => {
-    const { models: available, localError } = await modelCatalog.list();
-    return c.json({ architect: adapter?.model ?? null, defaultAgent: defaultAgentModel(), available, ...(localError ? { localError } : {}) });
+    const { models: available, errors } = await providers.models();
+    return c.json({ architect: adapter?.model ?? null, defaultAgent: defaultAgentModel(), available, ...(errors.length ? { localError: errors.join("; ") } : {}) });
+  });
+  // Providers: added with a key (or a local server's address); the API never shows a key.
+  app.get("/api/providers", async (c) => c.json(await providers.views()));
+  app.post("/api/providers", async (c) => {
+    const req = await parsed(c, ProviderAddBodySchema);
+    if (!req.ok) return c.json({ error: req.error }, 400);
+    try {
+      return c.json(await providers.add(req.data), 201);
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 400);
+    }
+  });
+  app.post("/api/providers/:id/remove", async (c) => {
+    const id = c.req.param("id");
+    const outcome = await providers.remove(id);
+    if (outcome === "environment") return c.json({ error: `${id} comes from the Hub's .env: remove it there` }, 409);
+    if (outcome === "missing") return c.json({ error: "no such provider" }, 404);
+    return c.json({ removed: id });
   });
   app.get("/api/desks", (c) => c.json(deskModels.view(adapter?.model ?? null, defaultAgentModel())));
   app.post("/api/desks", async (c) => {
@@ -651,7 +677,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     if (!Array.isArray(desks)) return c.json({ error: desks.error }, 404);
     let spec: string | null = null;
     if (model !== "default") {
-      const resolved = resolveModel(model, (await modelCatalog.list()).models);
+      const resolved = resolveModel(model, (await providers.models()).models, providers.list());
       if ("error" in resolved) return c.json({ error: resolved.error }, 400);
       spec = resolved.spec;
     }

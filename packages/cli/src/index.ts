@@ -8,6 +8,8 @@ import {
   tokenFile,
   DEFAULT_DASHBOARD_PORT,
   DEFAULT_DISCOVERY_PORT,
+  isProviderPreset,
+  PROVIDER_PRESETS,
   DEFAULT_HUB_PORT,
   DEFAULT_PROJECTS_DIR,
   MAX_WORKER_SLOTS,
@@ -36,6 +38,7 @@ import {
 import { startWorkerCommand } from "./commands/start-worker.js";
 import { findHubCommand } from "./commands/find-hub.js";
 import { deskCommand, desksCommand, modelsCommand } from "./commands/models.js";
+import { addProviderCommand, providersCommand, removeProviderCommand } from "./commands/providers.js";
 import { updateCommand } from "./commands/update.js";
 import { rollbackUnconfirmed, updatePaths } from "./self-update.js";
 import { userTool } from "./systemd.js";
@@ -110,13 +113,16 @@ const program = new Command()
   .description("Skynet (AI Swarm Orchestrator) - local-network multi-agent development swarm")
   .version(layout.version());
 
+/** The Hub's projects folder unless --root says otherwise. */
+const DEFAULT_ROOT = process.env.ASO_PROJECTS_ROOT || path.join(os.homedir(), DEFAULT_PROJECTS_DIR);
+
 /** Options shared by `start-hub` and `hub-service install` (the service runs start-hub with the ones given). */
 function hubOptions(cmd: Command): Command {
   return cmd
     .option(
       "-r, --root <dir>",
       "folder of projects: each git repository in it is a project, and new ones are created there",
-      process.env.ASO_PROJECTS_ROOT || path.join(os.homedir(), DEFAULT_PROJECTS_DIR),
+      DEFAULT_ROOT,
     )
     .option("-p, --port <port>", "Hub API/WebSocket port", parsePort, DEFAULT_HUB_PORT)
     .option("--host <host>", "interface to bind", "0.0.0.0")
@@ -307,6 +313,30 @@ program
   .action(listWorkerKeysCommand);
 
 program
+  .command("providers")
+  .description("The model providers the Hub can call (added ones and the .env's), with how many models each lists")
+  .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
+  .action(providersCommand);
+const providerCmd = program.command("provider").description("Add or remove a model provider: just its key, or a local server's address");
+providerCmd
+  .command("add <preset>")
+  .description(`Add a provider: ${PROVIDER_PRESETS.join(", ")}. Asks for the key (hidden) unless --key; reads it from stdin when piped`)
+  .option("--key <key>", "the API key (prefer the prompt: a key on the command line lands in your shell history)")
+  .option("--url <url>", "the API's root, for ollama and custom (e.g. http://avalon:11434/v1)")
+  .option("--name <id>", "its name on the Hub (default: the preset's), e.g. ollama-avalon for a second Ollama")
+  .option("--vision", "its models accept images")
+  .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
+  .action((preset: string, opts) => {
+    if (!isProviderPreset(preset)) throw new InvalidArgumentError(`expected one of: ${PROVIDER_PRESETS.join(", ")}`);
+    return addProviderCommand(preset, opts);
+  });
+providerCmd
+  .command("remove <id>")
+  .description("Remove an added provider and forget its key")
+  .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
+  .action(removeProviderCommand);
+
+program
   .command("models")
   .description("The models desks can use: Claude, and the local server's (ASO_LLM_BASE_URL)")
   .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
@@ -343,7 +373,8 @@ program
 program
   .command("llm-check")
   .description("Send one tiny request to verify ANTHROPIC_API_KEY and model access (costs a fraction of a cent)")
-  .option("--model <id>", "model to check", process.env.ASO_MODEL || "claude-opus-5-5")
+  .option("--model <id>", "model to check: <provider>/<model> (see aso models), or a Claude id", process.env.ASO_MODEL || "claude-opus-5-5")
+  .option("-r, --root <dir>", "the Hub's projects folder, whose .aso/providers.json lists the added providers", DEFAULT_ROOT)
   .action(llmCheckCommand);
 
 program
