@@ -313,6 +313,20 @@ const ReviewSchema = z
   })
   .describe("The task's GitHub pull request, with pull requests on");
 
+export const AcceptanceSchema = z
+  .object({
+    result: z.enum(["checking", "met", "unmet", "undecided"]).describe("checking: under way; undecided: the check couldn't tell, and the work went on"),
+    commit: z.string().describe("The commit it checked"),
+    at: Timestamp,
+    model: z.string().optional(),
+    summary: z.string().optional(),
+    reason: z.string().optional().describe("Why it was undecided"),
+    criteria: z
+      .array(z.object({ criterion: z.string(), verdict: z.enum(["met", "unmet", "unclear"]), reason: z.string() }))
+      .optional(),
+  })
+  .describe("The check of the work against the task's acceptance criteria, after QA passed");
+export type Acceptance = z.infer<typeof AcceptanceSchema>;
 export const TaskSchema = z.object({
   spec: TaskSpecSchema,
   project: z.string(),
@@ -332,6 +346,7 @@ export const TaskSchema = z.object({
   commit: z.string().optional(),
   mainCommit: z.string().optional(),
   qaSummary: z.string().optional(),
+  acceptance: AcceptanceSchema.optional(),
   screenshots: z
     .object({
       commit: z.string().describe("The commit QA tested when it took them"),

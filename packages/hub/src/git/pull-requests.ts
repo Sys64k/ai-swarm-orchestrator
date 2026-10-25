@@ -289,12 +289,27 @@ export function pullRequestBody(task: TaskRecord, consoleUrl?: string): string {
     ...files,
     "",
     `**QA:** ${task.qaSummary ?? "not run"}`,
+    ...acceptanceNote(task),
     ...screenshotsNote(task, consoleUrl),
     `**Task:** \`${s.taskId}\` (${s.role}, ${s.kind})${rounds ? `, after ${rounds}` : ""}; model cost about $${task.llm.costUsd.toFixed(2)}`,
     "",
     "---",
     "Opened by the ASO Hub. **Merge** (here or in the ASO console) to accept it. To send it back to an agent, submit a review that **requests changes** (on a pull request you opened yourself, GitHub only offers **Comment**: that works too). **Close** to cancel the task.",
   ].join("\n");
+}
+
+/** The acceptance check's verdict, criterion by criterion, for the commit under review. */
+export function acceptanceNote(task: Pick<TaskRecord, "acceptance" | "commit">): string[] {
+  const a = task.acceptance;
+  if (!a || a.commit !== task.commit || a.result === "checking") return [];
+  if (a.result === "undecided") return [`**Acceptance check:** couldn't decide (${a.reason ?? "no reason"}); check the criteria yourself`];
+  const criteria = a.criteria ?? [];
+  const met = criteria.filter((c) => c.verdict === "met").length;
+  const mark = { met: "✅", unmet: "❌", unclear: "❔" } as const;
+  return [
+    `**Acceptance check** (${a.model ?? "model"}): ${met} of ${criteria.length} criteria met${a.summary ? `. ${a.summary}` : ""}`,
+    ...criteria.map((c) => `- ${mark[c.verdict]} ${c.criterion}${c.verdict === "met" ? "" : `: ${c.reason}`}`),
+  ];
 }
 
 /** Where to see the screenshots QA took; GitHub can't show them, as they stay on the Hub. */

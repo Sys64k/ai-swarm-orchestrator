@@ -13,6 +13,7 @@ import {
   agentName,
   type CrewMemberSchema,
   type ReviewChecks,
+  type Acceptance,
 } from "@aso/shared";
 import { mergeBlock } from "./git/pull-requests.js";
 import type { z } from "zod";
@@ -22,6 +23,7 @@ import type { NodeRegistry } from "./registry.js";
 import { DEFAULT_ROUTING_POLICIES, selectNode, type RoutingPolicies } from "./routing.js";
 import type { TranscriptInput } from "./transcripts.js";
 import type { Screenshots, ScreenshotSet } from "./screenshots.js";
+import { unmetReason, type AcceptanceChecker } from "./llm/acceptance.js";
 
 const log = createLogger("tasks");
 
@@ -65,6 +67,8 @@ export interface TaskRecord {
   conflicts?: string[];
   /** What the last passing QA run reported (shown in the pull request). */
   qaSummary?: string;
+  /** The check of the work against the acceptance criteria, after QA passed. */
+  acceptance?: Acceptance;
   /** What the project's screenshots script saved in the last passing QA run. */
   screenshots?: ScreenshotSet;
   /** The views the developer agent listed at its last finish, for QA's screenshots script. */
@@ -191,6 +195,8 @@ export interface TaskManagerOptions {
   onTranscript?: (taskId: string, entry: TranscriptInput) => void;
   /** Keeps the screenshots of each task's last passing QA run. */
   screenshots?: Pick<Screenshots, "save" | "clear">;
+  /** Checks QA-passed work against its acceptance criteria before it is merged or reviewed. */
+  acceptance?: Pick<AcceptanceChecker, "check">;
 }
 
 const HISTORY_LIMIT = 50;
@@ -199,6 +205,7 @@ const ACTIVE: ReadonlySet<TaskState> = new Set(["assigned", "in_progress", "test
 /** Task queue and pipeline: routes work to workers, verifies pushes, runs QA, merges. */
 export class TaskManager {
   private readonly tasks = new Map<string, TaskRecord>();
+  private readonly acceptance: TaskManagerOptions["acceptance"];
   private readonly policies: RoutingPolicies;
   private readonly maxDrops: number;
   private readonly maxQaAttempts: number;
@@ -232,6 +239,7 @@ export class TaskManager {
     this.onChange = opts.onChange;
     this.onTranscript = opts.onTranscript;
     this.screenshots = opts.screenshots;
+    this.acceptance = opts.acceptance;
     this.project = opts.project ?? "project";
     this.onDispatchNeeded = opts.onDispatchNeeded;
     this.isIdTaken = opts.isIdTaken ?? ((id) => this.tasks.has(id));
@@ -344,8 +352,13 @@ export class TaskManager {
           break;
         }
         case "verifying":
-          this.note(task, "Hub restarted; verifying again");
-          void this.verify(task, task.commit!);
+          if (task.acceptance?.result === "checking") {
+            this.note(task, "Hub restarted; checking the acceptance criteria again");
+            void this.checkAcceptance(task);
+          } else {
+            this.note(task, "Hub restarted; verifying again");
+            void this.verify(task, task.commit!);
+          }
           break;
         case "merging":
           // Idempotent: a commit that already reached main merges as "already up to date".
@@ -745,8 +758,46 @@ export class TaskManager {
     this.kick();
   }
 
-  /** QA-approved work: to a person's review when pull requests are on, else straight into main. */
+  /**
+   * QA-approved work: first checked against its acceptance criteria (when the Hub has a check
+   * and the task has criteria), then on to review or merge.
+   */
   private approved(task: TaskRecord): void {
+    if (!this.acceptance || task.spec.acceptanceCriteria.length === 0) return this.release(task);
+    task.state = "verifying";
+    task.acceptance = { result: "checking", commit: task.commit!, at: new Date().toISOString() };
+    this.note(task, "checking the work against its acceptance criteria");
+    void this.checkAcceptance(task);
+  }
+
+  /** Run the acceptance check; unmet criteria send the work back, anything else lets it go on. */
+  private async checkAcceptance(task: TaskRecord): Promise<void> {
+    const commit = task.commit!;
+    const diff = await this.repo.diff(commit).catch(() => undefined);
+    const verdict = await this.acceptance!.check(task, diff);
+    // Cancelled, or a newer commit, while the model thought: this verdict is stale.
+    if (task.state !== "verifying" || task.commit !== commit || task.acceptance?.result !== "checking") return;
+    if (verdict.usage) this.recordLlmUsage(task.spec.taskId, verdict.usage);
+    const at = new Date().toISOString();
+    if (verdict.result === "undecided") {
+      task.acceptance = { result: "undecided", commit, at, reason: verdict.reason, ...(verdict.model ? { model: verdict.model } : {}) };
+      this.note(task, `acceptance check undecided (${verdict.reason}); going on`);
+      return this.release(task);
+    }
+    task.acceptance = { result: verdict.result, commit, at, model: verdict.model, summary: verdict.summary, criteria: verdict.criteria };
+    const met = verdict.criteria.filter((c) => c.verdict !== "unmet").length;
+    if (verdict.result === "unmet") {
+      this.note(task, `acceptance check: ${met} of ${verdict.criteria.length} criteria met`);
+      this.rework(task, unmetReason(verdict.criteria));
+    } else {
+      this.note(task, `acceptance check: all ${verdict.criteria.length} criteria met`);
+      this.release(task);
+    }
+    this.kick();
+  }
+
+  /** Work that passed QA (and the acceptance check): to a person's review when pull requests are on, else straight into main. */
+  private release(task: TaskRecord): void {
     if (!this.reviewGate) return void this.merge(task);
     task.state = "awaiting_review";
     task.review ??= { rounds: 0, handled: [] };

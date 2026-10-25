@@ -50,6 +50,7 @@ import { syncApiCopies } from "./api-sync.js";
 import type { z } from "zod";
 import { AnthropicApiAdapter, DEFAULT_MAX_TOKENS, type Effort, type LlmAdapter } from "./llm/adapter.js";
 import { openAiCompatibleFor } from "./llm/openai-compatible.js";
+import { AcceptanceChecker } from "./llm/acceptance.js";
 import { adapterForModel, DeskModels, desksOf } from "./llm/desk-models.js";
 import { ModelCatalog, resolveModel } from "./llm/catalog.js";
 import { ConversationManager } from "./llm/conversations.js";
@@ -78,6 +79,11 @@ import { TaskError, type QaOptions, type TaskRecord } from "./tasks.js";
 const log = createLogger("hub");
 
 export interface HubOptions {
+  /**
+   * Check QA-passed work against its acceptance criteria with the Architect's model before it
+   * is merged or reviewed (default: on, when the Hub has a model). A checker can be passed (tests).
+   */
+  acceptanceCheck?: boolean | Pick<AcceptanceChecker, "check">;
   /**
    * Folder of projects: every git repository directly inside it is a project (id = folder name),
    * and new projects are created there. Give this or `targetDir`.
@@ -207,12 +213,17 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   let notifier: Notifier | undefined;
   let deployer: Deployer | undefined;
   const hostDeploys = opts.deploy?.runner === "host" ? new HostDeployQueue(opts.deploy.queue) : undefined;
+  // The acceptance check uses the Architect's model, which exists only further down: it waits for it.
+  let setReviewModel: (adapter: LlmAdapter | undefined) => void = () => undefined;
+  const reviewModel = new Promise<LlmAdapter | undefined>((resolve) => (setReviewModel = resolve));
+  const acceptance =
+    opts.acceptanceCheck === false ? undefined : typeof opts.acceptanceCheck === "object" ? opts.acceptanceCheck : new AcceptanceChecker(reviewModel);
   const projects = await ProjectSet.open(registry, {
     root: opts.projectsRoot,
     single: opts.targetDir,
     mainBranch: opts.mainBranch,
     persist: opts.stateDir !== null,
-    tasks: { policies: opts.policies, reclaimGraceMs: opts.reclaimGraceMs, qa: opts.qa },
+    tasks: { policies: opts.policies, reclaimGraceMs: opts.reclaimGraceMs, qa: opts.qa, acceptance },
     deps: { installer: opts.dependencyInstaller, allow: opts.allowDependencies },
     sync: { enabled: opts.sync?.enabled, remote: opts.sync?.remote, token: opts.sync?.token, retryMs: opts.sync?.retryMs },
     pullRequests: opts.pullRequests,
@@ -262,6 +273,8 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     (process.env.ANTHROPIC_API_KEY ? new AnthropicApiAdapter({ model: spec, effort: llm.effort ?? "high", maxTokens }) : undefined);
   const adapter = llm.adapter ?? adapterFor(model);
   const agentAdapter = llm.agentAdapter ?? (llm.agentModel && llm.agentModel !== model ? adapterFor(llm.agentModel) : undefined);
+  setReviewModel(adapter);
+  if (adapter && acceptance) log.info(`acceptance check: on (${adapter.model})`);
   if (!adapter) log.warn("no LLM configured: set ANTHROPIC_API_KEY, or use an openai:<model> with ASO_LLM_BASE_URL, to let agents work");
   else {
     log.info(`LLM: ${adapter.name} ${adapter.model}${agentAdapter ? ` (Architect); ${agentAdapter.model} (agents)` : ""}`);

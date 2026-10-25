@@ -779,6 +779,25 @@ example, with `rev-parse --verify --quiet` and with a conflicting `stash pop`. T
 `HubRepository` therefore check command output and repository state directly instead of
 relying on exceptions.
 
+### The acceptance check (`AcceptanceChecker`)
+
+After QA passes, `TaskManager.approved()` runs the check when the Hub has one and the task has
+acceptance criteria; the task shows `verifying`, with `acceptance.result: "checking"` (a Hub
+restart runs the check again). `llm/acceptance.ts` sends the Architect's model the task, its
+numbered criteria, the agent's summary (labelled a claim) and the diff against the task's base
+(cut at 120,000 characters; then it's told to mark what it can't see `unclear`), with one tool,
+`report_acceptance`: a verdict per criterion (`met`, `unmet`, `unclear`) and a summary.
+
+- **Unmet:** a rework round whose reason lists each unmet criterion and what's missing.
+- **Met (unclear doesn't block):** on to review or merge; `acceptanceNote` adds the verdict to
+  the pull request.
+- **Undecided:** no model, a model error, no diff, or an answer that skips a criterion; the
+  work goes on, noted on the task and in the pull request.
+
+A verdict for a commit that's no longer the task's (a newer push, a cancel) is dropped. The
+check's tokens count toward the task's spend. Tried on the real history of aso-ui #99: it judged
+both of a local model's incomplete rounds unmet (0 of 6 criteria) and the finished round met.
+
 ### QA runs
 
 The worker runs `setup` steps, then `command`, each through `runCommand`:

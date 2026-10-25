@@ -128,6 +128,7 @@ function hubOptions(cmd: Command): Command {
     .option("--docker", "run the Hub and dashboard in Docker (Architect stays on the host)", false)
     .option("--test-command <cmd>", "QA test command, split on spaces, run without a shell", process.env.ASO_TEST_COMMAND || "npm test")
     .option("--no-qa", "merge verified work without a QA run")
+    .option("--no-acceptance-check", "don't check QA-passed work against its acceptance criteria with the Architect's model")
     .option("--no-push", "keep merges local instead of pushing main to the target repo's origin")
     .option(
       "--allow-deps <list>",
