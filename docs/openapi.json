@@ -2616,65 +2616,72 @@
             ]
           },
           "defaultAgent": {
-            "description": "The model of desks without a profile",
+            "description": "The model of desks without one of their own",
             "type": [
               "string",
               "null"
             ]
           },
-          "profiles": {
+          "available": {
             "type": "array",
             "items": {
               "type": "object",
               "properties": {
                 "model": {
                   "type": "string",
-                  "minLength": 1,
-                  "maxLength": 200,
-                  "description": "A Claude model id, or openai:<model> for an OpenAI-compatible API"
+                  "description": "The name to choose it by"
+                },
+                "spec": {
+                  "type": "string",
+                  "description": "How the Hub calls it: a Claude id, or openai:<name>"
+                },
+                "provider": {
+                  "type": "string",
+                  "enum": [
+                    "anthropic",
+                    "openai-compatible"
+                  ]
                 },
                 "baseUrl": {
-                  "description": "For openai: models, the API's root (default: the Hub's ASO_LLM_BASE_URL)",
-                  "type": "string",
-                  "maxLength": 500,
-                  "format": "uri"
-                },
-                "concurrency": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991,
-                  "description": "Calls at once"
-                },
-                "vision": {
-                  "description": "For openai: models, whether the model accepts images",
-                  "type": "boolean"
-                },
-                "name": {
-                  "type": "string",
-                  "pattern": "^[a-z0-9][a-z0-9._-]{0,39}$"
-                },
-                "running": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991,
-                  "description": "Calls running now"
-                },
-                "waiting": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991,
-                  "description": "Calls waiting for a free place"
+                  "description": "The OpenAI-compatible server it runs on",
+                  "type": "string"
                 }
               },
               "required": [
                 "model",
-                "concurrency",
-                "name",
-                "running",
-                "waiting"
+                "spec",
+                "provider"
               ],
               "additionalProperties": false
-            }
+            },
+            "description": "The models desks can use"
+          },
+          "localError": {
+            "description": "Why the local models couldn't be listed",
+            "type": "string"
+          }
+        },
+        "required": [
+          "architect",
+          "defaultAgent",
+          "available"
+        ],
+        "additionalProperties": false
+      },
+      "Desks": {
+        "type": "object",
+        "properties": {
+          "architect": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "defaultAgent": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "desks": {
             "type": "array",
@@ -2685,25 +2692,61 @@
                   "type": "string",
                   "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,99}#[1-9][0-9]?$"
                 },
-                "profile": {
-                  "type": "string",
-                  "pattern": "^[a-z0-9][a-z0-9._-]{0,39}$"
+                "model": {
+                  "type": "string"
                 }
               },
               "required": [
                 "desk",
-                "profile"
+                "model"
               ],
               "additionalProperties": false
             },
-            "description": "Desks with a profile; the others use the default agent model"
+            "description": "Desks with a model of their own; the others use the default"
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "model": {
+                  "type": "string"
+                },
+                "baseUrl": {
+                  "type": "string"
+                },
+                "concurrency": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "running": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "waiting": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "model",
+                "concurrency",
+                "running",
+                "waiting"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Each model desks use, with its calls at once and how busy it is"
           }
         },
         "required": [
           "architect",
           "defaultAgent",
-          "profiles",
-          "desks"
+          "desks",
+          "models"
         ],
         "additionalProperties": false
       },
@@ -3000,60 +3043,40 @@
         ],
         "additionalProperties": false
       },
-      "ModelProfileBody": {
+      "DeskAssignment": {
         "type": "object",
         "properties": {
-          "model": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200,
-            "description": "A Claude model id, or openai:<model> for an OpenAI-compatible API"
-          },
-          "baseUrl": {
-            "description": "For openai: models, the API's root (default: the Hub's ASO_LLM_BASE_URL)",
-            "type": "string",
-            "maxLength": 500,
-            "format": "uri"
-          },
           "concurrency": {
-            "description": "Calls at once (default: 1 for openai: models, the Hub's --llm-concurrency for Claude)",
+            "description": "Calls at once (default: 1 for local/OpenAI-compatible models, the Hub's --llm-concurrency for Claude)",
             "type": "integer",
             "minimum": 1,
             "maximum": 64
           },
-          "vision": {
-            "description": "For openai: models, whether the model accepts images",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "model"
-        ],
-        "additionalProperties": false
-      },
-      "DeskAssignment": {
-        "type": "object",
-        "properties": {
-          "desk": {
+          "baseUrl": {
+            "description": "For a model on another OpenAI-compatible server than the Hub's ASO_LLM_BASE_URL",
             "type": "string",
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,99}#[1-9][0-9]?$"
+            "maxLength": 500,
+            "format": "uri"
           },
-          "profile": {
-            "anyOf": [
-              {
-                "type": "string",
-                "pattern": "^[a-z0-9][a-z0-9._-]{0,39}$"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The profile to use, or null for the default agent model"
+          "vision": {
+            "description": "For OpenAI-compatible models, whether the model accepts images",
+            "type": "boolean"
+          },
+          "target": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,99}(#[1-9][0-9]?)?$",
+            "description": "A desk, e.g. avalon#4, or a connected machine, e.g. avalon, for all its desks"
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "A model from GET /api/models (e.g. claude-haiku-5-5, qwen3-coder:30b), openai:<name>, or default"
           }
         },
         "required": [
-          "desk",
-          "profile"
+          "target",
+          "model"
         ],
         "additionalProperties": false
       },
@@ -5166,7 +5189,7 @@
         "tags": [
           "Workers"
         ],
-        "summary": "The model profiles, which desks use them, and each profile's calls at once",
+        "summary": "The models desks can use (Claude, and the local OpenAI-compatible server's), and the Architect's and default ones",
         "responses": {
           "200": {
             "description": "OK",
@@ -5184,50 +5207,20 @@
         }
       }
     },
-    "/api/models/profiles/{name}": {
-      "post": {
-        "operationId": "postModelsProfile",
+    "/api/desks": {
+      "get": {
+        "operationId": "getDesks",
         "tags": [
           "Workers"
         ],
-        "summary": "Add or replace a model profile (a model with its own address and limit on calls at once)",
-        "parameters": [
-          {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ModelProfileBody"
-              }
-            }
-          }
-        },
+        "summary": "Which desks use a model of their own, and each such model's calls at once and load",
         "responses": {
           "200": {
             "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Models"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid name or body, or the Hub can't use that model (e.g. no API key)",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
+                  "$ref": "#/components/schemas/Desks"
                 }
               }
             }
@@ -5236,59 +5229,13 @@
             "description": "Missing or wrong token"
           }
         }
-      }
-    },
-    "/api/models/profiles/{name}/remove": {
+      },
       "post": {
-        "operationId": "postModelsProfileRemove",
+        "operationId": "postDesks",
         "tags": [
           "Workers"
         ],
-        "summary": "Remove a model profile; its desks go back to the default agent model",
-        "parameters": [
-          {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Models"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or wrong token"
-          },
-          "404": {
-            "description": "No such profile",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/models/desks": {
-      "post": {
-        "operationId": "postModelsDesks",
-        "tags": [
-          "Workers"
-        ],
-        "summary": "Give a desk (<host>#<slot>) a model profile, or null for the default agent model",
+        "summary": "Put a desk (<host>#<slot>) or a whole machine (<host>) on a model, or back on the default",
         "requestBody": {
           "required": true,
           "content": {
@@ -5305,13 +5252,13 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Models"
+                  "$ref": "#/components/schemas/Desks"
                 }
               }
             }
           },
           "400": {
-            "description": "Invalid body",
+            "description": "Invalid body, unknown model, or a model the Hub can't use",
             "content": {
               "application/json": {
                 "schema": {
@@ -5324,7 +5271,7 @@
             "description": "Missing or wrong token"
           },
           "404": {
-            "description": "No such profile",
+            "description": "That machine isn't connected",
             "content": {
               "application/json": {
                 "schema": {

@@ -35,7 +35,7 @@ import {
 } from "./commands/service.js";
 import { startWorkerCommand } from "./commands/start-worker.js";
 import { findHubCommand } from "./commands/find-hub.js";
-import { deskCommand, modelsCommand, removeModelProfileCommand, setModelProfileCommand } from "./commands/models.js";
+import { deskCommand, desksCommand, modelsCommand } from "./commands/models.js";
 import { updateCommand } from "./commands/update.js";
 import { rollbackUnconfirmed, updatePaths } from "./self-update.js";
 import { userTool } from "./systemd.js";
@@ -307,27 +307,20 @@ program
 
 program
   .command("models")
-  .description("Show the models: the Architect's, the default for desks, each model profile and which desks use it")
+  .description("The models desks can use: Claude, and the local server's (ASO_LLM_BASE_URL)")
   .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
   .action(modelsCommand);
-
-const modelProfileCmd = program.command("model-profile").description("Model profiles: a model with its own address and limit on calls at once, for desks to use");
-modelProfileCmd
-  .command("set <name> <model>")
-  .description("Add or replace a profile. <model> is a Claude model id or openai:<model>")
-  .option("--base-url <url>", "for openai: models, the API's root (default: the Hub's ASO_LLM_BASE_URL)")
-  .option("--concurrency <n>", "calls at once (default: 1 for openai: models, --llm-concurrency for Claude)", parsePositiveInt)
-  .option("--vision", "for openai: models, the model accepts images")
-  .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
-  .action(setModelProfileCommand);
-modelProfileCmd
-  .command("remove <name>")
-  .description("Remove a profile; its desks go back to the default agent model")
-  .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
-  .action(removeModelProfileCommand);
 program
-  .command("desk <desk> <profile>")
-  .description("Give a desk (<host>#<slot>, e.g. avalon#1) a model profile, or `default` for the default agent model")
+  .command("desks")
+  .description("Which desks use a model of their own, and how busy each model is")
+  .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
+  .action(desksCommand);
+program
+  .command("desk <target> <model>")
+  .description("Put a desk (avalon#4) or a whole machine (avalon) on a model from `aso models`, or `default`")
+  .option("--concurrency <n>", "that model's calls at once (default: 1 for local models, --llm-concurrency for Claude)", parsePositiveInt)
+  .option("--base-url <url>", "for a model on another OpenAI-compatible server than the Hub's ASO_LLM_BASE_URL")
+  .option("--vision", "a local model that accepts images")
   .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
   .action(deskCommand);
 

@@ -22,7 +22,7 @@ import type { AgentTurn } from "../tasks.js";
 import { LlmError, type LlmAdapter } from "./adapter.js";
 import { priceUsage } from "./pricing.js";
 import { Semaphore } from "./semaphore.js";
-import { deskName, type ModelProfiles, type Route } from "./profiles.js";
+import { deskName, type DeskModels, type Route } from "./desk-models.js";
 import { architectSystemPrompt, CONTINUE_PROMPT, planPrompt, systemPrompt, taskPrompt } from "./prompts.js";
 
 const log = createLogger("llm");
@@ -45,8 +45,8 @@ export interface ConversationOptions {
   maxTurns?: number;
   /** Concurrent API requests across all workers (desks with a model profile have their own limit). */
   concurrency?: number;
-  /** Model profiles for desks; desks without one use `agentAdapter`. */
-  profiles?: ModelProfiles;
+  /** Each desk's model; desks without one use `agentAdapter`. */
+  deskModels?: DeskModels;
   /** Called when model calls go on hold (out of credit), and when they work again. */
   onPause?: (reason: string) => void;
   onResume?: () => void;
@@ -91,8 +91,8 @@ interface Conversation {
   waitingNoted?: boolean;
   /** The current turn's last answer was cut off at the output limit (and thrown away). */
   cutOff?: { outputTokens: number };
-  /** The model profile of its desk when it started; kept for the whole round. */
-  profile?: string;
+  /** Its desk's model when it started (unset: the default); kept for the whole round. */
+  deskModel?: string;
 }
 
 /** A conversation as saved on disk: the subject and tools are rebuilt from the kind, id and role. */
@@ -105,7 +105,7 @@ interface SavedConversation {
   pendingToolUseIds: string[];
   /** Answer to the last turn, for a worker that lost it in the restart and asks again. */
   lastResult?: OkResult;
-  profile?: string;
+  deskModel?: string;
 }
 
 /**
@@ -171,7 +171,7 @@ export class ConversationManager {
         pendingToolUseIds: c.pendingToolUseIds,
         results: c.lastResult ? new Map([[c.lastResult.turn, c.lastResult]]) : new Map(),
         lastActivity: Date.now(),
-        ...(c.profile ? { profile: c.profile } : {}),
+        ...(c.deskModel ? { deskModel: c.deskModel } : {}),
       });
     }
     if (this.conversations.size) log.info(`restored ${this.conversations.size} agent conversation(s)`);
@@ -232,19 +232,25 @@ export class ConversationManager {
 
   /**
    * The model a conversation calls, with its limit on calls at once: the Architect plans on the
-   * main model; a task agent on its desk's profile, else the default agent model.
+   * main model; a task agent on its desk's model, else the default agent model. A desk model the
+   * Hub can no longer use (say its key was removed) falls back to the default.
    */
   private routeFor(conv: Conversation): Route | undefined {
     if (conv.subject.role === "architect") return this.adapter && { adapter: this.adapter, slots: this.slots };
-    const profiled = conv.profile ? this.opts.profiles?.route(conv.profile) : undefined;
-    if (profiled) return profiled;
+    if (conv.deskModel && this.opts.deskModels) {
+      try {
+        return this.opts.deskModels.route(conv.deskModel);
+      } catch (err) {
+        log.warn(`${conv.subject.id}: can't use desk model ${conv.deskModel} (${(err as Error).message}); using the default`);
+      }
+    }
     return this.agentAdapter && { adapter: this.agentAdapter, slots: this.slots };
   }
 
-  /** The profile of the desk a task's agent works at on `nodeId` (from the task's crew), if any. */
-  private deskProfile(taskId: string, nodeId: string): string | undefined {
+  /** The model of the desk a task's agent works at on `nodeId` (from the task's crew), if any. */
+  private deskModelOf(taskId: string, nodeId: string): string | undefined {
     const member = [...(this.tasks.get(taskId)?.crew ?? [])].reverse().find((m) => m.nodeId === nodeId);
-    return member && this.opts.profiles?.profileOf(deskName(member.host, member.slot));
+    return member && this.opts.deskModels?.modelOf(deskName(member.host, member.slot));
   }
 
   status() {
@@ -296,13 +302,11 @@ export class ConversationManager {
         results: new Map(),
         lastActivity: Date.now(),
       };
-      const profile = subject.kind === "task" ? this.deskProfile(subject.id, nodeId) : undefined;
-      if (profile) conv.profile = profile;
+      const deskModel = subject.kind === "task" ? this.deskModelOf(subject.id, nodeId) : undefined;
+      if (deskModel) conv.deskModel = deskModel;
       this.conversations.set(conv.id, conv);
       const model = this.routeFor(conv)?.adapter.model;
-      let on = "";
-      if (profile) on = ` (model profile ${profile}: ${model})`;
-      else if (model && subject.kind === "task") on = ` (${model})`;
+      const on = model && subject.kind === "task" ? ` (${model}${deskModel ? ", this desk's model" : ""})` : "";
       subject.recordEvent(`agent conversation started on ${nodeId}${on}`);
     } else if (conv.nodeId !== nodeId || conv.subject.kind !== subject.kind || conv.subject.id !== subject.id) {
       return void fail(`conversation ${req.conversationId} belongs to another ${conv.subject.kind} or node`);
@@ -457,7 +461,7 @@ export class ConversationManager {
       turn: conv.turn,
       pendingToolUseIds: conv.pendingToolUseIds,
       lastResult,
-      ...(conv.profile ? { profile: conv.profile } : {}),
+      ...(conv.deskModel ? { deskModel: conv.deskModel } : {}),
     };
     this.store?.saveConversation(conv.id, saved);
   }
