@@ -126,8 +126,8 @@ aso hub-service install ... --agent-model local/qwen3-coder:30b   # builders and
   `--agent-model` each take any provider's model. Planning is the hardest job: keeping the
   Architect on a strong model and running builders and QA on a cheaper or local one is a good
   start. With neither on a Claude model, the Hub needs no Anthropic key at all.
-- **Tool calling is required.** Agents work only through tool calls. `aso llm-check` tries one;
-  a model that fails it can't work as an agent. Small local models often call tools poorly over
+- **Tool calling is required.** Agents work only through tool calls. `aso llm-check` tries one,
+  and a turn answering it; a model that fails either can't work as an agent. Small local models often call tools poorly over
   long tasks; QA, review and the turn limit keep their mistakes out of `main`, at the cost of
   time.
 - **Ollama:** let the Hub reach it (`OLLAMA_HOST=0.0.0.0:11434` in its service) and give it room

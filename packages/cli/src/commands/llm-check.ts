@@ -22,7 +22,7 @@ async function adapterFor(model: string | undefined, root: string): Promise<LlmA
 
 /**
  * Two tiny requests: a one-word reply (the endpoint, credentials, model and credit), then a tool
- * call (whether the model can drive an agent).
+ * call and a turn answering it (whether the model can drive an agent).
  */
 export async function llmCheckCommand(opts: { model?: string; root: string }): Promise<void> {
   const adapter = await adapterFor(opts.model, opts.root);
@@ -45,13 +45,27 @@ export async function llmCheckCommand(opts: { model?: string; root: string }): P
       messages: [{ role: "user", content: "Run the check." }],
     });
     const call = tool.content.find((b) => b.type === "tool_use");
-    if (call?.type === "tool_use" && call.name === CHECK_TOOL.name && (call.input as { status?: unknown }).status === "ok") {
-      console.log("tool call: OK, the model can work as an agent.");
-    } else {
+    if (call?.type !== "tool_use" || call.name !== CHECK_TOOL.name || (call.input as { status?: unknown }).status !== "ok") {
       console.log(`tool call: FAILED (stop: ${tool.stopReason}). This model may not support tool calling; agents won't work with it.`);
       process.exitCode = 1;
       return;
     }
+    console.log("tool call: OK");
+
+    // An agent's next turn sends the call back with its result; some APIs check that turn
+    // (Gemini wants its thought signature back), so the check makes one too.
+    console.log("sending the tool's result back...");
+    const next = await adapter.complete({
+      system: "You are a connectivity check. After the tool reports, reply with exactly: DONE",
+      tools: [CHECK_TOOL],
+      messages: [
+        { role: "user", content: "Run the check." },
+        { role: "assistant", content: tool.content },
+        { role: "user", content: [{ type: "tool_result", tool_use_id: call.id, content: "status recorded" }] },
+      ],
+    });
+    const done = next.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("").trim();
+    console.log(`follow-up: ${JSON.stringify(done)} (stop: ${next.stopReason}), so the model can work as an agent.`);
     console.log("LLM access works.");
   } catch (err) {
     if (err instanceof LlmError) throw new Error(`LLM check failed: ${err.message}`);

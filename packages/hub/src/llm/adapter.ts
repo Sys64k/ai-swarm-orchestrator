@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { TokenCounts } from "./pricing.js";
+import { withoutProviderData } from "./provider-data.js";
 
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 
@@ -90,7 +91,7 @@ export class AnthropicApiAdapter implements LlmAdapter {
         max_tokens: this.opts.maxTokens,
         system: req.system,
         tools: req.tools,
-        messages: req.messages,
+        messages: withoutProviderData(req.messages),
         // Caches the growing conversation prefix: each turn re-reads earlier turns at the cache rate.
         cache_control: { type: "ephemeral" },
         output_config: { effort: this.opts.effort },

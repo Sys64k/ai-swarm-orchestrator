@@ -92,9 +92,10 @@ while no Architect is connected.
 
 ## `aso llm-check`
 
-Sends two tiny requests: a one-word reply (the key, model access and credit balance), then a
-tool call, which agents can't work without. Prints the reply, the tokens used and the estimated
-cost (a fraction of a cent). `--model <spec>` checks a different model from any
+Sends three tiny requests: a one-word reply (the key, model access and credit balance), a
+tool call, and a turn that answers the call, as an agent's next turn does (some APIs check that
+turn, e.g. Gemini wants its thought signature back). Agents can't work without the last two.
+Prints the reply, the tokens used and the estimated cost (a fraction of a cent). `--model <spec>` checks a different model from any
 [provider](models.md#providers) (`openai/gpt-5`, `ollama/qwen3-coder:30b`); `--root` points at
 the Hub's projects folder when it isn't the default.
 
