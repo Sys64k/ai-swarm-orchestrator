@@ -37,7 +37,7 @@ services:
       ASO_LLM_CONCURRENCY: "${ASO_LLM_CONCURRENCY:-4}"
       # A failing task moves to stronger models (docs/models.md, "Escalation").
       ASO_ESCALATE_TO: "${ASO_ESCALATE_TO:-}"
-      ASO_JUNIOR_ROUNDS: "${ASO_JUNIOR_ROUNDS:-2}"
+      ASO_JUNIOR_TRIES: "${ASO_JUNIOR_TRIES:-2}"
       ASO_ESCALATION: "${ASO_ESCALATION:-1}"
       # `host`: deploy commands are handed to `aso start-hub --docker` on the host (the container has no Docker).
       ASO_DEPLOY_RUNNER: "${ASO_DEPLOY_RUNNER:-}"

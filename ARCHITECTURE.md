@@ -1169,8 +1169,8 @@ would queue or spill the model out of GPU memory), `--llm-concurrency` for cloud
 ### Escalation (`llm/escalation.ts`)
 
 `roundModel(policy, task, desk, default)` picks a task conversation's model when it starts, from
-the task's `reworkRound` and `refusedModels`: the desk's model (or the default) for rounds below
-`juniorRounds`, then the ladder (`--escalate-to`, default `--model`), one step per further round,
+the task's `reworkRound` and `refusedModels`: the desk's model (or the default) while
+`reworkRound < juniorTries` (the first attempt is round 0, so `juniorTries` counts tries), then the ladder (`--escalate-to`, default `--model`), one step per further round,
 skipping refused models. The choice is pinned on the conversation like a desk model, routed
 through `DeskModels.route(spec)` (any spec, not only desks'), and named in the history with its
 reason. Ladder models the Hub can't build an adapter for are dropped at start, with a warning.
