@@ -581,7 +581,11 @@ export const PushCheckSchema = z.object({ subscribed: z.boolean() });
 export const PushRemovedSchema = z.object({ removed: z.boolean(), devices: z.number().int() });
 export const PushTestResultSchema = z.object({ sent: z.number().int().describe("Devices that took it"), failed: z.array(z.string()) });
 export const SignInCodeSchema = z.object({ code: z.string(), expiresAt: Timestamp });
-export const JoinCodeSchema = z.object({ code: z.string(), expiresAt: Timestamp });
+export const JoinCodeSchema = z.object({
+  code: z.string(),
+  expiresAt: Timestamp,
+  gatewayUrl: z.string().optional().describe("The worker gateway's public wss:// address, when the Hub has one (--gateway-url): for machines joining from the internet"),
+});
 export const WorkerKeyJoinedSchema = z.object({
   id: z.string(),
   name: z.string(),

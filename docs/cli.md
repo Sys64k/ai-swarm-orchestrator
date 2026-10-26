@@ -33,6 +33,7 @@ Every `aso` command and its options.
 | `--no-discovery` | | Don't answer LAN discovery: workers then need `--hub` |
 | `--gateway-port <port>` | off | Also listen here for workers coming from the internet through a TLS tunnel: only the worker connection, Git, the package and joining, worker keys only. See [Workers anywhere](installation.md#workers-anywhere) |
 | `--gateway-host <host>` | `127.0.0.1` | Interface the worker gateway listens on (the tunnel connects locally) |
+| `--gateway-url <wss://…>` | *(none)* | The gateway's public address, which join commands for machines on the internet use (`aso worker-key new --internet`, the console's **Add a machine**) |
 | `--update-from <git-url>` | `ASO_UPDATE_FROM` | Keep the Hub on that ASO repository's `main` (see [Automatic Hub updates](installation.md#automatic-hub-updates)). Only for an installed package run as the Hub service |
 
 ## `aso start-worker`
@@ -145,6 +146,7 @@ What the key may do (see [Machines you don't control](installation.md#machines-y
 
 | Option | Default | |
 |---|---|---|
+| `--internet` | | The machine joins from the internet, through the Hub's worker gateway (its `--gateway-url`) |
 | `--projects <ids>` | all | Comma-separated projects it may clone and work on |
 | `--untrusted` | trusted | Its machine only builds; a trusted machine tests its work |
 | `--budget <usd>` | none | USD of model calls its jobs may cause in total |

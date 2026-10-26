@@ -27,6 +27,8 @@ export interface StartHubOptions {
   /** The worker gateway's port (off when unset), and the interface it listens on. */
   gatewayPort?: number;
   gatewayHost: string;
+  /** The gateway's public wss:// address, for join commands. */
+  gatewayUrl?: string;
   docker: boolean;
   testCommand: string;
   qa: boolean;
@@ -69,7 +71,7 @@ export async function startHubCommand(opts: StartHubOptions): Promise<void> {
     projectsRootDisplay: process.env.ASO_PROJECTS_ROOT_DISPLAY || undefined,
     port: opts.port,
     host: opts.host,
-    ...(opts.gatewayPort ? { gateway: { port: opts.gatewayPort, host: opts.gatewayHost } } : {}),
+    ...(opts.gatewayPort ? { gateway: { port: opts.gatewayPort, host: opts.gatewayHost, ...(opts.gatewayUrl ? { url: opts.gatewayUrl } : {}) } } : {}),
     token: auth.token,
     sync: { enabled: opts.push && process.env.ASO_PUSH !== "0", token: process.env.ASO_GIT_TOKEN || undefined },
     pullRequests: { enabled: process.env.ASO_PULL_REQUESTS !== "0", consoleUrl: opts.consoleUrl },
@@ -141,6 +143,7 @@ async function startHubInDocker(root: string, opts: StartHubOptions, token: stri
       ASO_HUB_PORT: String(opts.port),
       // The container listens on 7423 when the gateway is on; compose publishes it on this machine only.
       ASO_GATEWAY_PORT: opts.gatewayPort ? String(opts.gatewayPort) : "",
+      ASO_GATEWAY_URL: opts.gatewayUrl ?? "",
       ASO_DASHBOARD_PORT: String(opts.dashboardPort),
       ASO_TEST_COMMAND: parseTestCommand(opts.testCommand).join(" "),
       ASO_QA: opts.qa ? "1" : "0",

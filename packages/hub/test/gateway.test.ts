@@ -107,6 +107,20 @@ describe("worker gateway (Hub)", () => {
     );
   });
 
+  it("hands its public address out with join codes, for machines joining from the internet", async () => {
+    await withHub(
+      async (ctx) => {
+        const made = await call(ctx.port, "/api/worker-keys/join-codes", { method: "POST", body: {} });
+        assert.equal(made.body.gatewayUrl, "wss://agent007.example.ts.net:10000");
+      },
+      { gateway: { port: 0, url: "wss://agent007.example.ts.net:10000" } },
+    );
+    await withHub(async (ctx) => {
+      const made = await call(ctx.port, "/api/worker-keys/join-codes", { method: "POST", body: {} });
+      assert.equal(made.body.gatewayUrl, undefined, "none without one");
+    });
+  });
+
   it("isn't there unless asked for", async () => {
     await withHub(async (ctx) => assert.equal(ctx.hub.gatewayPort, undefined));
   });

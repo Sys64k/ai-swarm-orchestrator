@@ -76,14 +76,26 @@ export function keyLine(k: WorkerKey): string {
 }
 
 /** `aso worker-key new`: a one-time join code, and the commands to run with it on the new machine. */
-export async function newWorkerKeyCommand(opts: { hub: string; address?: string; name?: string; projects?: string; untrusted?: boolean; budget?: number }): Promise<void> {
+export async function newWorkerKeyCommand(opts: {
+  hub: string;
+  address?: string;
+  name?: string;
+  projects?: string;
+  untrusted?: boolean;
+  budget?: number;
+  internet?: boolean;
+}): Promise<void> {
   const version = await api<{ sha256: string | null }>(hubHttpBase(opts.hub), "/api/version");
-  const joined = await api<{ code: string; expiresAt: string }>(hubHttpBase(opts.hub), "/api/worker-keys/join-codes", {
+  if (opts.internet && opts.address) throw new Error("--internet or --address, not both");
+  const joined = await api<{ code: string; expiresAt: string; gatewayUrl?: string }>(hubHttpBase(opts.hub), "/api/worker-keys/join-codes", {
     method: "POST",
     body: JSON.stringify({ ...(opts.name ? { name: opts.name } : {}), ...scopeBody(opts) }),
   });
   // Machines elsewhere reach the Hub by its name (on Tailscale, its MagicDNS name), not 127.0.0.1.
-  const address = opts.address ?? (opts.hub === "127.0.0.1" || opts.hub === "localhost" ? os.hostname() : opts.hub);
+  if (opts.internet && !joined.gatewayUrl) {
+    throw new Error("this Hub has no public gateway address: start it with --gateway-port and --gateway-url, or give --address wss://…");
+  }
+  const address = opts.internet ? joined.gatewayUrl! : (opts.address ?? (opts.hub === "127.0.0.1" || opts.hub === "localhost" ? os.hostname() : opts.hub));
   console.log(joinInstructions(address, joined.code, joined.expiresAt, version.sha256 ?? undefined).join("\n"));
 }
 
