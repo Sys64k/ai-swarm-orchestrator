@@ -46,6 +46,7 @@ services:
       # Set: the worker gateway listens on 7423 in the container (published above).
       ASO_GATEWAY_PORT: "${ASO_GATEWAY_PORT:+7423}"
       ASO_GATEWAY_HOST: "0.0.0.0"
+      ASO_GATEWAY_URL: "${ASO_GATEWAY_URL:-}"
       # Read from the environment of `aso start-hub --docker`; never baked into the image.
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
       # Cloud providers' keys: each makes that provider available (docs/models.md, "Providers").

@@ -11,6 +11,9 @@ import {
   projectNameProblem,
   projectSummary,
   deployView,
+  EMPTY_INVITE,
+  inviteBody,
+  inviteCommand,
   joinCommand,
   workerAccess,
   workerKeyBadge,
@@ -595,6 +598,26 @@ describe("worker machines and their keys", () => {
     assert.equal(workerKeyRecord({ built: 2, qaPassed: 2, qaFailed: 1, accepted: 1, tested: 1 }), "2 builds · QA passed 2 of 3 · acceptance met 1 of 1 · 1 QA run");
     assert.equal(workerKeyRecord({ built: 1, failed: 1, dropped: 2 }), "1 build · 1 failed · 2 dropped");
     assert.equal(workerKeyRecord(undefined), "No jobs yet", "an older Hub, or a new key");
+  });
+
+  it("gives a machine on the internet the same line as the CLI, and builds the invite", () => {
+    // The same string as the CLI's joinCommand for a wss:// address (packages/cli/test/join.test.ts).
+    assert.equal(
+      joinCommand("wss://agent007.tailc9777f.ts.net:10000", "C0DE"),
+      'd=$(mktemp -d) && curl -fo "$d/aso.tgz" https://agent007.tailc9777f.ts.net:10000/dist/aso.tgz && npm install -g "$d/aso.tgz" && aso service install --hub wss://agent007.tailc9777f.ts.net:10000 --join C0DE',
+    );
+    assert.match(joinCommand("wss://h:10000/", "C", "ab12"), /https:\/\/h:10000\/dist\/aso\.tgz && echo "ab12  \$d\/aso\.tgz" \| sha256sum -c -/);
+    const plain = EMPTY_INVITE;
+    assert.deepEqual(inviteBody(plain), { body: {} }, "a trusted machine for every project");
+    assert.deepEqual(inviteBody({ ...EMPTY_INVITE, name: " friend ", untrusted: true, projects: ["aso-ui"], budget: "10,5" }), {
+      body: { name: "friend", trusted: false, projects: ["aso-ui"], budgetUsd: 10.5 },
+    });
+    assert.ok("error" in inviteBody({ ...plain, budget: "ten" }));
+    assert.ok("error" in inviteBody({ ...plain, budget: "-1" }));
+    const at = { hostname: "agent007", code: "C", sha256: null };
+    assert.deepEqual(inviteCommand({ ...at, internet: false, gatewayUrl: "wss://g:10000" }), { command: joinCommand("agent007", "C") }, "this network: the console's host");
+    assert.deepEqual(inviteCommand({ ...at, internet: true, gatewayUrl: "wss://g:10000" }), { command: joinCommand("wss://g:10000", "C") });
+    assert.match((inviteCommand({ ...at, internet: true }) as { error: string }).error, /no public gateway address/);
   });
 
   it("says what each key may do", () => {

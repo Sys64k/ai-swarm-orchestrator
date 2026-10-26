@@ -81,6 +81,18 @@ function parseSlots(value: string): number {
   return n;
 }
 
+/** A wss:// address (the worker gateway's, as machines on the internet reach it). */
+function parseWssUrl(value: string): string {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new InvalidArgumentError("expected a wss:// address, e.g. wss://agent007.tailc9777f.ts.net:10000");
+  }
+  if (url.protocol !== "wss:") throw new InvalidArgumentError("must start with wss:// (machines on the internet only connect over TLS)");
+  return value.replace(/\/+$/, "");
+}
+
 /** A whole number, 0 or more (e.g. rounds). */
 function parseCount(value: string): number {
   const n = Number(value);
@@ -146,6 +158,7 @@ function hubOptions(cmd: Command): Command {
       process.env.ASO_GATEWAY_PORT ? Number(process.env.ASO_GATEWAY_PORT) : undefined,
     )
     .option("--gateway-host <host>", "interface the worker gateway listens on (the tunnel connects locally)", process.env.ASO_GATEWAY_HOST || "127.0.0.1")
+    .option("--gateway-url <url>", "the worker gateway's public wss:// address (e.g. wss://agent007.tailc9777f.ts.net:10000), for join commands", parseWssUrl, process.env.ASO_GATEWAY_URL || undefined)
     .option("--no-discovery", "do not answer LAN discovery: workers need --hub")
     .option("--docker", "run the Hub and dashboard in Docker (Architect stays on the host)", false)
     .option("--test-command <cmd>", "QA test command, split on spaces, run without a shell", process.env.ASO_TEST_COMMAND || "npm test")
@@ -319,6 +332,7 @@ workerKeyCmd
   .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
   .option("--address <address>", "the Hub's address as the new machine reaches it (default: this machine's hostname)")
   .option("--name <name>", "a name for the machine's key (default: its hostname)")
+  .option("--internet", "the machine joins from the internet, through the Hub's worker gateway (its --gateway-url)")
   .option("--projects <ids>", "comma-separated projects it may clone and work on (default: all)")
   .option("--untrusted", "someone else's machine: it only builds, and a trusted machine tests its work")
   .option("--budget <usd>", "USD of model calls its jobs may cause in total", parseUsd)

@@ -871,20 +871,64 @@ export const REPLY_COPY: Record<ReplyMode, { label: string; placeholder: string;
   review: { label: "What should change", placeholder: "What should change? The agent gets this as written, e.g. Make the button bigger and test the empty list", button: "Ask for changes", rows: 3, primary: false },
 };
 
-/**
- * The commands that install aso on a new machine and join it to the Hub with `code`. `hubHost` is
- * the Hub's name as the new machine reaches it: the console's own host, which on Tailscale is the
- * Hub machine's name in the tailnet.
- */
-export function joinCommand(hubHost: string, code: string, sha256?: string | null, port = 7420): string {
-  const hub = hubHost.includes(":") ? `[${hubHost}]` : hubHost;
+/** Download aso from `base` (the Hub's HTTP address) into a fresh private folder, check it against `sha256` when known, and install it. */
+function installCommand(base: string, sha256?: string | null): string {
   // The checksum comes from the Hub over the console's own connection: a package swapped on the
   // way isn't installed. A fresh private folder: no other user can swap the file after the check.
   const check = sha256 ? ` && echo "${sha256}  $d/aso.tgz" | sha256sum -c -` : "";
-  // One line; no --hub: the worker finds the Hub on the LAN or over Tailscale, and again when it
-  // moves. The CLI builds the same line (`joinCommand` in packages/cli/src/commands/worker-keys.ts):
-  // keep them in step. Only the CLI makes lines for the worker gateway (a wss:// address, with --hub).
-  return `d=$(mktemp -d) && curl -fo "$d/aso.tgz" http://${hub}:${port}/dist/aso.tgz${check} && npm install -g "$d/aso.tgz" && aso service install --join ${code}`;
+  return `d=$(mktemp -d) && curl -fo "$d/aso.tgz" ${base}/dist/aso.tgz${check} && npm install -g "$d/aso.tgz"`;
+}
+
+/**
+ * The one line a new machine runs to install aso and join. `address` is the Hub as the machine
+ * reaches it: a host (the Hub's port; no --hub, since the worker finds the Hub on the LAN or over
+ * Tailscale, and again when it moves), or the worker gateway's wss:// address (over HTTPS, and the
+ * worker keeps that address: there's no discovery on the internet). The CLI builds the same line
+ * (`joinCommand` in packages/cli/src/commands/worker-keys.ts): keep them in step.
+ */
+export function joinCommand(address: string, code: string, sha256?: string | null, port = 7420): string {
+  if (/^wss:\/\//i.test(address)) {
+    const gateway = address.replace(/\/+$/, "");
+    return `${installCommand(gateway.replace(/^wss:/i, "https:"), sha256)} && aso service install --hub ${gateway} --join ${code}`;
+  }
+  const host = address.includes(":") ? `[${address}]` : address;
+  return `${installCommand(`http://${host}:${port}`, sha256)} && aso service install --join ${code}`;
+}
+
+/** The invite form on the machines page. */
+export interface InviteForm {
+  name: string;
+  /** It joins from the internet, through the worker gateway. */
+  internet: boolean;
+  untrusted: boolean;
+  projects: string[];
+  budget: string;
+}
+
+export const EMPTY_INVITE: InviteForm = { name: "", internet: false, untrusted: false, projects: [], budget: "" };
+
+/** The line to show for a join code: through the gateway for an internet invite, else to this console's host. */
+export function inviteCommand(opts: { internet: boolean; gatewayUrl?: string; hostname: string; code: string; sha256?: string | null }): { command: string } | { error: string } {
+  if (!opts.internet) return { command: joinCommand(opts.hostname, opts.code, opts.sha256) };
+  if (!opts.gatewayUrl) {
+    return { error: "This Hub has no public gateway address: start it with --gateway-port and --gateway-url (see Workers anywhere in the install guide)." };
+  }
+  return { command: joinCommand(opts.gatewayUrl, opts.code, opts.sha256) };
+}
+
+/** The invite form, as the join-code request's body, or what's wrong with it. */
+export function inviteBody(form: InviteForm): { body: Record<string, unknown> } | { error: string } {
+  const name = form.name.trim();
+  const budget = form.budget.trim().replace(",", ".");
+  if (budget && !(Number.isFinite(Number(budget)) && Number(budget) >= 0)) return { error: "The budget is dollars of model calls, e.g. 10" };
+  return {
+    body: {
+      ...(name ? { name } : {}),
+      ...(form.untrusted ? { trusted: false } : {}),
+      ...(form.projects.length ? { projects: form.projects } : {}),
+      ...(budget ? { budgetUsd: Number(budget) } : {}),
+    },
+  };
 }
 
 /** A worker key's state, for the machines page. */

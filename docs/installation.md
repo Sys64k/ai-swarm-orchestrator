@@ -141,9 +141,10 @@ its traffic gets there:
   with Tailscale Funnel no router port is opened and no domain is needed:
 
   ```bash
-  aso hub-service install ... --gateway-port 7423     # the Hub listens on 127.0.0.1:7423 too
+  aso hub-service install ... --gateway-port 7423 \
+    --gateway-url wss://agent007.tailc9777f.ts.net:10000   # its public address, for join commands
   tailscale funnel --bg --https=10000 http://127.0.0.1:7423
-  aso worker-key new --address wss://agent007.tailc9777f.ts.net:10000
+  aso worker-key new --internet          # or: Add a machine in the console, "joins from the internet"
   ```
 
   The first `tailscale funnel` asks you to allow Funnel for the machine in your tailnet's
@@ -170,8 +171,8 @@ directly on the machine instead.
 ### Machines you don't control
 
 A friend's PC or a volunteer's machine can work for the swarm with a key that's limited to
-what it should do. Give the limits when you invite it (`aso worker-key new`), or change them
-later (`aso worker-key set <id>`, or **Trust**/**Untrust** on the console's machines page):
+what it should do. Give the limits when you invite it (`aso worker-key new`, or **Add a machine** in the console,
+which has the same choices), or change them later (`aso worker-key set <id>`, or **Trust**/**Untrust** on the console's machines page):
 
 ```bash
 aso worker-key new --address wss://agent007.tailc9777f.ts.net:10000 \

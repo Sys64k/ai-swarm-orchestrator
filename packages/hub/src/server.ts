@@ -118,7 +118,7 @@ export interface HubOptions {
    * only the worker connection, Git, the package and joining, with worker keys only (never the
    * main token). Off unless set.
    */
-  gateway?: { port: number; host?: string };
+  gateway?: { port: number; host?: string; url?: string };
   policies?: RoutingPolicies;
   /** Drop nodes silent for longer than this. */
   nodeTimeoutMs?: number;
@@ -883,7 +883,8 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     const { name, ...scope } = req.data ?? {};
     const unknown = unknownProjects(scope.projects);
     if (unknown) return c.json({ error: unknown }, 400);
-    return c.json(workerKeys.createJoinCode(name, Date.now(), scope), 201);
+    const gatewayUrl = opts.gateway?.url;
+    return c.json({ ...workerKeys.createJoinCode(name, Date.now(), scope), ...(gatewayUrl ? { gatewayUrl } : {}) }, 201);
   });
   app.post("/api/worker-keys/join", async (c) => {
     const minute = Math.floor(Date.now() / 60_000);
