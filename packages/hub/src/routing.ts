@@ -33,6 +33,8 @@ export interface RoutingRequest {
    * the code. It still gets the job when it is the only eligible node.
    */
   avoid?: string;
+  /** Why a node may not take this job for reasons beyond its hardware (its key's scope); undefined: it may. */
+  refuse?: (nodeId: string) => string | undefined;
 }
 
 /** What the router needs to know about a worker. */
@@ -72,7 +74,7 @@ export function selectNode(
 
   for (const node of nodes) {
     const metrics = metricsOf(node);
-    const reason = rejectionReason(node, request, policy);
+    const reason = request.refuse?.(node.nodeId) ?? rejectionReason(node, request, policy);
     if (reason) rejected.push({ nodeId: node.nodeId, reason });
     else eligible.push({ node, metrics });
   }

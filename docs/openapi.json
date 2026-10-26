@@ -2612,6 +2612,25 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 64
+          },
+          "projects": {
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+            },
+            "description": "The projects it may clone and work on (default: all)"
+          },
+          "trusted": {
+            "type": "boolean",
+            "description": "A trusted machine also runs QA; an untrusted one only builds, and its work is tested by a trusted one (default: trusted)"
+          },
+          "budgetUsd": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100000,
+            "description": "USD of model calls its jobs may cause in total (default: no cap beyond task budgets)"
           }
         },
         "additionalProperties": false
@@ -2658,6 +2677,25 @@
             "type": "string",
             "description": "ISO 8601 time"
           },
+          "projects": {
+            "description": "The projects it may use; absent: all",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "trusted": {
+            "type": "boolean",
+            "description": "Its machine runs QA too; an untrusted one only builds"
+          },
+          "budgetUsd": {
+            "description": "USD of model calls its jobs may cause in total",
+            "type": "number"
+          },
+          "spentUsd": {
+            "type": "number",
+            "description": "USD its jobs have caused so far (estimated)"
+          },
           "connected": {
             "type": "boolean",
             "description": "Whether a worker is connected with it now"
@@ -2667,6 +2705,8 @@
           "id",
           "name",
           "createdAt",
+          "trusted",
+          "spentUsd",
           "connected"
         ],
         "additionalProperties": false
@@ -3232,6 +3272,47 @@
         "required": [
           "code"
         ]
+      },
+      "WorkerKeyScope": {
+        "type": "object",
+        "properties": {
+          "projects": {
+            "description": "The projects it may use; null: all",
+            "anyOf": [
+              {
+                "maxItems": 100,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+                },
+                "description": "The projects it may clone and work on (default: all)"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "trusted": {
+            "type": "boolean",
+            "description": "A trusted machine also runs QA; an untrusted one only builds, and its work is tested by a trusted one (default: trusted)"
+          },
+          "budgetUsd": {
+            "description": "Its model budget in USD; null: none",
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100000,
+                "description": "USD of model calls its jobs may cause in total (default: no cap beyond task budgets)"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
       },
       "Join": {
         "type": "object",
@@ -5430,6 +5511,70 @@
           },
           "401": {
             "description": "Missing or wrong token"
+          }
+        }
+      }
+    },
+    "/api/worker-keys/{id}": {
+      "post": {
+        "operationId": "postWorkerKey",
+        "tags": [
+          "Workers"
+        ],
+        "summary": "Change what a worker key may do: its projects, whether its machine is trusted, its model budget",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkerKeyScope"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerKey"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body, or an unknown project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "No such key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         }
       }

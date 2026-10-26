@@ -105,8 +105,22 @@ export const PlanReplyBodySchema = z.object({ message: z.string().min(1).max(MAX
 export const CreateTaskBodySchema = TaskSpecInputSchema.extend({ project: ProjectIdSchema.optional() });
 export const SyncBodySchema = z.object({ project: ProjectIdSchema.optional() });
 export const RedeemSignInCodeBodySchema = z.object({ code: z.string().min(1).max(200) });
+/** What a worker key may do: its projects, whether its machine is trusted, its model budget. */
+const ScopeFields = {
+  projects: z.array(ProjectIdSchema).max(100).describe("The projects it may clone and work on (default: all)"),
+  trusted: z.boolean().describe("A trusted machine also runs QA; an untrusted one only builds, and its work is tested by a trusted one (default: trusted)"),
+  budgetUsd: z.number().min(0).max(100_000).describe("USD of model calls its jobs may cause in total (default: no cap beyond task budgets)"),
+};
 export const JoinCodeBodySchema = z.strictObject({
   name: z.string().min(1).max(64).optional().describe("A name for the machine's key (default: the hostname it reports when it joins)"),
+  projects: ScopeFields.projects.optional(),
+  trusted: ScopeFields.trusted.optional(),
+  budgetUsd: ScopeFields.budgetUsd.optional(),
+});
+export const WorkerKeyScopeBodySchema = z.strictObject({
+  projects: ScopeFields.projects.nullable().optional().describe("The projects it may use; null: all"),
+  trusted: ScopeFields.trusted.optional(),
+  budgetUsd: ScopeFields.budgetUsd.nullable().optional().describe("Its model budget in USD; null: none"),
 });
 export const JoinBodySchema = z.strictObject({
   code: z.string().min(1).max(200).describe("The one-time join code"),
@@ -579,6 +593,10 @@ export const WorkerKeySchema = z.object({
   createdAt: Timestamp,
   lastUsedAt: Timestamp.optional(),
   revokedAt: Timestamp.optional(),
+  projects: z.array(z.string()).optional().describe("The projects it may use; absent: all"),
+  trusted: z.boolean().describe("Its machine runs QA too; an untrusted one only builds"),
+  budgetUsd: z.number().optional().describe("USD of model calls its jobs may cause in total"),
+  spentUsd: z.number().describe("USD its jobs have caused so far (estimated)"),
   connected: z.boolean().describe("Whether a worker is connected with it now"),
 });
 export const DiscoveryProofSchema = z.object({ proof: z.string().describe("HMAC-SHA256 over the claim, keyed with the credential's secret (hex)") });

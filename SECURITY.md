@@ -100,6 +100,10 @@ the Hub (`aso hub-service restart`). `aso llm-check` confirms the Anthropic key.
   leaked token could do stay off the internet. A worker key there can do what it can anywhere:
   take jobs and use the projects' Git (clone any project, push only its own task branches). An
   address with 20 failed keys or join codes in 10 minutes is refused for 10 minutes.
+- **A worker key can be limited** (`aso worker-key new|set`): to some projects (jobs and Git),
+  to building only (`--untrusted`: QA, which runs the code, always runs on a trusted machine),
+  and to a model budget its jobs may cause. Enforced on the Hub when it picks a machine for a
+  job, on every Git request, and before every model call.
 - **LAN discovery can't be spoofed into leaking a key.** A worker without `--hub` broadcasts a
   query (and sends it to each online Tailscale peer) that names its key by a hash, never the key. It connects only to an answer whose HMAC
   proof (made with the key's hash, which only the Hub holds) covers the worker's nonce, the port

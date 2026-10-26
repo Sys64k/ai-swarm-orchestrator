@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { hubPath } from "../lib/hub-routes.ts";
 import { describe, it } from "node:test";
 import {
   formatUsd,
@@ -13,6 +14,7 @@ import {
   joinCommand,
   workerAccess,
   workerKeyBadge,
+  workerKeyScope,
   formatDuration,
   hubUpdateView,
   shortCommit,
@@ -588,6 +590,15 @@ describe("worker machines and their keys", () => {
     );
     assert.match(joinCommand("::1", "C"), /http:\/\/\[::1\]:7420\//);
   });
+  it("says what each key may do", () => {
+    assert.equal(workerKeyScope({}), "Trusted · all projects", "a key from an older Hub");
+    assert.equal(workerKeyScope({ trusted: false, projects: ["aso-ui"], budgetUsd: 10, spentUsd: 1.2 }), "Untrusted: builds only · aso-ui · $1.20 of $10");
+    assert.equal(workerKeyScope({ trusted: true, spentUsd: 3 }), "Trusted · all projects · $3.00 spent");
+    assert.equal(hubPath("POST", ["worker-keys", "fecac655"]), "/api/worker-keys/fecac655", "the console can trust or untrust a machine");
+    assert.equal(hubPath("POST", ["worker-keys", "join"]), undefined, "but not join");
+    assert.equal(hubPath("POST", ["worker-keys", "join-codes"]), "/api/worker-keys/join-codes", "(its own route)");
+  });
+
   it("says where each key stands and how a worker connected", () => {
     assert.deepEqual(workerKeyBadge({ connected: true }, now), { label: "Connected", tone: "good" });
     assert.deepEqual(workerKeyBadge({ connected: false }, now), { label: "Not connected", tone: "waiting", detail: "never joined" });

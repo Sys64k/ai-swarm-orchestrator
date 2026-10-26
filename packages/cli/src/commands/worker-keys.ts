@@ -1,4 +1,5 @@
 import os from "node:os";
+import { describeScope } from "@aso/hub";
 import { hubHttpBase } from "@aso/shared";
 import { api } from "../hub-api.js";
 
@@ -8,7 +9,24 @@ interface WorkerKey {
   createdAt: string;
   lastUsedAt?: string;
   revokedAt?: string;
+  projects?: string[];
+  trusted?: boolean;
+  budgetUsd?: number;
+  spentUsd?: number;
   connected: boolean;
+}
+
+
+/** The scope settings from `worker-key new|set` options; `null`: remove that limit. */
+export function scopeBody(opts: { projects?: string; allProjects?: boolean; trusted?: boolean; untrusted?: boolean; budget?: number | false }): Record<string, unknown> {
+  if (opts.trusted && opts.untrusted) throw new Error("--trusted or --untrusted, not both");
+  if (opts.projects && opts.allProjects) throw new Error("--projects or --all-projects, not both");
+  const projects = opts.projects?.split(",").map((p) => p.trim()).filter(Boolean);
+  return {
+    ...(projects?.length ? { projects } : opts.allProjects ? { projects: null } : {}),
+    ...(opts.untrusted ? { trusted: false } : opts.trusted ? { trusted: true } : {}),
+    ...(typeof opts.budget === "number" ? { budgetUsd: opts.budget } : opts.budget === false ? { budgetUsd: null } : {}),
+  };
 }
 
 /**
@@ -53,15 +71,15 @@ export function installCommand(http: string, sha256?: string | null): string {
 /** One line per key, for `aso worker-keys`. */
 export function keyLine(k: WorkerKey): string {
   const state = k.revokedAt ? `revoked ${k.revokedAt}` : k.connected ? "connected" : k.lastUsedAt ? `last used ${k.lastUsedAt}` : "never used";
-  return `${k.id}  ${k.name}  (${state})`;
+  return `${k.id}  ${k.name}  (${state}; ${describeScope(k)})`;
 }
 
 /** `aso worker-key new`: a one-time join code, and the commands to run with it on the new machine. */
-export async function newWorkerKeyCommand(opts: { hub: string; address?: string; name?: string }): Promise<void> {
+export async function newWorkerKeyCommand(opts: { hub: string; address?: string; name?: string; projects?: string; untrusted?: boolean; budget?: number }): Promise<void> {
   const version = await api<{ sha256: string | null }>(hubHttpBase(opts.hub), "/api/version");
   const joined = await api<{ code: string; expiresAt: string }>(hubHttpBase(opts.hub), "/api/worker-keys/join-codes", {
     method: "POST",
-    body: JSON.stringify(opts.name ? { name: opts.name } : {}),
+    body: JSON.stringify({ ...(opts.name ? { name: opts.name } : {}), ...scopeBody(opts) }),
   });
   // Machines elsewhere reach the Hub by its name (on Tailscale, its MagicDNS name), not 127.0.0.1.
   const address = opts.address ?? (opts.hub === "127.0.0.1" || opts.hub === "localhost" ? os.hostname() : opts.hub);
@@ -73,6 +91,15 @@ export async function listWorkerKeysCommand(opts: { hub: string }): Promise<void
   const keys = await api<WorkerKey[]>(hubHttpBase(opts.hub), "/api/worker-keys");
   if (keys.length === 0) return void console.log("No worker keys yet: `aso worker-key new` lets a machine join with its own.");
   for (const k of keys) console.log(keyLine(k));
+}
+
+/** `aso worker-key set <id>`: change a key's projects, trust or budget. */
+export async function setWorkerKeyCommand(id: string, opts: { hub: string; projects?: string; allProjects?: boolean; trusted?: boolean; untrusted?: boolean; budget?: number | boolean }): Promise<void> {
+  // commander's --no-budget sets budget to false; without either option it stays true.
+  const body = scopeBody({ ...opts, budget: opts.budget === true ? undefined : opts.budget });
+  if (Object.keys(body).length === 0) throw new Error("nothing to change: give --projects, --all-projects, --trusted, --untrusted, --budget or --no-budget");
+  const k = await api<WorkerKey>(hubHttpBase(opts.hub), `/api/worker-keys/${encodeURIComponent(id)}`, { method: "POST", body: JSON.stringify(body) });
+  console.log(`${k.id} (${k.name}): ${describeScope(k)}`);
 }
 
 /** `aso worker-key revoke <id>`: the machine is disconnected and can't come back with its key. */

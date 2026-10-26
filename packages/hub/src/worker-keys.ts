@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { JsonFileWriter } from "./push/json-file.js";
+import { describeScope, type KeyScope } from "./worker-scope.js";
 import { createLogger, discoveryKeyId, discoverySecret, WORKER_KEY_PREFIX } from "@aso/shared";
 
 const log = createLogger("worker-keys");
@@ -23,6 +24,12 @@ const RecordSchema = z.object({
   createdAt: z.string(),
   lastUsedAt: z.string().optional(),
   revokedAt: z.string().optional(),
+  /** The projects it may use; absent: all. */
+  projects: z.array(z.string()).optional(),
+  /** Absent (keys from before scopes): trusted. */
+  trusted: z.boolean().optional(),
+  budgetUsd: z.number().optional(),
+  spentUsd: z.number().optional(),
 });
 type WorkerKeyRecord = z.infer<typeof RecordSchema>;
 
@@ -33,7 +40,21 @@ export interface WorkerKeyView {
   createdAt: string;
   lastUsedAt?: string;
   revokedAt?: string;
+  projects?: string[];
+  trusted: boolean;
+  budgetUsd?: number;
+  spentUsd: number;
 }
+
+/** What a join code gives the key it becomes, and what can be changed on a key later (`null`: remove the limit). */
+export interface ScopeSettings {
+  projects?: string[] | null;
+  trusted?: boolean;
+  budgetUsd?: number | null;
+}
+
+/** How often spending is written down (it changes with every model call). */
+const SPEND_SAVE_MS = 30_000;
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 
@@ -44,7 +65,8 @@ const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
  * which someone with the Hub's token created; the Hub keeps only the key's hash.
  */
 export class WorkerKeys {
-  private readonly codes = new Map<string, { expiresAt: number; name?: string }>();
+  private readonly codes = new Map<string, { expiresAt: number; name?: string; scope?: ScopeSettings }>();
+  private spendSaveAt = 0;
   private readonly lastUsedSaved = new Map<string, number>();
 
   private readonly writer: JsonFileWriter | undefined;
@@ -69,13 +91,16 @@ export class WorkerKeys {
     return new WorkerKeys(records, file);
   }
 
-  /** A one-time code a new machine trades for its key. `name` labels the key (default: the machine's hostname). */
-  createJoinCode(name?: string, now = Date.now()): { code: string; expiresAt: string } {
+  /**
+   * A one-time code a new machine trades for its key. `name` labels the key (default: the
+   * machine's hostname); `scope` limits it (default: all projects, trusted, no budget).
+   */
+  createJoinCode(name?: string, now = Date.now(), scope?: ScopeSettings): { code: string; expiresAt: string } {
     for (const [code, c] of this.codes) if (c.expiresAt <= now) this.codes.delete(code);
     while (this.codes.size >= MAX_CODES) this.codes.delete(this.codes.keys().next().value!);
     const code = randomBytes(18).toString("base64url");
     const expiresAt = now + JOIN_CODE_TTL_MS;
-    this.codes.set(code, { expiresAt, ...(name ? { name } : {}) });
+    this.codes.set(code, { expiresAt, ...(name ? { name } : {}), ...(scope ? { scope } : {}) });
     return { code, expiresAt: new Date(expiresAt).toISOString() };
   }
 
@@ -91,7 +116,10 @@ export class WorkerKeys {
     this.codes.delete(code);
     if (!entry || entry.expiresAt <= now) return undefined;
     const key = `${WORKER_KEY_PREFIX}${randomBytes(32).toString("base64url")}`;
-    const record: WorkerKeyRecord = { id: randomUUID().slice(0, 8), name: entry.name ?? machine, hash: sha256(key), createdAt: new Date(now).toISOString() };
+    const record: WorkerKeyRecord = applyScope(
+      { id: randomUUID().slice(0, 8), name: entry.name ?? machine, hash: sha256(key), createdAt: new Date(now).toISOString() },
+      entry.scope ?? {},
+    );
     this.records.push(record);
     try {
       await this.save();
@@ -135,6 +163,41 @@ export class WorkerKeys {
     return undefined;
   }
 
+  /** A key's scope, for the rules in worker-scope.ts; undefined for no such key. */
+  scopeOf(id: string): KeyScope | undefined {
+    const r = this.records.find((x) => x.id === id);
+    return r && { ...(r.projects ? { projects: r.projects } : {}), trusted: r.trusted ?? true, ...(r.budgetUsd !== undefined ? { budgetUsd: r.budgetUsd } : {}), spentUsd: r.spentUsd ?? 0 };
+  }
+
+  /** Change a key's scope; returns it, or undefined when there is no such key. */
+  async setScope(id: string, changes: ScopeSettings): Promise<WorkerKeyView | undefined> {
+    const record = this.records.find((r) => r.id === id);
+    if (!record) return undefined;
+    applyScope(record, changes);
+    await this.save();
+    log.info(`worker key ${record.id} (${record.name}): ${describeScope(this.scopeOf(id)!)}`);
+    return view(record);
+  }
+
+  /** Write down spending not saved yet (the Hub calls this when it stops). */
+  async flush(): Promise<void> {
+    await this.save();
+  }
+
+  /**
+   * Add model spending caused by a key's jobs; written down every half minute at most. The budget
+   * is checked before a call and spending added after it, so calls at once can overshoot a little:
+   * it is an estimate.
+   */
+  addSpend(id: string, usd: number, now = Date.now()): void {
+    const record = this.records.find((r) => r.id === id);
+    if (!record || usd <= 0) return;
+    record.spentUsd = Math.round(((record.spentUsd ?? 0) + usd) * 1e6) / 1e6;
+    if (now - this.spendSaveAt < SPEND_SAVE_MS) return;
+    this.spendSaveAt = now;
+    this.save().catch((err: Error) => log.warn(`could not save worker key spending: ${err.message}`));
+  }
+
   /** Whether the key with this id exists and isn't revoked (connections made with it re-check this). */
   isActive(id: string): boolean {
     return this.records.some((r) => r.id === id && !r.revokedAt);
@@ -166,6 +229,16 @@ export class WorkerKeys {
   }
 }
 
-function view({ hash: _hash, ...rest }: WorkerKeyRecord): WorkerKeyView {
-  return rest;
+function view({ hash: _hash, trusted, spentUsd, ...rest }: WorkerKeyRecord): WorkerKeyView {
+  return { ...rest, trusted: trusted ?? true, spentUsd: spentUsd ?? 0 };
+}
+
+/** Set a record's scope fields from settings (`null` removes a limit; absent leaves it). */
+function applyScope(record: WorkerKeyRecord, s: ScopeSettings): WorkerKeyRecord {
+  if (s.projects === null) delete record.projects;
+  else if (s.projects) record.projects = [...new Set(s.projects)];
+  if (s.trusted !== undefined) record.trusted = s.trusted;
+  if (s.budgetUsd === null) delete record.budgetUsd;
+  else if (s.budgetUsd !== undefined) record.budgetUsd = s.budgetUsd;
+  return record;
 }

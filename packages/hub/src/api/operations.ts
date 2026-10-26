@@ -40,6 +40,7 @@ import {
   RedeemSignInCodeBodySchema,
   JoinBodySchema,
   JoinCodeBodySchema,
+  WorkerKeyScopeBodySchema,
   JoinCodeSchema,
   WorkerKeyJoinedSchema,
   WorkerKeySchema,
@@ -68,6 +69,7 @@ export const REQUEST_SCHEMAS = {
   HubUpdateReport: HubUpdateReportBodySchema,
   RedeemSignInCode: RedeemSignInCodeBodySchema,
   JoinCode: JoinCodeBodySchema,
+  WorkerKeyScope: WorkerKeyScopeBodySchema,
   Join: JoinBodySchema,
   DiscoveryProofBody: DiscoveryProofBodySchema,
   DeskAssignment: DeskAssignmentBodySchema,
@@ -257,6 +259,10 @@ const WORKERS: ApiOperation[] = [
     responses: { 201: ok("WorkerKeyJoined", "Joined"), 400: err("Invalid body"), 403: err("Unknown, used or expired code"), 429: err("Too many failed attempts") },
   },
   { method: "get", path: "/api/worker-keys", tag: "Workers", summary: "The worker keys, revoked ones included", responses: { 200: ok(["WorkerKey"]) } },
+  {
+    method: "post", path: "/api/worker-keys/{id}", tag: "Workers", summary: "Change what a worker key may do: its projects, whether its machine is trusted, its model budget", body: "WorkerKeyScope",
+    responses: { 200: ok("WorkerKey"), 400: err("Invalid body, or an unknown project"), 404: err("No such key") },
+  },
   {
     method: "post", path: "/api/worker-keys/{id}/revoke", tag: "Workers", summary: "Revoke a worker key: its machine is disconnected and can't come back with it",
     responses: { 200: ok("WorkerKey"), 404: err("No such key") },

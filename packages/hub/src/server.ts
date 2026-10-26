@@ -6,6 +6,7 @@ import { Hono, type Context, type MiddlewareHandler } from "hono";
 import type { WSEvents } from "hono/ws";
 import { serve, type ServerType } from "@hono/node-server";
 import { createGatewayApp, PUBLIC_API_PATHS, requestAddress } from "./gateway.js";
+import { budgetSpent, mayUseProject, projectOfGitPath, REFUSE_ALL, refuseJob, type KeyScope } from "./worker-scope.js";
 import { createNodeWebSocket } from "@hono/node-ws";
 import type { WSContext } from "hono/ws";
 import {
@@ -31,6 +32,7 @@ import {
   discoveryProof,
   discoverySecret,
   JoinCodeBodySchema,
+  WorkerKeyScopeBodySchema,
   parseAgentMessage,
   parseBody,
   runningJobsOf,
@@ -238,12 +240,14 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   const reviewModel = new Promise<LlmAdapter | undefined>((resolve) => (setReviewModel = resolve));
   const acceptance =
     opts.acceptanceCheck === false ? undefined : typeof opts.acceptanceCheck === "object" ? opts.acceptanceCheck : new AcceptanceChecker(reviewModel);
+  // A machine's worker-key scope (none for the Hub's own token); set once the keys are loaded below.
+  let scopeOfNode: (nodeId: string) => KeyScope | undefined = () => undefined;
   const projects = await ProjectSet.open(registry, {
     root: opts.projectsRoot,
     single: opts.targetDir,
     mainBranch: opts.mainBranch,
     persist: opts.stateDir !== null,
-    tasks: { policies: opts.policies, reclaimGraceMs: opts.reclaimGraceMs, qa: opts.qa, acceptance },
+    tasks: { policies: opts.policies, reclaimGraceMs: opts.reclaimGraceMs, qa: opts.qa, acceptance, refuseWorker: (nodeId, job) => refuseJob(scopeOfNode(nodeId), job) },
     deps: { installer: opts.dependencyInstaller, allow: opts.allowDependencies },
     sync: { enabled: opts.sync?.enabled, remote: opts.sync?.remote, token: opts.sync?.token, retryMs: opts.sync?.retryMs },
     pullRequests: opts.pullRequests,
@@ -269,6 +273,17 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   // Saved owners keep a restarted Hub's held jobs with their credential. On start, before any node
   // is back, only node ids a task still names are kept: the rest have nothing left to protect.
   const nodeOwners = await NodeOwners.open(conversationDir);
+  const keyOfNode = (nodeId: string) => nodeOwners.ownerOf(nodeId) ?? undefined;
+  // No owner key: the Hub's own token, fully trusted. An owner key that's gone: nothing allowed.
+  scopeOfNode = (nodeId) => {
+    const keyId = keyOfNode(nodeId);
+    return keyId ? (workerKeys.scopeOf(keyId) ?? REFUSE_ALL) : undefined;
+  };
+  /** The projects in `list` this Hub doesn't have, as an error; undefined when all exist. */
+  const unknownProjects = (list?: string[] | null) => {
+    const unknown = list?.filter((p) => !projects.get(p));
+    return unknown?.length ? `no project ${unknown.join(", ")}` : undefined;
+  };
   nodeOwners.prune(nodeIdsInUse(projects.list().flatMap((p) => p.tasks.list())));
   if (conversationDir) {
     deployer = new Deployer({
@@ -334,6 +349,13 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     agentAdapter,
     deskModels,
     defaultAgentSpec: llm.agentModel || model,
+    spend: {
+      refuse: (nodeId) => budgetSpent(scopeOfNode(nodeId)),
+      record: (nodeId, usd) => {
+        const keyId = keyOfNode(nodeId);
+        if (keyId) workerKeys.addSpend(keyId, usd);
+      },
+    },
     escalation,
     taskBudgetUsd: llm.taskBudgetUsd,
     planBudgetUsd: llm.planBudgetUsd,
@@ -577,6 +599,17 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   );
   app.get("/api/openapi.json", (c) => c.json(openApiDocument(hubVersion() ?? UNKNOWN_VERSION)));
   app.use(`${GIT_PATH}/*`, requireWorker);
+  // A worker key limited to some projects clones and pushes only those (the Git rule is
+  // mayUseProject; jobs follow refuseJob). A path that names no project is refused to a key.
+  app.use(`${GIT_PATH}/*`, async (c, next) => {
+    const key = workerKeyOf(c);
+    if (!key) return next();
+    const project = projectOfGitPath(c.req.path, GIT_PATH);
+    if (!project || !mayUseProject(workerKeys.scopeOf(key.id) ?? REFUSE_ALL, project)) {
+      return c.json({ error: `this worker key may not use ${project ?? c.req.path}` }, 403);
+    }
+    return next();
+  });
   // Takes the main token too: the worker gateway serves its own socket route, worker keys only.
   app.use(WS_PATH, requireWorker);
 
@@ -833,7 +866,10 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   app.post("/api/worker-keys/join-codes", async (c) => {
     const req = await parsed(c, JoinCodeBodySchema, { optional: true });
     if (!req.ok) return c.json({ error: req.error }, 400);
-    return c.json(workerKeys.createJoinCode(req.data?.name), 201);
+    const { name, ...scope } = req.data ?? {};
+    const unknown = unknownProjects(scope.projects);
+    if (unknown) return c.json({ error: unknown }, 400);
+    return c.json(workerKeys.createJoinCode(name, Date.now(), scope), 201);
   });
   app.post("/api/worker-keys/join", async (c) => {
     const minute = Math.floor(Date.now() / 60_000);
@@ -867,6 +903,17 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   });
   const keyView = (k: WorkerKeyView) => ({ ...k, connected: [...connections.values()].some((c) => c.workerKey?.id === k.id) });
   app.get("/api/worker-keys", (c) => c.json(workerKeys.list().map(keyView)));
+  // Change what a key may do: its projects, whether its machine is trusted, its model budget.
+  app.post("/api/worker-keys/:id", async (c) => {
+    const req = await parsed(c, WorkerKeyScopeBodySchema);
+    if (!req.ok) return c.json({ error: req.error }, 400);
+    const unknown = unknownProjects(req.data.projects);
+    if (unknown) return c.json({ error: unknown }, 400);
+    const updated = await workerKeys.setScope(c.req.param("id"), req.data);
+    if (!updated) return c.json({ error: "no such worker key" }, 404);
+    projects.tasks.dispatch(); // a wider scope may free waiting jobs
+    return c.json(keyView(updated));
+  });
   app.post("/api/worker-keys/:id/revoke", async (c) => {
     const id = c.req.param("id");
     // Revoked in memory first: cut it off even if saving fails (the 500 then says so).
@@ -1148,6 +1195,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       // restore() decides what happens to their jobs. Hub-side steps still running (a merge)
       // are saved mid-way and simply run again on the next start.
       await projects.close();
+      await workerKeys.flush().catch((err: Error) => log.warn(`could not save worker key spending: ${err.message}`));
       await store?.close();
       for (const c of connections.values()) c.ws.close(1001, "hub shutting down");
       await new Promise<void>((resolve) => server.close(() => resolve()));

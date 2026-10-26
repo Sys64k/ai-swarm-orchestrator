@@ -24,6 +24,7 @@ import { DEFAULT_ROUTING_POLICIES, selectNode, type RoutingPolicies } from "./ro
 import type { TranscriptInput } from "./transcripts.js";
 import type { Screenshots, ScreenshotSet } from "./screenshots.js";
 import { acceptanceCounts, unmetReason, type AcceptanceChecker } from "./llm/acceptance.js";
+import type { WorkerJob } from "./worker-scope.js";
 
 const log = createLogger("tasks");
 
@@ -172,6 +173,8 @@ export const DEFAULT_QA: QaOptions = { enabled: true, command: ["npm", "test"], 
 export interface TaskManagerOptions {
   /** The project these tasks belong to; sent to workers so they check out the right repository. */
   project?: string;
+  /** Why a machine may not take a job (its worker key's scope); undefined: it may. */
+  refuseWorker?: (nodeId: string, job: WorkerJob) => string | undefined;
   /**
    * Called when work may have become dispatchable (a node freed up, a task requeued). With
    * several projects sharing the workers, this dispatches all of them; default: this one.
@@ -214,6 +217,7 @@ export class TaskManager {
   private readonly maxDrops: number;
   private readonly maxQaAttempts: number;
   private readonly maxReworkRounds: number;
+  private readonly refuseWorker?: TaskManagerOptions["refuseWorker"];
   private readonly reclaimGraceMs: number;
   readonly qa: QaOptions;
   private readonly onMerged?: (task: TaskRecord) => void;
@@ -236,6 +240,7 @@ export class TaskManager {
     this.maxDrops = opts.maxDrops ?? 3;
     this.maxQaAttempts = opts.maxQaAttempts ?? 3;
     this.maxReworkRounds = opts.maxReworkRounds ?? 3;
+    this.refuseWorker = opts.refuseWorker;
     this.reclaimGraceMs = opts.reclaimGraceMs ?? 5 * 60_000;
     this.qa = { ...DEFAULT_QA, ...opts.qa };
     this.onMerged = opts.onMerged;
@@ -438,7 +443,8 @@ export class TaskManager {
         : `waiting for ${unmet.map((d) => d.spec.taskId).join(", ")} to be merged`;
       return;
     }
-    const decision = selectNode({ role: task.spec.role, kind: task.spec.kind }, this.registry.workerSnapshots(), this.policies);
+    const refuse = (nodeId: string) => this.refuseWorker?.(nodeId, { project: this.project, job: "implement" });
+    const decision = selectNode({ role: task.spec.role, kind: task.spec.kind, refuse }, this.registry.workerSnapshots(), this.policies);
     if (!decision.ok) return this.wait(task, decision);
 
     this.registry.assign(decision.nodeId, task.spec.taskId);
@@ -453,7 +459,8 @@ export class TaskManager {
 
   private dispatchQa(task: TaskRecord): void {
     // QA on another machine than the implementer when one is free, so the tests run on a fresh checkout and setup.
-    const decision = selectNode({ role: "qa", kind: this.qa.kind, avoid: task.nodeId }, this.registry.workerSnapshots(), this.policies);
+    const refuse = (nodeId: string) => this.refuseWorker?.(nodeId, { project: this.project, job: "test" });
+    const decision = selectNode({ role: "qa", kind: this.qa.kind, avoid: task.nodeId, refuse }, this.registry.workerSnapshots(), this.policies);
     if (!decision.ok) return this.wait(task, decision);
 
     this.registry.assign(decision.nodeId, task.spec.taskId);

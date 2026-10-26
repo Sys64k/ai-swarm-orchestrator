@@ -39,6 +39,9 @@ const RULES: ReadonlyArray<{ method: "GET" | "POST"; pattern: RegExp }> = [
   { method: "GET", pattern: /^worker-keys$/ },
   { method: "POST", pattern: /^worker-keys\/join-codes$/ },
   { method: "POST", pattern: new RegExp(`^worker-keys/${ID}/revoke$`) },
+  // Trusting or untrusting a machine; projects and budgets are set with `aso worker-key set`.
+  // Key ids are 8 hex characters, so this never matches `join` or `join-codes`.
+  { method: "POST", pattern: /^worker-keys\/[0-9a-f]{8}$/ },
   { method: "GET", pattern: /^tasks$/ },
   { method: "GET", pattern: new RegExp(`^tasks/${ID}$`) },
   { method: "GET", pattern: new RegExp(`^tasks/${ID}/(transcript|diff|checks)$`) },

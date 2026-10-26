@@ -34,7 +34,7 @@ export { MAX_FILE_PATCH, MAX_TOTAL_PATCH, parseDiff } from "./git/diff.js";
 export { StateStore, type Snapshot } from "./state-store.js";
 export { Transcripts, type TranscriptEntry, type TranscriptInput, type TranscriptSubject } from "./transcripts.js";
 export { SignInCodes, SIGN_IN_CODE_TTL_MS } from "./sign-in-codes.js";
-export { JOIN_CODE_TTL_MS, WorkerKeys, type WorkerKeyView } from "./worker-keys.js";
+export { JOIN_CODE_TTL_MS, WorkerKeys, type ScopeSettings, type WorkerKeyView } from "./worker-keys.js";
 export { NodeOwners, nodeIdsInUse } from "./node-owners.js";
 export { mergedTaskBranches, pruneMergedTaskBranches } from "./git/task-branches.js";
 export { Notifier, TEST_NOTIFICATION } from "./push/notifier.js";
@@ -51,3 +51,4 @@ export { deskName, DeskModels, desksOf, modelConcurrency, type ModelSettings, ty
 export { CLAUDE_FALLBACK, DEFAULT_CLAUDE_MODEL, environmentProviders, fetchModels, parseModelList, parseSpec, providerView, Providers, resolveModel, type Provider, type ProviderInput, type ProviderStatus } from "./llm/providers.js";
 export { ACCEPTANCE_DIFF_LIMIT, AcceptanceChecker, acceptanceCounts, acceptancePrompt, diffText, readVerdict, unmetReason, type AcceptanceVerdict, type CriterionVerdict } from "./llm/acceptance.js";
 export { AttemptLimiter, clientAddress, createGatewayApp, gatewayAccess, GATEWAY_MAX_FAILURES, JOIN_PATH, PUBLIC_API_PATHS, type GatewayRule } from "./gateway.js";
+export { budgetSpent, describeScope, mayUseProject, projectOfGitPath, REFUSE_ALL, refuseJob, type KeyScope, type WorkerJob } from "./worker-scope.js";

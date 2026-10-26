@@ -894,6 +894,13 @@ export function workerKeyBadge(k: Pick<WorkerKey, "revokedAt" | "connected" | "l
   return { label: "Not connected", tone: "waiting", detail: k.lastUsedAt ? `last seen ${timeAgo(k.lastUsedAt, now)}` : "never joined" };
 }
 
+/** What a key may do, in words: "Untrusted · aso-ui · $1.20 of $10" (the CLI's is describeScope in hub/src/worker-scope.ts). */
+export function workerKeyScope(k: Pick<WorkerKey, "projects" | "trusted" | "budgetUsd" | "spentUsd">): string {
+  const spent = k.spentUsd ?? 0;
+  const money = k.budgetUsd !== undefined ? `$${spent.toFixed(2)} of $${k.budgetUsd}` : spent ? `$${spent.toFixed(2)} spent` : undefined;
+  return [k.trusted === false ? "Untrusted: builds only" : "Trusted", k.projects ? k.projects.join(", ") : "all projects", money].filter(Boolean).join(" · ");
+}
+
 /** How a worker connected: its own key, or the Hub's main token (which can do everything). */
 export function workerAccess(node: Pick<HubNode, "workerKey">): string | undefined {
   if (node.workerKey === undefined) return undefined; // an older Hub
