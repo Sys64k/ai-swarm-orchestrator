@@ -13,6 +13,8 @@ services:
     ports:
       - "${ASO_BIND:-0.0.0.0}:${ASO_HUB_PORT:-7420}:7420"
       - "${ASO_BIND:-0.0.0.0}:${ASO_DASHBOARD_PORT:-7421}:7421"
+      # The worker gateway, for a TLS tunnel on this machine (Tailscale Funnel): never on other interfaces.
+      - "127.0.0.1:${ASO_GATEWAY_PORT:-7423}:7423"
     volumes:
       # The projects folder: each git repository in it is a project.
       - "${ASO_PROJECTS_ROOT:?set ASO_PROJECTS_ROOT to the projects folder}:/projects"
@@ -41,6 +43,9 @@ services:
       ASO_ESCALATION: "${ASO_ESCALATION:-1}"
       # `host`: deploy commands are handed to `aso start-hub --docker` on the host (the container has no Docker).
       ASO_DEPLOY_RUNNER: "${ASO_DEPLOY_RUNNER:-}"
+      # Set: the worker gateway listens on 7423 in the container (published above).
+      ASO_GATEWAY_PORT: "${ASO_GATEWAY_PORT:+7423}"
+      ASO_GATEWAY_HOST: "0.0.0.0"
       # Read from the environment of `aso start-hub --docker`; never baked into the image.
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
       # Cloud providers' keys: each makes that provider available (docs/models.md, "Providers").

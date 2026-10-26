@@ -29,6 +29,11 @@ describe("joining a Hub from anywhere", () => {
     // The same line as the console's joinCommand (packages/dashboard/test/view.test.ts asserts this string too).
     assert.equal(joinCommand("agent007", "CODE123", "ab12"), 'd=$(mktemp -d) && curl -fo "$d/aso.tgz" http://agent007:7420/dist/aso.tgz && echo "ab12  $d/aso.tgz" | sha256sum -c - && npm install -g "$d/aso.tgz" && aso service install --join CODE123');
     assert.ok(lines.includes(`  ${joinCommand("agent007", "CODE123", "ab12")}`), "one line, without --hub: the worker finds the Hub on the LAN or over Tailscale");
+    assert.equal(
+      joinCommand("wss://agent007.tailc9777f.ts.net:10000", "C0DE"),
+      'd=$(mktemp -d) && curl -fo "$d/aso.tgz" https://agent007.tailc9777f.ts.net:10000/dist/aso.tgz && npm install -g "$d/aso.tgz" && aso service install --hub wss://agent007.tailc9777f.ts.net:10000 --join C0DE',
+      "through the worker gateway: over TLS, and the worker keeps the address (no discovery on the internet)",
+    );
     assert.ok(lines.some((l) => l.includes("add\n") || l.includes("--hub agent007")), "what to add when it can't");
     assert.equal(keyLine({ id: "k1", name: "avalon", createdAt: "x", connected: true }), "k1  avalon  (connected)");
     assert.equal(keyLine({ id: "k2", name: "mbp", createdAt: "x", connected: false }), "k2  mbp  (never used)");
