@@ -93,6 +93,13 @@ the Hub (`aso hub-service restart`). `aso llm-check` confirms the Anthropic key.
 - **No plain `ws://` to the internet.** Before every connection, a worker refuses a Hub address
   that resolves to a public IP unless it's `wss://` (`--allow-insecure` overrides).
   Private ranges, loopback and Tailscale's `100.64.0.0/10` count as private.
+- **The worker gateway is the only part meant for the internet.** With `--gateway-port`, a
+  second listener (on `127.0.0.1`, behind a TLS tunnel such as Tailscale Funnel) serves only
+  the worker connection, Git, the package, `health`, `version` and joining. Everything else
+  answers 404, and the main token is refused there, so the API, the console and everything a
+  leaked token could do stay off the internet. A worker key there can do what it can anywhere:
+  take jobs and use the projects' Git (clone any project, push only its own task branches). An
+  address with 20 failed keys or join codes in 10 minutes is refused for 10 minutes.
 - **LAN discovery can't be spoofed into leaking a key.** A worker without `--hub` broadcasts a
   query (and sends it to each online Tailscale peer) that names its key by a hash, never the key. It connects only to an answer whose HMAC
   proof (made with the key's hash, which only the Hub holds) covers the worker's nonce, the port

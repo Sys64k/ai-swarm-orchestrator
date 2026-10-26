@@ -31,6 +31,8 @@ Every `aso` command and its options.
 | `--no-architect` | | Do not start the Architect |
 | `--discovery-port <port>` | `7419` | UDP port this machine answers workers' [LAN discovery](installation.md#finding-the-hub-on-the-lan) on |
 | `--no-discovery` | | Don't answer LAN discovery: workers then need `--hub` |
+| `--gateway-port <port>` | off | Also listen here for workers coming from the internet through a TLS tunnel: only the worker connection, Git, the package and joining, worker keys only. See [Workers anywhere](installation.md#workers-anywhere) |
+| `--gateway-host <host>` | `127.0.0.1` | Interface the worker gateway listens on (the tunnel connects locally) |
 | `--update-from <git-url>` | `ASO_UPDATE_FROM` | Keep the Hub on that ASO repository's `main` (see [Automatic Hub updates](installation.md#automatic-hub-updates)). Only for an installed package run as the Hub service |
 
 ## `aso start-worker`

@@ -134,8 +134,25 @@ its traffic gets there:
   itself (see [Finding the Hub](#finding-the-hub-on-the-lan)); open the console at its tailnet
   address, so the command downloads aso from there. WireGuard encrypts everything end to end,
   and nothing of the Hub faces the internet.
-- **TLS:** with a `wss://` address (a reverse proxy or tunnel with HTTPS in front of the Hub's
-  port), the worker connection, Git and updates all use TLS.
+- **From the internet: the worker gateway.** For machines outside your tailnet (a friend's PC,
+  a cloud machine), the Hub opens a second port that serves **only** what a worker needs: the
+  worker connection, Git, the aso package and joining. It takes **worker keys only**, never the
+  Hub's main token, so the API and the console stay private. Put a TLS tunnel in front of it;
+  with Tailscale Funnel no router port is opened and no domain is needed:
+
+  ```bash
+  aso hub-service install ... --gateway-port 7423     # the Hub listens on 127.0.0.1:7423 too
+  tailscale funnel --bg --https=10000 http://127.0.0.1:7423
+  aso worker-key new --address wss://agent007.tailc9777f.ts.net:10000
+  ```
+
+  The first `tailscale funnel` asks you to allow Funnel for the machine in your tailnet's
+  settings. The last command prints the one line to run on the new machine: it downloads aso
+  over HTTPS and keeps the `wss://` address, since there's no discovery on the internet. An
+  address that keeps trying wrong keys or join codes (20 in 10 minutes) is refused for a while;
+  the address is the tunnel's `X-Forwarded-For`, trusted only from a proxy on the Hub's machine.
+- **TLS of your own:** with any other `wss://` address (a reverse proxy or tunnel with HTTPS in
+  front of the gateway or the Hub's port), the worker connection, Git and updates all use TLS.
 - **Plain `ws://` over the internet is refused.** If the Hub's address resolves to a public IP
   and the address isn't `wss://`, the worker stops with the reason, because the key, the code and
   every job would cross the internet unencrypted. `--allow-insecure` overrides that.

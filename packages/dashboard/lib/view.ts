@@ -882,7 +882,8 @@ export function joinCommand(hubHost: string, code: string, sha256?: string | nul
   // way isn't installed. A fresh private folder: no other user can swap the file after the check.
   const check = sha256 ? ` && echo "${sha256}  $d/aso.tgz" | sha256sum -c -` : "";
   // One line; no --hub: the worker finds the Hub on the LAN or over Tailscale, and again when it
-  // moves. The CLI builds the same line (`joinCommand` in packages/cli/src/commands/worker-keys.ts): keep them in step.
+  // moves. The CLI builds the same line (`joinCommand` in packages/cli/src/commands/worker-keys.ts):
+  // keep them in step. Only the CLI makes lines for the worker gateway (a wss:// address, with --hub).
   return `d=$(mktemp -d) && curl -fo "$d/aso.tgz" http://${hub}:${port}/dist/aso.tgz${check} && npm install -g "$d/aso.tgz" && aso service install --join ${code}`;
 }
 

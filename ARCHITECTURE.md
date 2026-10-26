@@ -1760,3 +1760,24 @@ sequenceDiagram
 - **Limits.** IPv4 only. Broadcasts stay in one network, and only Tailscale peers are asked
   directly: other subnets and VPNs need `--hub`, and so does Wi-Fi with client isolation. The responder's port is fixed for workers at
   7419.
+
+### Worker gateway (`gateway.ts`)
+
+`--gateway-port` starts a second Hono app on its own listener (default `127.0.0.1`), for a TLS
+tunnel to the internet. All its rules are in `gateway.ts`: `createGatewayApp` builds the app,
+and `startHub` only serves it. Its middleware, in order:
+
+1. An `AttemptLimiter` per client address refuses an address with 20 failures in 10 minutes.
+   The address is `clientAddress`: the socket's, or the last `X-Forwarded-For` hop when the
+   socket is loopback, i.e. the tunnel on the same machine.
+2. `gatewayAccess(method, path)` lets through only `public` paths (`health`, `version`,
+   `/dist/aso.tgz`, the join POST, a subset of the Hub's `PUBLIC_API_PATHS`) and `worker` ones
+   (`/ws`, `/git/*`); anything else is 404.
+3. `worker` paths need a worker key (`workerKeyOf`); the main token gets 401 and counts as a
+   failure, as does a failed join (its rule says `countsFailure`).
+
+Allowed requests go to the main app (`app.fetch`), with the same handlers and checks as on the
+Hub's port. The WebSocket has its own `createNodeWebSocket` on the gateway, using the same
+`workerSocket` events as the main port, since node-ws hands every upgrade on a server to the
+app it was created with. In Docker, compose publishes the container's 7423 on
+`127.0.0.1:${ASO_GATEWAY_PORT}` only.

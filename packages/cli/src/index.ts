@@ -139,6 +139,13 @@ function hubOptions(cmd: Command): Command {
     .option("--no-dashboard", "do not launch the Next.js dashboard")
     .option("--no-architect", "do not launch the Architect")
     .option("--discovery-port <port>", "UDP port this machine answers workers' LAN discovery on (workers started without --hub)", parsePort, DEFAULT_DISCOVERY_PORT)
+    .option(
+      "--gateway-port <port>",
+      "also listen here for workers coming in from the internet through a TLS tunnel (e.g. Tailscale Funnel): only the worker connection, Git, the package and joining, worker keys only",
+      parsePort,
+      process.env.ASO_GATEWAY_PORT ? Number(process.env.ASO_GATEWAY_PORT) : undefined,
+    )
+    .option("--gateway-host <host>", "interface the worker gateway listens on (the tunnel connects locally)", process.env.ASO_GATEWAY_HOST || "127.0.0.1")
     .option("--no-discovery", "do not answer LAN discovery: workers need --hub")
     .option("--docker", "run the Hub and dashboard in Docker (Architect stays on the host)", false)
     .option("--test-command <cmd>", "QA test command, split on spaces, run without a shell", process.env.ASO_TEST_COMMAND || "npm test")

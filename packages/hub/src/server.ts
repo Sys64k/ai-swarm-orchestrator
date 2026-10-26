@@ -3,7 +3,9 @@ import { readFile, stat } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { Hono, type Context, type MiddlewareHandler } from "hono";
+import type { WSEvents } from "hono/ws";
 import { serve, type ServerType } from "@hono/node-server";
+import { createGatewayApp, PUBLIC_API_PATHS, requestAddress } from "./gateway.js";
 import { createNodeWebSocket } from "@hono/node-ws";
 import type { WSContext } from "hono/ws";
 import {
@@ -108,6 +110,12 @@ export interface HubOptions {
   stateDir?: null;
   port?: number;
   host?: string;
+  /**
+   * A second listener for workers that reach the Hub from the internet, through a TLS tunnel:
+   * only the worker connection, Git, the package and joining, with worker keys only (never the
+   * main token). Off unless set.
+   */
+  gateway?: { port: number; host?: string };
   policies?: RoutingPolicies;
   /** Drop nodes silent for longer than this. */
   nodeTimeoutMs?: number;
@@ -189,6 +197,8 @@ export interface HubOptions {
 
 export interface HubHandle {
   port: number;
+  /** The worker gateway's port, when it runs. */
+  gatewayPort?: number;
   registry: NodeRegistry;
   projects: ProjectSet;
   /** Tasks of all projects, by id. */
@@ -562,10 +572,12 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   // Health stays public (minimal) so tools can check liveness; everything else needs the token.
   // Joining is public: the one-time code in the body is the credential.
   app.use("/api/*", async (c, next) =>
-    ["/api/health", "/api/version", "/api/openapi.json", "/api/worker-keys/join"].includes(c.req.path) ? next() : requireAuth(c, next),
+    // The worker gateway serves a subset of these (gatewayAccess in gateway.ts).
+    (PUBLIC_API_PATHS as readonly string[]).includes(c.req.path) ? next() : requireAuth(c, next),
   );
   app.get("/api/openapi.json", (c) => c.json(openApiDocument(hubVersion() ?? UNKNOWN_VERSION)));
   app.use(`${GIT_PATH}/*`, requireWorker);
+  // Takes the main token too: the worker gateway serves its own socket route, worker keys only.
   app.use(WS_PATH, requireWorker);
 
   // Workers clone, fetch and push each project at /git/<project>.git; pushes are limited to task/* refs.
@@ -818,7 +830,6 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   // Worker keys: a machine joins with a one-time code and gets a key for worker work only.
   /** Wrong join codes per client address and minute: one flood source can't block others joining. */
   const failedJoins = new Map<string, { minute: number; count: number }>();
-  const clientAddress = (c: Context) => (c.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined)?.incoming?.socket?.remoteAddress ?? "unknown";
   app.post("/api/worker-keys/join-codes", async (c) => {
     const req = await parsed(c, JoinCodeBodySchema, { optional: true });
     if (!req.ok) return c.json({ error: req.error }, 400);
@@ -826,7 +837,8 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   });
   app.post("/api/worker-keys/join", async (c) => {
     const minute = Math.floor(Date.now() / 60_000);
-    const from = clientAddress(c);
+    // Per client, also behind the worker gateway's tunnel (its X-Forwarded-For).
+    const from = requestAddress(c);
     const failed = failedJoins.get(from);
     const req = await parsed(c, JoinBodySchema);
     if (!req.ok) return c.json({ error: req.error }, 400);
@@ -1046,39 +1058,38 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     }
   });
 
-  app.get(
-    WS_PATH,
-    upgradeWebSocket((c) => {
-      const connId = randomUUID();
-      const key = workerKeyOf(c);
-      let conn: Connection;
-      return {
-        onOpen(_evt, ws) {
-          // Revoked between the upgrade and now: never let it in.
-          if (key && !workerKeys.isActive(key.id)) return void ws.close(4401, "worker key revoked");
-          conn = { connId, ws, ...(key ? { workerKey: { id: key.id, name: key.name } } : {}) };
-          connections.set(connId, conn);
-          log.info(`connection opened ${connId} (total ${connections.size})`);
-        },
-        onMessage(evt) {
-          if (!conn) return; // refused in onOpen
-          if (typeof evt.data !== "string") return reject(conn, "binary frames are not supported");
-          if (Buffer.byteLength(evt.data) > MAX_FRAME_BYTES) return reject(conn, "frame too large");
-          const parsed = parseAgentMessage(evt.data);
-          if (!parsed.ok) return reject(conn, parsed.reason, parsed.issues, parsed.refId);
-          handleMessage(conn, parsed.message);
-        },
-        onClose() {
-          connections.delete(connId);
-          if (conn?.nodeId && conn.transport) dropNode(conn.nodeId, conn.transport);
-          log.info(`connection closed ${conn?.nodeId ?? connId} (total ${connections.size})`);
-        },
-        onError(evt) {
-          log.warn(`socket error on ${connId}`, evt);
-        },
-      };
-    }),
-  );
+  /** The worker connection's events, shared by the Hub's own port and the gateway. */
+  const workerSocket = (c: Context): WSEvents => {
+    const connId = randomUUID();
+    const key = workerKeyOf(c);
+    let conn: Connection;
+    return {
+      onOpen(_evt, ws) {
+        // Revoked between the upgrade and now: never let it in.
+        if (key && !workerKeys.isActive(key.id)) return void ws.close(4401, "worker key revoked");
+        conn = { connId, ws, ...(key ? { workerKey: { id: key.id, name: key.name } } : {}) };
+        connections.set(connId, conn);
+        log.info(`connection opened ${connId} (total ${connections.size})`);
+      },
+      onMessage(evt) {
+        if (!conn) return; // refused in onOpen
+        if (typeof evt.data !== "string") return reject(conn, "binary frames are not supported");
+        if (Buffer.byteLength(evt.data) > MAX_FRAME_BYTES) return reject(conn, "frame too large");
+        const parsed = parseAgentMessage(evt.data);
+        if (!parsed.ok) return reject(conn, parsed.reason, parsed.issues, parsed.refId);
+        handleMessage(conn, parsed.message);
+      },
+      onClose() {
+        connections.delete(connId);
+        if (conn?.nodeId && conn.transport) dropNode(conn.nodeId, conn.transport);
+        log.info(`connection closed ${conn?.nodeId ?? connId} (total ${connections.size})`);
+      },
+      onError(evt) {
+        log.warn(`socket error on ${connId}`, evt);
+      },
+    };
+  };
+  app.get(WS_PATH, upgradeWebSocket(workerSocket));
 
   const server: ServerType = await new Promise((resolve, reject) => {
     const s = serve({ fetch: app.fetch, port, hostname: host }, () => resolve(s));
@@ -1087,6 +1098,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   injectWebSocket(server);
   // Port 0 asks the OS for a free port; report the one actually bound.
   const boundPort = (server.address() as AddressInfo | null)?.port ?? port;
+  const gateway = opts.gateway ? await startGateway(opts.gateway) : undefined;
   log.info(`listening on ${host}:${boundPort} (ws ${WS_PATH}, git ${GIT_PATH}/<project>.git), ${opts.projectsRoot ? `projects in ${opts.projectsRoot}` : `project ${opts.targetDir}`}`);
 
   // Half-open TCP connections (sleeping laptops, pulled cables) never fire onClose on their own.
@@ -1105,8 +1117,22 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   }, Math.min(15_000, nodeTimeoutMs, opts.reclaimGraceMs ?? Infinity, opts.push?.workerOfflineMs ?? Infinity));
   sweep.unref();
 
+  /** The worker gateway's listener (its rules are all in gateway.ts). */
+  async function startGateway(at: { port: number; host?: string }): Promise<{ server: ServerType; port: number }> {
+    const gw = createGatewayApp({ app, workerSocket, hasWorkerKey: (c) => workerKeyOf(c) !== undefined });
+    const gwServer: ServerType = await new Promise((resolve, reject) => {
+      const s = serve({ fetch: gw.app.fetch, port: at.port, hostname: at.host ?? "127.0.0.1" }, () => resolve(s));
+      s.once("error", reject);
+    });
+    gw.injectWebSocket(gwServer);
+    const gwPort = (gwServer.address() as AddressInfo | null)?.port ?? at.port;
+    log.info(`worker gateway on ${at.host ?? "127.0.0.1"}:${gwPort} (worker connection, Git, package and joining; worker keys only)`);
+    return { server: gwServer, port: gwPort };
+  }
+
   return {
     port: boundPort,
+    gatewayPort: gateway?.port,
     registry,
     projects,
     tasks,
@@ -1125,6 +1151,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       await store?.close();
       for (const c of connections.values()) c.ws.close(1001, "hub shutting down");
       await new Promise<void>((resolve) => server.close(() => resolve()));
+      if (gateway) await new Promise<void>((resolve) => gateway.server.close(() => resolve()));
     },
   };
 }

@@ -36,7 +36,9 @@ export function joinInstructions(address: string, code: string, expiresAt: strin
  * The console builds the same line (`joinCommand` in packages/dashboard/lib/view.ts): keep them in step.
  */
 export function joinCommand(address: string, code: string, sha256?: string | null): string {
-  return `${installCommand(hubHttpBase(address), sha256)} && aso service install --join ${code}`;
+  // Through the worker gateway (a wss:// address) there's no discovery: the worker keeps the address.
+  const hub = /^wss:\/\//i.test(address) ? ` --hub ${address}` : "";
+  return `${installCommand(hubHttpBase(address), sha256)} && aso service install${hub} --join ${code}`;
 }
 
 /**
