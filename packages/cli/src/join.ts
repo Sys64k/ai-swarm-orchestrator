@@ -28,7 +28,7 @@ export async function joinHub(hub: string, port: number, code: string): Promise<
   return { id: body.id, name: body.name, hub };
 }
 
-/** The firewall rule a Hub's machine with ufw needs for discovery over Tailscale. */
+/** The firewall rule for a Hub's machine whose ufw drops discovery over Tailscale (Tailscale's own rules usually let it in). */
 export const TAILNET_DISCOVERY_RULE = `sudo ufw allow in on tailscale0 to any port ${DEFAULT_DISCOVERY_PORT} proto udp`;
 
 /** Why no Hub answered, with what to check: on the LAN, and on the tailnet when Tailscale runs here. */
@@ -41,7 +41,7 @@ export function noHubMessage(net: Tailnet): string {
     where = `${lan}, and no other Tailscale machine is online`;
   } else {
     const peers = net.peers.length === 1 ? "1 online Tailscale peer" : `${net.peers.length} online Tailscale peers`;
-    where = `on this LAN or from the ${peers} (UDP ${DEFAULT_DISCOVERY_PORT}). On the Hub's machine, discovery over Tailscale needs \`${TAILNET_DISCOVERY_RULE}\` (with ufw)`;
+    where = `on this LAN or from the ${peers} (UDP ${DEFAULT_DISCOVERY_PORT}). If the Hub's machine has a firewall that drops it, let it in there: \`${TAILNET_DISCOVERY_RULE}\` (with ufw)`;
   }
   return `no Hub answered ${where}. Check that the code or key is valid and that the Hub runs; or pass --hub <address>`;
 }
