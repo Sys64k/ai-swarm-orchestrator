@@ -10,6 +10,7 @@ import {
   keyTravelsInClear,
   machineModelOf,
   priceBody,
+  priceLine,
   providerBody,
   providerDetail,
   providerId,
@@ -107,10 +108,15 @@ describe("model providers in the console", () => {
   });
 
   it("builds a price from the form, with a decimal comma too", () => {
-    assert.deepEqual(priceBody({ model: " openai/gpt-5 ", input: "1,25", output: "10" }), { body: { model: "openai/gpt-5", input: 1.25, output: 10 } });
-    assert.ok("error" in priceBody({ model: "", input: "1", output: "1" }));
-    assert.ok("error" in priceBody({ model: "m", input: "", output: "1" }), "an empty price isn't $0");
-    assert.ok("error" in priceBody({ model: "m", input: "-1", output: "1" }));
+    const none = { cacheRead: "" };
+    assert.deepEqual(priceBody({ model: " openai/gpt-5 ", input: "1,25", output: "10", ...none }), { body: { model: "openai/gpt-5", input: 1.25, output: 10 } });
+    assert.deepEqual(priceBody({ model: "g", input: "0.75", output: "3.75", cacheRead: "0,075" }), { body: { model: "g", input: 0.75, output: 3.75, cacheRead: 0.075 } });
+    assert.ok("error" in priceBody({ model: "", input: "1", output: "1", ...none }));
+    assert.ok("error" in priceBody({ model: "m", input: "", output: "1", ...none }), "an empty price isn't $0");
+    assert.ok("error" in priceBody({ model: "m", input: "-1", output: "1", ...none }));
+    assert.ok("error" in priceBody({ model: "m", input: "1", output: "1", cacheRead: "x" }));
+    assert.equal(priceLine({ model: "g", input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0.75, source: "set" }), "$0.75 in · $3.75 out · $0.075 cached · set here");
+    assert.equal(priceLine({ model: "c", input: 1, output: 5, cacheRead: 1, cacheWrite: 1, source: "built-in" }), "$1 in · $5 out");
   });
 
   it("lets the browser list, add and remove providers and prices, and nothing else of theirs", () => {

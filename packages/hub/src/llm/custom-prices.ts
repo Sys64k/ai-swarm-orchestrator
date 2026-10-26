@@ -3,12 +3,15 @@ import path from "node:path";
 import { z } from "zod";
 import { createLogger } from "@aso/shared";
 import { JsonFileWriter } from "../push/json-file.js";
-import { setCustomPrices } from "./pricing.js";
+import { setCustomPrices, type SetPrice } from "./pricing.js";
 
 const log = createLogger("prices");
 
 const FILE = "prices.json";
-const PricesFileSchema = z.record(z.string(), z.object({ input: z.number().min(0), output: z.number().min(0) }));
+const PricesFileSchema = z.record(
+  z.string(),
+  z.object({ input: z.number().min(0), output: z.number().min(0), cacheRead: z.number().min(0).optional(), cacheWrite: z.number().min(0).optional() }),
+);
 type PricesFile = z.infer<typeof PricesFileSchema>;
 
 /**
@@ -39,8 +42,9 @@ export class CustomPrices {
     return new CustomPrices(prices, file);
   }
 
-  async set(model: string, price: { input: number; output: number }): Promise<void> {
-    await this.save({ ...this.prices, [model]: { input: price.input, output: price.output } });
+  async set(model: string, price: SetPrice): Promise<void> {
+    const { input, output, cacheRead, cacheWrite } = price;
+    await this.save({ ...this.prices, [model]: { input, output, ...(cacheRead === undefined ? {} : { cacheRead }), ...(cacheWrite === undefined ? {} : { cacheWrite }) } });
   }
 
   /** False when no price was set for it. */

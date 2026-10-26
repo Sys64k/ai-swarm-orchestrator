@@ -36,8 +36,12 @@ aso provider remove openai                 # forgets the key
 - **Prices:** Claude models are priced from the Hub's table; OpenRouter reports its own prices,
   which the Hub uses. For any other model, set one, so task budgets stop it too (otherwise it
   reads $0 and only the turn limit does):
-  `aso price set openai/gpt-5 --input 1.25 --output 10` (USD per million tokens; `aso prices`
-  lists them).
+  `aso price set openai/gpt-5 --input 1.25 --output 10 --cache-read 0.125` (USD per million
+  tokens; `aso prices` lists them). **Give the cache-read price too:** agents re-send their
+  conversation each turn and providers serve most of it from their cache, so most input
+  tokens are cache reads (a Gemini task here read 18.6M cached tokens against 0.95M fresh).
+  Without `--cache-read` they count at the input price, which can overstate the cost
+  several times over and stop tasks at their budget early.
 - **The Architect's model:** `--model <provider>/<model>`. Without it, the Hub uses Claude Opus
   when Anthropic is a provider; with no Anthropic provider, give `--model` (and restart the Hub
   after adding the provider it names).

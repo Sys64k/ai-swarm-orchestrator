@@ -1000,7 +1000,7 @@ select.input {
 }
 .price-form {
   display: grid;
-  grid-template-columns: 1fr 5.5rem 5.5rem auto;
+  grid-template-columns: 1fr 5rem 5rem 5rem auto;
   gap: 8px;
   align-items: center;
   margin-top: 12px;

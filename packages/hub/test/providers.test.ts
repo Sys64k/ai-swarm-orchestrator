@@ -180,6 +180,19 @@ describe("providers", () => {
     await prices.remove("qwen3-coder:30b");
   });
 
+  it("charges cached input at its own rate when one is set", async () => {
+    const prices = await CustomPrices.open(tempDir());
+    // A Gemini agent's task: most input is read from the cache, at a tenth of the input price.
+    const task = { inputTokens: 1e6, outputTokens: 1e5, cacheReadTokens: 20e6, cacheWriteTokens: 0 };
+    await prices.set("models/gemini-3.8-flash", { input: 0.75, output: 3.75 });
+    assert.equal(priceUsage("models/gemini-3.8-flash", task).costUsd, 16.125, "without a cache rate: every cached token at the input price");
+    await prices.set("models/gemini-3.8-flash", { input: 0.75, output: 3.75, cacheRead: 0.075 });
+    assert.equal(priceUsage("models/gemini-3.8-flash", task).costUsd, 2.625);
+    const entry = priceTable().find((p) => p.model === "models/gemini-3.8-flash")!;
+    assert.deepEqual([entry.cacheRead, entry.cacheWrite], [0.075, 0.75]);
+    await prices.remove("models/gemini-3.8-flash");
+  });
+
   it("lets a provider added on the Hub take over the .env's with the same name", async () => {
     const api = await fakeApi(["gpt-5"], "sk-added");
     try {
@@ -234,7 +247,7 @@ describe("providers (Hub)", () => {
         assert.deepEqual(models.available.map((m: AvailableModel) => [m.spec, m.providerLabel]), [["remote/llama3.3:70b", `Custom (${new URL(api.url).host})`]]);
         assert.equal((await call(ctx.port, "/api/desks", { target: "test#1", model: "llama3.3:70b" })).status, 200, "a desk on it by name");
         const priced = await call(ctx.port, "/api/prices", { model: "remote/llama3.3:70b", input: 0.2, output: 0.4 });
-        assert.deepEqual(priced.body, { model: "llama3.3:70b", input: 0.2, output: 0.4, source: "set" }, "priced per model name");
+        assert.deepEqual(priced.body, { model: "llama3.3:70b", input: 0.2, output: 0.4, cacheRead: 0.2, cacheWrite: 0.2, source: "set" }, "priced per model name; cache rates default to the input price");
         assert.equal((await call(ctx.port, "/api/prices", { model: "x", input: -1, output: 0 })).status, 400);
         assert.equal((await call(ctx.port, "/api/prices/remove", { model: "llama3.3:70b" })).status, 200);
         assert.equal((await call(ctx.port, "/api/prices/remove", { model: "llama3.3:70b" })).status, 404);

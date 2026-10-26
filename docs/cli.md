@@ -152,9 +152,11 @@ gives a second one of a kind its own name; `--vision` marks models that accept i
 ## `aso prices`, `aso price set|remove`
 
 `aso prices` lists the model prices the Hub knows (USD per million tokens): the built-in Claude
-ones and those set on the Hub. `aso price set <model> --input <usd> --output <usd>` sets one
-(`<provider>/<model>` or the name; it applies to that model name, and wins over a built-in or
-reported price), so task budgets stop that model too. `aso price remove <model>` removes it.
+ones and those set on the Hub. `aso price set <model> --input <usd> --output <usd>
+[--cache-read <usd>] [--cache-write <usd>]` sets one for `<provider>/<model>` or a model's
+name, so task budgets stop that model too. It applies to that model name and wins over a
+built-in or reported price. The cache rates default to the input price: give `--cache-read`,
+since most of an agent's input is read from the cache. `aso price remove <model>` removes it.
 
 ## `aso models`, `aso desks`, `aso desk`
 

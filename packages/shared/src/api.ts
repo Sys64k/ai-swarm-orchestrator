@@ -182,12 +182,16 @@ export const PriceSetBodySchema = z.strictObject({
   model: z.string().min(1).max(200).describe("The model: <provider>/<model> or its name; the price applies to that model name"),
   input: z.number().min(0).max(10_000).describe("USD per million input tokens"),
   output: z.number().min(0).max(10_000).describe("USD per million output tokens"),
+  cacheRead: z.number().min(0).max(10_000).optional().describe("USD per million cached input tokens read (default: the input price)"),
+  cacheWrite: z.number().min(0).max(10_000).optional().describe("USD per million input tokens written to the cache (default: the input price)"),
 });
 export const PriceRemoveBodySchema = z.strictObject({ model: z.string().min(1).max(200) });
 export const PriceSchema = z.object({
   model: z.string(),
   input: z.number(),
   output: z.number(),
+  cacheRead: z.number().describe("Cached input tokens read"),
+  cacheWrite: z.number().describe("Input tokens written to the cache"),
   source: z.enum(["built-in", "set"]).describe("set: a price set on this Hub (it wins over the built-in one)"),
 });
 export const PricesSchema = z.array(PriceSchema);
