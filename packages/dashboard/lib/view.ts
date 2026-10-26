@@ -901,6 +901,21 @@ export function workerKeyScope(k: Pick<WorkerKey, "projects" | "trusted" | "budg
   return [k.trusted === false ? "Untrusted: builds only" : "Trusted", k.projects ? k.projects.join(", ") : "all projects", money].filter(Boolean).join(" · ");
 }
 
+/** A machine's track record in words (the CLI's is describeRecord in hub/src/track-record.ts). */
+export function workerKeyRecord(track: WorkerKey["track"]): string {
+  const n = (k: keyof NonNullable<WorkerKey["track"]>) => track?.[k] ?? 0;
+  const ofTotal = (label: string, good: number, bad: number) => (good + bad ? `${label} ${good} of ${good + bad}` : undefined);
+  const parts = [
+    n("built") ? `${n("built")} build${n("built") === 1 ? "" : "s"}` : undefined,
+    ofTotal("QA passed", n("qaPassed"), n("qaFailed")),
+    ofTotal("acceptance met", n("accepted"), n("unmet")),
+    n("failed") ? `${n("failed")} failed` : undefined,
+    n("dropped") ? `${n("dropped")} dropped` : undefined,
+    n("tested") ? `${n("tested")} QA run${n("tested") === 1 ? "" : "s"}` : undefined,
+  ].filter(Boolean);
+  return parts.length ? parts.join(" · ") : "No jobs yet";
+}
+
 /** How a worker connected: its own key, or the Hub's main token (which can do everything). */
 export function workerAccess(node: Pick<HubNode, "workerKey">): string | undefined {
   if (node.workerKey === undefined) return undefined; // an older Hub

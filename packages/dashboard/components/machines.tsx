@@ -5,7 +5,7 @@ import { hubGet, hubPost } from "./hub-client.ts";
 import { usePoll } from "./use-poll.ts";
 import { ActionButton, Badge, Banner, Section, TopBar } from "./ui.tsx";
 import type { WorkerKey } from "../lib/types.ts";
-import { joinCommand, workerKeyBadge, workerKeyScope } from "../lib/view.ts";
+import { joinCommand, workerKeyBadge, workerKeyRecord, workerKeyScope } from "../lib/view.ts";
 
 /** The worker machines' own keys: add a machine with a one-time join code, or shut one out. */
 export function Machines() {
@@ -62,6 +62,7 @@ export function Machines() {
                       {b.detail ? ` · ${b.detail}` : ""}
                     </div>
                     <div className="muted small">{workerKeyScope(k)}</div>
+                    <div className="muted small">{workerKeyRecord(k.track)}</div>
                   </div>
                   <Badge label={b.label} tone={b.tone} />
                   {!k.revokedAt && (

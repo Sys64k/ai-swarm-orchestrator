@@ -7,6 +7,7 @@ import type { WSEvents } from "hono/ws";
 import { serve, type ServerType } from "@hono/node-server";
 import { createGatewayApp, PUBLIC_API_PATHS, requestAddress } from "./gateway.js";
 import { budgetSpent, mayUseProject, projectOfGitPath, REFUSE_ALL, refuseJob, type KeyScope } from "./worker-scope.js";
+import type { JobOutcome } from "./track-record.js";
 import { createNodeWebSocket } from "@hono/node-ws";
 import type { WSContext } from "hono/ws";
 import {
@@ -242,12 +243,21 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     opts.acceptanceCheck === false ? undefined : typeof opts.acceptanceCheck === "object" ? opts.acceptanceCheck : new AcceptanceChecker(reviewModel);
   // A machine's worker-key scope (none for the Hub's own token); set once the keys are loaded below.
   let scopeOfNode: (nodeId: string) => KeyScope | undefined = () => undefined;
+  // Counts a job's outcome on its machine's worker key (machines on the Hub's own token have none).
+  let recordOutcome: (nodeId: string, outcome: JobOutcome) => void = () => undefined;
   const projects = await ProjectSet.open(registry, {
     root: opts.projectsRoot,
     single: opts.targetDir,
     mainBranch: opts.mainBranch,
     persist: opts.stateDir !== null,
-    tasks: { policies: opts.policies, reclaimGraceMs: opts.reclaimGraceMs, qa: opts.qa, acceptance, refuseWorker: (nodeId, job) => refuseJob(scopeOfNode(nodeId), job) },
+    tasks: {
+      policies: opts.policies,
+      reclaimGraceMs: opts.reclaimGraceMs,
+      qa: opts.qa,
+      acceptance,
+      refuseWorker: (nodeId, job) => refuseJob(scopeOfNode(nodeId), job),
+      onOutcome: (nodeId, outcome) => recordOutcome(nodeId, outcome),
+    },
     deps: { installer: opts.dependencyInstaller, allow: opts.allowDependencies },
     sync: { enabled: opts.sync?.enabled, remote: opts.sync?.remote, token: opts.sync?.token, retryMs: opts.sync?.retryMs },
     pullRequests: opts.pullRequests,
@@ -278,6 +288,10 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   scopeOfNode = (nodeId) => {
     const keyId = keyOfNode(nodeId);
     return keyId ? (workerKeys.scopeOf(keyId) ?? REFUSE_ALL) : undefined;
+  };
+  recordOutcome = (nodeId, outcome) => {
+    const keyId = keyOfNode(nodeId);
+    if (keyId) workerKeys.recordOutcome(keyId, outcome);
   };
   /** The projects in `list` this Hub doesn't have, as an error; undefined when all exist. */
   const unknownProjects = (list?: string[] | null) => {

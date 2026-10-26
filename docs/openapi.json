@@ -2696,6 +2696,61 @@
             "type": "number",
             "description": "USD its jobs have caused so far (estimated)"
           },
+          "track": {
+            "type": "object",
+            "properties": {
+              "built": {
+                "description": "It pushed finished work that checked out",
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "qaPassed": {
+                "description": "QA passed that work",
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "qaFailed": {
+                "description": "QA failed that work",
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "accepted": {
+                "description": "The acceptance check found that work met its criteria",
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "unmet": {
+                "description": "It found criteria unmet",
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "failed": {
+                "description": "Its agent gave up on a job",
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "dropped": {
+                "description": "It went offline in the middle of a job",
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "tested": {
+                "description": "It ran QA on someone's work",
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              }
+            },
+            "additionalProperties": false,
+            "description": "Its machine's track record: what became of the jobs it took"
+          },
           "connected": {
             "type": "boolean",
             "description": "Whether a worker is connected with it now"
@@ -2707,6 +2762,7 @@
           "createdAt",
           "trusted",
           "spentUsd",
+          "track",
           "connected"
         ],
         "additionalProperties": false

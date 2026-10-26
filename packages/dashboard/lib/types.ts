@@ -168,6 +168,8 @@ export interface WorkerKey {
   trusted?: boolean;
   budgetUsd?: number;
   spentUsd?: number;
+  /** What became of its machine's jobs (absent on an older Hub). */
+  track?: Partial<Record<"built" | "qaPassed" | "qaFailed" | "accepted" | "unmet" | "failed" | "dropped" | "tested", number>>;
   connected: boolean;
 }
 

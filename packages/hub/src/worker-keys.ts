@@ -4,6 +4,7 @@ import path from "node:path";
 import { z } from "zod";
 import { JsonFileWriter } from "./push/json-file.js";
 import { describeScope, type KeyScope } from "./worker-scope.js";
+import { addOutcome, JOB_OUTCOMES, type JobOutcome, type TrackRecord } from "./track-record.js";
 import { createLogger, discoveryKeyId, discoverySecret, WORKER_KEY_PREFIX } from "@aso/shared";
 
 const log = createLogger("worker-keys");
@@ -30,6 +31,8 @@ const RecordSchema = z.object({
   trusted: z.boolean().optional(),
   budgetUsd: z.number().optional(),
   spentUsd: z.number().optional(),
+  /** What became of its machine's jobs (see track-record.ts). */
+  track: z.partialRecord(z.enum(JOB_OUTCOMES), z.number()).optional(),
 });
 type WorkerKeyRecord = z.infer<typeof RecordSchema>;
 
@@ -44,6 +47,7 @@ export interface WorkerKeyView {
   trusted: boolean;
   budgetUsd?: number;
   spentUsd: number;
+  track: TrackRecord;
 }
 
 /** What a join code gives the key it becomes, and what can be changed on a key later (`null`: remove the limit). */
@@ -179,6 +183,14 @@ export class WorkerKeys {
     return view(record);
   }
 
+  /** Count what became of a job its machine took (saved in the background). */
+  recordOutcome(id: string, outcome: JobOutcome): void {
+    const record = this.records.find((r) => r.id === id);
+    if (!record) return;
+    record.track = addOutcome(record.track, outcome);
+    this.save().catch((err: Error) => log.warn(`could not save worker key ${id}'s track record: ${err.message}`));
+  }
+
   /** Write down spending not saved yet (the Hub calls this when it stops). */
   async flush(): Promise<void> {
     await this.save();
@@ -229,8 +241,8 @@ export class WorkerKeys {
   }
 }
 
-function view({ hash: _hash, trusted, spentUsd, ...rest }: WorkerKeyRecord): WorkerKeyView {
-  return { ...rest, trusted: trusted ?? true, spentUsd: spentUsd ?? 0 };
+function view({ hash: _hash, trusted, spentUsd, track, ...rest }: WorkerKeyRecord): WorkerKeyView {
+  return { ...rest, trusted: trusted ?? true, spentUsd: spentUsd ?? 0, track: track ?? {} };
 }
 
 /** Set a record's scope fields from settings (`null` removes a limit; absent leaves it). */

@@ -1804,3 +1804,15 @@ Hub's own token have none (fully trusted). The rules are pure functions, checked
 token (no scope, fully trusted); an owner key that no longer exists gets `REFUSE_ALL`. The Git
 check refuses a key any path that `projectOfGitPath` can't read a project from. Join codes carry a scope to the key
 they become (`createJoinCode(name, now, scope)`); `POST /api/worker-keys/{id}` changes it.
+
+### Track records (`track-record.ts`)
+
+Each worker key keeps counts of what became of its machine's jobs (`track`; the list is
+`JOB_OUTCOMES` in shared): `built` (its push checked out, in `verify`), `qaPassed` / `qaFailed`
+and `accepted` / `unmet` (the verdicts on that work, credited to the builder, `task.nodeId`),
+`failed` (its agent gave up), `dropped` (it went offline during a job it had started, from
+`requeue`; a job only assigned doesn't count) and `tested` (it ran QA). `TaskManager` reports each with
+`onOutcome(nodeId, outcome)`; the Hub maps the node to its key through `NodeOwners` and calls
+`WorkerKeys.recordOutcome`. Counting as things happen is needed because node ids change on
+every reconnect. Machines on the Hub's own token have no key and no record. `describeRecord`
+(CLI) and `workerKeyRecord` (console) say it in words.

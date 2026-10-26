@@ -190,6 +190,15 @@ aso worker-key new --address wss://agent007.tailc9777f.ts.net:10000 \
 
 Keys from before these limits, and machines connected with the Hub's own token, are trusted
 for every project with no budget.
+
+**Each key's track record** shows how far to trust its machine: how many builds it pushed
+that checked out, how often QA passed them, how often the acceptance check found them complete,
+how often its agent gave up or it went offline during a job it had started, and how many QA
+runs it did for others. `aso
+worker-keys` and the console's machines page show it, e.g. `12 builds · QA passed 9 of 11 ·
+acceptance met 8 of 9 · 1 failed`. It's counted as jobs end, from when the Hub started keeping
+it; it informs you, and changes nothing by itself. It reflects the models that worked on that
+machine's jobs too, since the machine runs the tools and the Hub's models do the thinking.
 ### Keep a worker running (systemd)
 
 On Linux, install the worker as a systemd user service instead of starting it by hand. It
