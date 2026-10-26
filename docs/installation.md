@@ -99,9 +99,11 @@ within seconds, and the Hub's machine needs no fixed IP.
   Tailscale (`--join <code>` before the machine has a key), or what to check if it didn't.
 - **An address you give wins.** With `--hub`, the worker uses only that address, as before.
   Workers reached through `wss://` need it.
-- **Over Tailscale, the Hub's machine must let UDP 7419 in on `tailscale0`**:
-  `sudo ufw allow in on tailscale0 to any port 7419 proto udp` (with ufw). The Hub's own port
-  needs no rule when the Hub runs in Docker, since Docker's published ports bypass ufw.
+- **Over Tailscale, the firewall usually needs nothing:** Tailscale's own rules let traffic in
+  on `tailscale0` before ufw sees it (tested with ufw active and only a LAN rule for UDP 7419).
+  If `aso find-hub` says no Hub answered from the online Tailscale peers, let UDP 7419 in on
+  the Hub's machine: `sudo ufw allow in on tailscale0 to any port 7419 proto udp`. The Hub's own
+  port needs no rule when the Hub runs in Docker, since Docker's published ports bypass ufw.
 - **What can stop it:** a firewall on the Hub's machine that drops UDP 7419, Wi-Fi client
   isolation, or a VPN on the worker. With NordVPN connected, run
   `nordvpn set lan-discovery on`, or give `--hub`.
