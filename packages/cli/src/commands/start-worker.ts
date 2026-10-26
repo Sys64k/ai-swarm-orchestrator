@@ -21,7 +21,7 @@ export async function startWorkerCommand(opts: {
   allowInsecure?: boolean;
 }): Promise<void> {
   if (opts.hub) await checkTransport(opts.hub, opts.port, opts.allowInsecure ?? false);
-  const joinedAt = opts.join ? await joinHub(opts.hub ?? (await findHub(opts.join)), opts.port, opts.join) : undefined;
+  const joinedAt = opts.join ? await joinHub(opts.hub ?? (await findHub(opts.join)).address, opts.port, opts.join) : undefined;
   const token = opts.token ?? resolveWorkerToken()?.token;
   if (!token) {
     throw new Error("no worker key: join with --join <code> (from `aso worker-key new` on the Hub), or pass --token");

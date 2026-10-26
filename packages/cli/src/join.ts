@@ -1,6 +1,6 @@
 import { lookup } from "node:dns/promises";
 import os from "node:os";
-import { createLogger, DEFAULT_DISCOVERY_PORT, discoverHub, hubHttpBase, isPrivateAddress, resolveHubUrl, saveWorkerKey } from "@aso/shared";
+import { createLogger, DEFAULT_DISCOVERY_PORT, hubHttpBase, isPrivateAddress, locateHub, resolveHubUrl, saveWorkerKey, tailnet, type FoundHub, type Tailnet } from "@aso/shared";
 
 const log = createLogger("cli");
 
@@ -28,18 +28,36 @@ export async function joinHub(hub: string, port: number, code: string): Promise<
   return { id: body.id, name: body.name, hub };
 }
 
-/**
- * The Hub's `host:port`, found on the LAN with `credential` (a worker key, the Hub's token, or a
- * join code): only the Hub that holds it can answer.
- */
-export async function findHub(credential: string, discover: (credential: string) => Promise<string | undefined> = discoverHub): Promise<string> {
-  const found = await discover(credential);
-  if (!found) {
-    throw new Error(
-      `no Hub answered on this network (UDP ${DEFAULT_DISCOVERY_PORT}). Check that it runs on this LAN, that the code or key is valid, ` +
-        "and that no VPN or firewall drops broadcasts; or pass --hub <address>",
-    );
+/** The firewall rule a Hub's machine with ufw needs for discovery over Tailscale. */
+export const TAILNET_DISCOVERY_RULE = `sudo ufw allow in on tailscale0 to any port ${DEFAULT_DISCOVERY_PORT} proto udp`;
+
+/** Why no Hub answered, with what to check: on the LAN, and on the tailnet when Tailscale runs here. */
+export function noHubMessage(net: Tailnet): string {
+  const lan = `on this LAN (UDP ${DEFAULT_DISCOVERY_PORT})`;
+  let where: string;
+  if (!net.running) {
+    where = `${lan}; Tailscale isn't running here, so the Hub wasn't looked for there`;
+  } else if (net.peers.length === 0) {
+    where = `${lan}, and no other Tailscale machine is online`;
+  } else {
+    const peers = net.peers.length === 1 ? "1 online Tailscale peer" : `${net.peers.length} online Tailscale peers`;
+    where = `on this LAN or from the ${peers} (UDP ${DEFAULT_DISCOVERY_PORT}). On the Hub's machine, discovery over Tailscale needs \`${TAILNET_DISCOVERY_RULE}\` (with ufw)`;
   }
+  return `no Hub answered ${where}. Check that the code or key is valid and that the Hub runs; or pass --hub <address>`;
+}
+
+/**
+ * Where the Hub is and which way it answered, found on the LAN or the tailnet with `credential`
+ * (a worker key, the Hub's token, or a join code): only the Hub that holds it can answer.
+ */
+export async function findHub(
+  credential: string,
+  locate: (credential: string, opts: { tailnet: Tailnet }) => Promise<FoundHub | undefined> = locateHub,
+  readTailnet: () => Promise<Tailnet> = tailnet,
+): Promise<FoundHub> {
+  const net = await readTailnet();
+  const found = await locate(credential, { tailnet: net });
+  if (!found) throw new Error(noHubMessage(net));
   return found;
 }
 

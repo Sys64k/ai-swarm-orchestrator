@@ -10,7 +10,7 @@ import {
   projectNameProblem,
   projectSummary,
   deployView,
-  joinCommands,
+  joinCommand,
   workerAccess,
   workerKeyBadge,
   formatDuration,
@@ -579,12 +579,14 @@ describe("deploys and the Hub's own update", () => {
 describe("worker machines and their keys", () => {
   const now = Date.parse("2026-10-24T12:00:00Z");
   it("gives the new machine its commands, with the Hub's name as the console knows it", () => {
-    assert.equal(joinCommands("h", "C", "ab12")[0], 'd=$(mktemp -d) && curl -fo "$d/aso.tgz" http://h:7420/dist/aso.tgz && echo "ab12  $d/aso.tgz" | sha256sum -c - && npm install -g "$d/aso.tgz"');
-    assert.deepEqual(joinCommands("agent007.tailc9777f.ts.net", "C0DE"), [
-      'd=$(mktemp -d) && curl -fo "$d/aso.tgz" http://agent007.tailc9777f.ts.net:7420/dist/aso.tgz && npm install -g "$d/aso.tgz"',
-      "aso service install --hub agent007.tailc9777f.ts.net --join C0DE",
-    ]);
-    assert.match(joinCommands("::1", "C")[1], /--hub \[::1\] /);
+    // The same line as the CLI's joinCommand (packages/cli/test/join.test.ts asserts this string too).
+    assert.equal(joinCommand("agent007", "CODE123", "ab12"), 'd=$(mktemp -d) && curl -fo "$d/aso.tgz" http://agent007:7420/dist/aso.tgz && echo "ab12  $d/aso.tgz" | sha256sum -c - && npm install -g "$d/aso.tgz" && aso service install --join CODE123');
+    assert.equal(
+      joinCommand("agent007.tailc9777f.ts.net", "C0DE"),
+      'd=$(mktemp -d) && curl -fo "$d/aso.tgz" http://agent007.tailc9777f.ts.net:7420/dist/aso.tgz && npm install -g "$d/aso.tgz" && aso service install --join C0DE',
+      "one line, and no --hub: the worker finds the Hub on the LAN or over Tailscale",
+    );
+    assert.match(joinCommand("::1", "C"), /http:\/\/\[::1\]:7420\//);
   });
   it("says where each key stands and how a worker connected", () => {
     assert.deepEqual(workerKeyBadge({ connected: true }, now), { label: "Connected", tone: "good" });

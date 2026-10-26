@@ -390,7 +390,7 @@ program
 
 program
   .command("find-hub")
-  .description(`Find the Hub on this LAN (a UDP ${DEFAULT_DISCOVERY_PORT} broadcast only that Hub can answer) and print its address`)
+  .description(`Find the Hub on this LAN or over Tailscale (a UDP ${DEFAULT_DISCOVERY_PORT} query only that Hub can answer) and print its address`)
   .option("--join <code>", "find it with a one-time join code instead (before this machine has a key)")
   .action(findHubCommand);
 

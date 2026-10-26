@@ -74,9 +74,17 @@ describe("answering LAN discovery on the Hub's machine", () => {
 });
 
 describe("a worker without the Hub's address", () => {
-  it("says what to check when no Hub answers", async () => {
-    await assert.rejects(findHub(KEY, async () => undefined), /no Hub answered on this network \(UDP 7419\).*--hub <address>/s);
-    assert.equal(await findHub(KEY, async () => "192.168.101.112:7420"), "192.168.101.112:7420");
+  it("says what to check when no Hub answers, on the LAN and the tailnet", async () => {
+    const none = async () => undefined;
+    const noTailscale = async () => ({ running: false, peers: [] });
+    const peers = async () => ({ running: true, peers: ["100.94.233.79"] });
+    await assert.rejects(findHub(KEY, none, noTailscale), /no Hub answered on this LAN \(UDP 7419\); Tailscale isn't running here.*--hub <address>/s);
+    await assert.rejects(findHub(KEY, none, peers), /from the 1 online Tailscale peer \(UDP 7419\).*sudo ufw allow in on tailscale0 to any port 7419 proto udp/s);
+    await assert.rejects(findHub(KEY, none, async () => ({ running: true, peers: [] })), /no other Tailscale machine is online/);
+    let asked: unknown;
+    const found = await findHub(KEY, async (_k, opts) => ((asked = opts.tailnet), { address: "100.94.233.79:7420", via: "tailnet" as const }), peers);
+    assert.deepEqual(found, { address: "100.94.233.79:7420", via: "tailnet" });
+    assert.deepEqual(asked, { running: true, peers: ["100.94.233.79"] }, "discovery asks the tailnet peers");
   });
 
   it("installs a service that finds the Hub itself", () => {

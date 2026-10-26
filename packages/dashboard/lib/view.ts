@@ -876,12 +876,14 @@ export const REPLY_COPY: Record<ReplyMode, { label: string; placeholder: string;
  * the Hub's name as the new machine reaches it: the console's own host, which on Tailscale is the
  * Hub machine's name in the tailnet.
  */
-export function joinCommands(hubHost: string, code: string, sha256?: string | null, port = 7420): string[] {
+export function joinCommand(hubHost: string, code: string, sha256?: string | null, port = 7420): string {
   const hub = hubHost.includes(":") ? `[${hubHost}]` : hubHost;
   // The checksum comes from the Hub over the console's own connection: a package swapped on the
   // way isn't installed. A fresh private folder: no other user can swap the file after the check.
   const check = sha256 ? ` && echo "${sha256}  $d/aso.tgz" | sha256sum -c -` : "";
-  return [`d=$(mktemp -d) && curl -fo "$d/aso.tgz" http://${hub}:${port}/dist/aso.tgz${check} && npm install -g "$d/aso.tgz"`, `aso service install --hub ${hub} --join ${code}`];
+  // One line; no --hub: the worker finds the Hub on the LAN or over Tailscale, and again when it
+  // moves. The CLI builds the same line (`joinCommand` in packages/cli/src/commands/worker-keys.ts): keep them in step.
+  return `d=$(mktemp -d) && curl -fo "$d/aso.tgz" http://${hub}:${port}/dist/aso.tgz${check} && npm install -g "$d/aso.tgz" && aso service install --join ${code}`;
 }
 
 /** A worker key's state, for the machines page. */

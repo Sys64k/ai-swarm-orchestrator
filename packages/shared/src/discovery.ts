@@ -4,6 +4,7 @@ import os from "node:os";
 import { z } from "zod";
 import { isPrivateAddress } from "./auth.js";
 import { DEFAULT_DISCOVERY_PORT } from "./constants.js";
+import { NO_TAILNET, replySource, tailnet, type Tailnet } from "./tailnet.js";
 
 /**
  * Finding the Hub on the LAN without its address. A worker broadcasts a query over UDP; the Hub's
@@ -137,18 +138,42 @@ export interface DiscoverOptions {
   timeoutMs?: number;
   /** Where to send the query (default: every broadcast address). */
   targets?: string[];
+  /**
+   * Tailnet peers to ask directly too. Default: this machine's, from `tailscale status`, unless
+   * `targets` is given (then none, so a test asks only where it says). `NO_TAILNET`: none.
+   */
+  tailnet?: Tailnet;
 }
 
-/** Ask the LAN where the Hub is: its `host:port`, or undefined when no trustworthy answer came in time. */
+/** Where the Hub was found, and which way the answer came. */
+export interface FoundHub {
+  address: string;
+  via: "lan" | "tailnet";
+}
+
+/** How long a tailnet answer waits for a LAN one, which is preferred (shorter way). */
+const LAN_GRACE_MS = 300;
+
+/**
+ * Ask where the Hub is: by broadcast on the LAN, and directly at each online Tailscale peer
+ * (broadcasts don't cross Tailscale). Its `host:port`, or undefined when no trustworthy answer
+ * came in time. A LAN answer is preferred over a tailnet one that arrives just before it.
+ */
 export async function discoverHub(credential: string, opts: DiscoverOptions = {}): Promise<string | undefined> {
+  return (await locateHub(credential, opts))?.address;
+}
+
+/** Like `discoverHub`, and says which way the answer came. */
+export async function locateHub(credential: string, opts: DiscoverOptions = {}): Promise<FoundHub | undefined> {
   const port = opts.port ?? DEFAULT_DISCOVERY_PORT;
   const timeoutMs = opts.timeoutMs ?? 2000;
+  const peers = (opts.tailnet ?? (opts.targets ? NO_TAILNET : await tailnet())).peers;
   const query = newDiscoveryQuery(credential);
   const packet = Buffer.from(JSON.stringify(query));
   const socket = dgram.createSocket("udp4");
-  return new Promise<string | undefined>((resolve) => {
+  return new Promise<FoundHub | undefined>((resolve) => {
     const timers: NodeJS.Timeout[] = [];
-    const finish = (address: string | undefined) => {
+    const finish = (found: FoundHub | undefined) => {
       for (const t of timers) clearTimeout(t);
       socket.removeAllListeners();
       socket.on("error", () => undefined);
@@ -157,22 +182,29 @@ export async function discoverHub(credential: string, opts: DiscoverOptions = {}
       } catch {
         /* already closed */
       }
-      resolve(address);
+      resolve(found);
     };
     socket.on("error", () => finish(undefined));
+    // A LAN answer ends the wait; a tailnet one is kept, and used unless a LAN one follows soon.
+    let tailnetAnswer: FoundHub | undefined;
     socket.on("message", (msg, rinfo) => {
       const reply = parseDiscoveryReply(msg);
       const address = reply && acceptDiscoveryReply(reply, { nonce: query.nonce, credential, from: rinfo.address });
-      if (address) finish(address);
+      if (!address) return;
+      const found: FoundHub = { address, via: replySource(rinfo.address) };
+      if (found.via === "lan") return finish(found);
+      if (tailnetAnswer) return;
+      tailnetAnswer = found;
+      timers.push(setTimeout(() => finish(found), LAN_GRACE_MS));
     });
     socket.bind(0, () => {
       socket.setBroadcast(true);
       const send = () => {
-        for (const target of opts.targets ?? broadcastAddresses()) socket.send(packet, port, target, () => undefined);
+        for (const target of [...(opts.targets ?? broadcastAddresses()), ...peers]) socket.send(packet, port, target, () => undefined);
       };
       // UDP may drop a packet: ask three times within the wait.
       for (const at of [0, timeoutMs / 4, timeoutMs / 2]) timers.push(setTimeout(send, at));
-      timers.push(setTimeout(() => finish(undefined), timeoutMs));
+      timers.push(setTimeout(() => finish(tailnetAnswer), timeoutMs));
     });
   });
 }

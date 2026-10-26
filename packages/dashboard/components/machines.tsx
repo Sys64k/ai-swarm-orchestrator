@@ -5,12 +5,12 @@ import { hubGet, hubPost } from "./hub-client.ts";
 import { usePoll } from "./use-poll.ts";
 import { ActionButton, Badge, Banner, Section, TopBar } from "./ui.tsx";
 import type { WorkerKey } from "../lib/types.ts";
-import { joinCommands, workerKeyBadge } from "../lib/view.ts";
+import { joinCommand, workerKeyBadge } from "../lib/view.ts";
 
 /** The worker machines' own keys: add a machine with a one-time join code, or shut one out. */
 export function Machines() {
   const keys = usePoll<WorkerKey[]>("worker-keys", 5000);
-  const [join, setJoin] = useState<{ commands: string[]; expiresAt: string }>();
+  const [join, setJoin] = useState<{ command: string; expiresAt: string }>();
   const [error, setError] = useState<string>();
 
   const add = async () => {
@@ -18,7 +18,7 @@ export function Machines() {
     const version = await hubGet<{ sha256: string | null }>("version");
     const r = await hubPost<{ code: string; expiresAt: string }>("worker-keys/join-codes", {});
     if (!r.ok) return setError(r.error);
-    setJoin({ commands: joinCommands(window.location.hostname, r.data.code, version.ok ? version.data.sha256 : undefined), expiresAt: r.data.expiresAt });
+    setJoin({ command: joinCommand(window.location.hostname, r.data.code, version.ok ? version.data.sha256 : undefined), expiresAt: r.data.expiresAt });
   };
 
   return (
@@ -36,8 +36,8 @@ export function Machines() {
           {join ? (
             <>
               <p className="muted small">On the new machine (the code works once, for 30 minutes):</p>
-              <pre className="mono small deploy-output">{join.commands.join("\n")}</pre>
-              <button type="button" className="button button-plain" onClick={() => void navigator.clipboard?.writeText(join.commands.join("\n"))}>
+              <pre className="mono small deploy-output">{join.command}</pre>
+              <button type="button" className="button button-plain" onClick={() => void navigator.clipboard?.writeText(join.command)}>
                 Copy
               </button>
             </>

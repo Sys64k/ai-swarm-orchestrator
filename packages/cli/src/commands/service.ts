@@ -46,7 +46,7 @@ export async function installServiceCommand(opts: WorkerServiceOptions & { token
   requireSystemd();
   const port = opts.port ?? DEFAULT_HUB_PORT;
   if (opts.hub) await checkTransport(opts.hub, port, opts.allowInsecure ?? false);
-  if (opts.join) await joinHub(opts.hub ?? (await findHub(opts.join)), port, opts.join);
+  if (opts.join) await joinHub(opts.hub ?? (await findHub(opts.join)).address, port, opts.join);
   const token = opts.token ? { token: opts.token, source: "--token" } : resolveWorkerToken();
   if (!token) throw new Error("no worker key: pass --join <code> (from `aso worker-key new` on the Hub), or --token");
   if (!opts.hub) {
