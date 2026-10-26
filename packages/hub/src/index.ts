@@ -45,6 +45,7 @@ export { encryptPayload, generateVapidKeys, sendPush, vapidAuthorization, MAX_PA
 export { hubUpdateNotification } from "./hub-update.js";
 export { apiChanges, apiFileContents, apiHash, API_COPY_PATH, syncApiCopies, syncTaskId, syncTaskSpec, type ApiChanges } from "./api-sync.js";
 export { PROVIDER_DATA, withoutProviderData } from "./llm/provider-data.js";
+export { buildEscalationPolicy, calledSpec, canonicalSpec, canSwitchFrom, DEFAULT_JUNIOR_ROUNDS, roundModel, type EscalationPolicy, type EscalationTask, type RoundModel } from "./llm/escalation.js";
 export { OpenAiCompatibleAdapter, OPENAI_PREFIX, accumulateChunks, classifyHttp, fromChatAnswer, sseData, toChatMessages, toChatTools, type ChatAnswer, type ChatMessage } from "./llm/openai-compatible.js";
 export { deskName, DeskModels, desksOf, modelConcurrency, type ModelSettings, type Route } from "./llm/desk-models.js";
 export { CLAUDE_FALLBACK, DEFAULT_CLAUDE_MODEL, environmentProviders, fetchModels, parseModelList, parseSpec, providerView, Providers, resolveModel, type Provider, type ProviderInput, type ProviderStatus } from "./llm/providers.js";

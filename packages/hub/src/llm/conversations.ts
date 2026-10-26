@@ -23,6 +23,7 @@ import { LlmError, type LlmAdapter } from "./adapter.js";
 import { priceUsage } from "./pricing.js";
 import { Semaphore } from "./semaphore.js";
 import { deskName, type DeskModels, type Route } from "./desk-models.js";
+import { calledSpec, canSwitchFrom, roundModel, type EscalationPolicy, type RoundModel } from "./escalation.js";
 import { architectSystemPrompt, CONTINUE_PROMPT, planPrompt, systemPrompt, taskPrompt } from "./prompts.js";
 
 const log = createLogger("llm");
@@ -47,6 +48,10 @@ export interface ConversationOptions {
   concurrency?: number;
   /** Each desk's model; desks without one use `agentAdapter`. */
   deskModels?: DeskModels;
+  /** The default agent model's spec (what `agentAdapter` calls), to compare models by. */
+  defaultAgentSpec?: string;
+  /** Stronger models a task moves to after failing rounds; none: every round on its desk's model. */
+  escalation?: EscalationPolicy;
   /** Called when model calls go on hold (out of credit), and when they work again. */
   onPause?: (reason: string) => void;
   onResume?: () => void;
@@ -91,7 +96,10 @@ interface Conversation {
   waitingNoted?: boolean;
   /** The current turn's last answer was cut off at the output limit (and thrown away). */
   cutOff?: { outputTokens: number };
-  /** Its desk's model when it started (unset: the default); kept for the whole round. */
+  /**
+   * The model this round calls when it isn't the default: its desk's, or one escalation chose;
+   * pinned for the whole round. (Named for desks, as saved conversations know it.)
+   */
   deskModel?: string;
 }
 
@@ -253,6 +261,26 @@ export class ConversationManager {
     return member && this.opts.deskModels?.modelOf(deskName(member.host, member.slot));
   }
 
+  /** This round's model for a task's agent: its desk's, or one up the escalation ladder, skipping models that refused it. */
+  private roundModelOf(taskId: string, nodeId: string): RoundModel {
+    const task = this.tasks.get(taskId);
+    return roundModel(this.opts.escalation, task ?? { reworkRound: 0 }, this.deskModelOf(taskId, nodeId), this.opts.defaultAgentSpec);
+  }
+
+  /**
+   * After a model's API refused a task's request (not a retryable error): when another model can
+   * take the task, record this one as refused, so the failing attempt is requeued on that model.
+   */
+  private skipRefusedModel(conv: Conversation, error: string): void {
+    if (conv.subject.kind !== "task") return;
+    const spec = calledSpec({ spec: conv.deskModel }, this.opts.defaultAgentSpec);
+    const task = this.tasks.get(conv.subject.id);
+    if (!spec || !task) return;
+    if (canSwitchFrom(this.opts.escalation, task, this.deskModelOf(task.spec.taskId, conv.nodeId), this.opts.defaultAgentSpec, spec)) {
+      this.tasks.recordModelRefused(task.spec.taskId, spec, error);
+    }
+  }
+
   status() {
     return {
       configured: this.adapter !== undefined,
@@ -302,11 +330,11 @@ export class ConversationManager {
         results: new Map(),
         lastActivity: Date.now(),
       };
-      const deskModel = subject.kind === "task" ? this.deskModelOf(subject.id, nodeId) : undefined;
-      if (deskModel) conv.deskModel = deskModel;
+      const choice: RoundModel = subject.kind === "task" ? this.roundModelOf(subject.id, nodeId) : {};
+      if (choice.spec) conv.deskModel = choice.spec;
       this.conversations.set(conv.id, conv);
       const model = this.routeFor(conv)?.adapter.model;
-      const on = model && subject.kind === "task" ? ` (${model}${deskModel ? ", this desk's model" : ""})` : "";
+      const on = model && subject.kind === "task" ? ` (${model}${choice.why ? `, ${choice.why}` : ""})` : "";
       subject.recordEvent(`agent conversation started on ${nodeId}${on}`);
     } else if (conv.nodeId !== nodeId || conv.subject.kind !== subject.kind || conv.subject.id !== subject.id) {
       return void fail(`conversation ${req.conversationId} belongs to another ${conv.subject.kind} or node`);
@@ -432,7 +460,10 @@ export class ConversationManager {
       }
       conv.waitingNoted = false;
       log.warn(`${conv.subject.id} turn ${req.turn} failed: ${e.message}`);
-      if (!e.retryable) conv.subject.recordEvent(`LLM error: ${e.message}`);
+      if (!e.retryable) {
+        conv.subject.recordEvent(`LLM error: ${e.message}`);
+        this.skipRefusedModel(conv, e.message);
+      }
       fail(e.message, e.retryable);
     } finally {
       conv.inflight = undefined;

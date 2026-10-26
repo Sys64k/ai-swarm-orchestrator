@@ -56,6 +56,7 @@ import { AcceptanceChecker } from "./llm/acceptance.js";
 import { DeskModels, desksOf } from "./llm/desk-models.js";
 import { Providers, resolveModel } from "./llm/providers.js";
 import { CustomPrices } from "./llm/custom-prices.js";
+import { buildEscalationPolicy } from "./llm/escalation.js";
 import { ConversationManager } from "./llm/conversations.js";
 import { hasPrice, priceTable } from "./llm/pricing.js";
 import { gitHttpHandler } from "./git/http-backend.js";
@@ -177,6 +178,12 @@ export interface HubOptions {
     planBudgetUsd?: number;
     maxTurns?: number;
     concurrency?: number;
+    /** Stronger models a task moves to after failing rounds (default: the Architect's model). */
+    escalateTo?: string[];
+    /** Rework rounds a task gets on its desk's model before it escalates (default 2). */
+    juniorRounds?: number;
+    /** `false`: every round on the desk's model, no escalation. */
+    escalation?: boolean;
   };
 }
 
@@ -302,9 +309,22 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     llm.concurrency ?? 4,
     (spec) => providers.isLocal(spec),
   );
+  // Escalation: a task that keeps failing on its desk's model moves up to stronger ones.
+  const escalation = buildEscalationPolicy({ ...llm, model }, (spec) => {
+    try {
+      providers.adapterFor(spec, { maxTokens, effort });
+      return true;
+    } catch (err) {
+      log.warn(`can't escalate to ${spec}: ${(err as Error).message}`);
+      return false;
+    }
+  });
+  if (escalation) log.info(`escalation: after ${escalation.juniorRounds} rework rounds on a desk's model, tasks move to ${escalation.ladder.join(", then ")}`);
   const conversations = new ConversationManager(adapter, tasks, registry, plans, {
     agentAdapter,
     deskModels,
+    defaultAgentSpec: llm.agentModel || model,
+    escalation,
     taskBudgetUsd: llm.taskBudgetUsd,
     planBudgetUsd: llm.planBudgetUsd,
     maxTurns: llm.maxTurns,

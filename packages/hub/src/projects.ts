@@ -266,6 +266,7 @@ export class ProjectSet {
     recordLlmUsage: (taskId: string, usage: LlmUsage): void => this.taskOwner(taskId)?.tasks.recordLlmUsage(taskId, usage),
     recordAgentTurn: (taskId: string, turn: Omit<AgentTurn, "at">): void => this.taskOwner(taskId)?.tasks.recordAgentTurn(taskId, turn),
     recordEvent: (taskId: string, event: string): void => this.taskOwner(taskId)?.tasks.recordEvent(taskId, event),
+    recordModelRefused: (taskId: string, spec: string, error: string): void => this.taskOwner(taskId)?.tasks.recordModelRefused(taskId, spec, error),
   };
 
   /** Hub-wide view of plans, by globally unique id. */

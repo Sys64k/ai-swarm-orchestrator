@@ -2,7 +2,8 @@
 import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { Command, InvalidArgumentError } from "commander";
+import { Command, InvalidArgumentError, Option } from "commander";
+import { DEFAULT_JUNIOR_ROUNDS } from "@aso/hub";
 import {
   resolveToken,
   tokenFile,
@@ -80,6 +81,13 @@ function parseSlots(value: string): number {
   return n;
 }
 
+/** A whole number, 0 or more (e.g. rounds). */
+function parseCount(value: string): number {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 0 || n > 100) throw new InvalidArgumentError("expected a whole number from 0 to 100");
+  return n;
+}
+
 function parseUsd(value: string): number {
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0) throw new InvalidArgumentError("must be a positive number of USD");
@@ -145,6 +153,9 @@ function hubOptions(cmd: Command): Command {
     .option("--console-url <url>", "the console's address, for links from pull requests to their tasks (e.g. QA screenshots)", parseUrl, process.env.ASO_CONSOLE_URL || undefined)
     .option("--model <spec>", "the Architect's model, and agents' without --agent-model: <provider>/<model> (see aso models); default: Claude Opus when Anthropic is a provider", process.env.ASO_MODEL || undefined)
     .option("--agent-model <spec>", "the builder and QA agents' model (default: --model)", process.env.ASO_AGENT_MODEL || undefined)
+    .option("--escalate-to <specs>", "stronger models (comma-separated, weakest first) a task moves to after failing rounds on its desk's model (default: --model)", process.env.ASO_ESCALATE_TO || undefined)
+    .option("--junior-rounds <n>", "rework rounds a task gets on its desk's model before it escalates", parseCount, process.env.ASO_JUNIOR_ROUNDS ? Number(process.env.ASO_JUNIOR_ROUNDS) : DEFAULT_JUNIOR_ROUNDS)
+    .addOption(new Option("--no-escalation", "keep every round on the desk's model").default(process.env.ASO_ESCALATION !== "0"))
     .option("--effort <level>", `model effort: ${EFFORTS.join(", ")}`, parseEffort, (process.env.ASO_EFFORT as Effort) || "high")
     .option("--task-budget <usd>", "estimated LLM spend cap per task", parseUsd, Number(process.env.ASO_TASK_BUDGET) || 5)
     .option("--plan-budget <usd>", "estimated LLM spend cap per planning round", parseUsd, Number(process.env.ASO_PLAN_BUDGET) || 3)
