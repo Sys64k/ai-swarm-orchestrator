@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
-import { createLogger, PRESET_INFO, ProviderAddBodySchema, ProviderIdSchema, PROVIDER_PRESETS, type AvailableModel, type ProviderAddBody, type ProviderView } from "@aso/shared";
+import { createLogger, PRESET_INFO, type ProviderPreset, ProviderAddBodySchema, ProviderIdSchema, PROVIDER_PRESETS, type AvailableModel, type ProviderAddBody, type ProviderView } from "@aso/shared";
 import { JsonFileWriter } from "../push/json-file.js";
 import { AnthropicApiAdapter, type Effort, type LlmAdapter } from "./adapter.js";
 import { OPENAI_PREFIX, OpenAiCompatibleAdapter } from "./openai-compatible.js";
@@ -44,7 +44,16 @@ export interface ProviderStatus {
   error?: string;
 }
 
-export interface ProvidersEnv {
+/** Cloud providers' keys the Hub's .env may hold, besides ANTHROPIC_API_KEY. */
+export const ENV_KEYS = {
+  OPENAI_API_KEY: "openai",
+  OPENROUTER_API_KEY: "openrouter",
+  GEMINI_API_KEY: "gemini",
+  GROQ_API_KEY: "groq",
+  MISTRAL_API_KEY: "mistral",
+} as const satisfies Record<string, ProviderPreset>;
+
+export interface ProvidersEnv extends Partial<Record<keyof typeof ENV_KEYS, string>> {
   ANTHROPIC_API_KEY?: string;
   ASO_LLM_BASE_URL?: string;
   ASO_LLM_API_KEY?: string;
@@ -55,6 +64,10 @@ export interface ProvidersEnv {
 export function environmentProviders(env: ProvidersEnv): Provider[] {
   const out: Provider[] = [];
   if (env.ANTHROPIC_API_KEY) out.push({ id: "anthropic", preset: "anthropic", kind: "anthropic", key: env.ANTHROPIC_API_KEY, source: "environment", label: "Anthropic" });
+  for (const [name, preset] of Object.entries(ENV_KEYS) as Array<[keyof typeof ENV_KEYS, ProviderPreset]>) {
+    const key = env[name]?.trim();
+    if (key) out.push(toProvider({ id: preset, preset, key }, "environment"));
+  }
   const url = env.ASO_LLM_BASE_URL ? trimUrl(env.ASO_LLM_BASE_URL) : undefined;
   if (url) {
     out.push({

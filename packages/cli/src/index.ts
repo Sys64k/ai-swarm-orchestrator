@@ -358,7 +358,7 @@ priceCmd
 
 program
   .command("models")
-  .description("The models desks can use: Claude, and the local server's (ASO_LLM_BASE_URL)")
+  .description("The models desks can use, by provider (see aso providers)")
   .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
   .action(modelsCommand);
 program
@@ -370,7 +370,7 @@ program
   .command("desk <target> <model>")
   .description("Put a desk (avalon#4) or a whole machine (avalon) on a model from `aso models`, or `default`")
   .option("--concurrency <n>", "that model's calls at once (default: 1 for local models, --llm-concurrency for Claude)", parsePositiveInt)
-  .option("--base-url <url>", "for a model on another OpenAI-compatible server than the Hub's ASO_LLM_BASE_URL")
+  .option("--base-url <url>", "call this model at another address than its provider's (better: add that server as a provider)")
   .option("--vision", "a local model that accepts images")
   .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
   .action(deskCommand);
@@ -392,7 +392,7 @@ program
 
 program
   .command("llm-check")
-  .description("Send one tiny request to verify ANTHROPIC_API_KEY and model access (costs a fraction of a cent)")
+  .description("Send two tiny requests (a reply and a tool call) to check a model through its provider (costs a fraction of a cent)")
   .option("--model <spec>", "model to check: <provider>/<model> (see aso models); default: Claude Opus when Anthropic is a provider", process.env.ASO_MODEL || undefined)
   .option("-r, --root <dir>", "the Hub's projects folder, whose .aso/providers.json lists the added providers", DEFAULT_ROOT)
   .action(llmCheckCommand);
