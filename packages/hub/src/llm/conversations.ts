@@ -52,6 +52,13 @@ export interface ConversationOptions {
   defaultAgentSpec?: string;
   /** Stronger models a task moves to after failing rounds; none: every round on its desk's model. */
   escalation?: EscalationPolicy;
+  /** A machine's model spending, counted against its worker key's budget. */
+  spend?: {
+    /** Why its agents may make no more model calls; undefined: they may. */
+    refuse(nodeId: string): string | undefined;
+    /** A call's estimated cost, by the machine whose agent made it. */
+    record(nodeId: string, usd: number): void;
+  };
   /** Called when model calls go on hold (out of credit), and when they work again. */
   onPause?: (reason: string) => void;
   onResume?: () => void;
@@ -359,6 +366,8 @@ export class ConversationManager {
     if (spent >= subject.budgetUsd) {
       return void fail(`${subject.kind} ${subject.id} reached its LLM budget ($${spent.toFixed(2)} of $${subject.budgetUsd})`);
     }
+    const machineStop = this.opts.spend?.refuse(nodeId);
+    if (machineStop) return void fail(machineStop);
 
     // A later turn with no tool results follows a reply that ended without tool calls.
     const base: Anthropic.Beta.BetaMessageParam =
@@ -404,6 +413,7 @@ export class ConversationManager {
       this.totals.calls++;
       this.totals.costUsd += usage.costUsd;
       conv.subject.recordUsage(usage);
+      this.opts.spend?.record(conv.nodeId, usage.costUsd);
 
       if (response.stopReason === "refusal") {
         return fail(`the model declined this request${response.refusalCategory ? ` (${response.refusalCategory})` : ""}`, false);

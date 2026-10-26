@@ -134,13 +134,24 @@ the end, and prints how it went: the commit and how long it took, or the reason 
 lines of output (exit code 1). `--no-wait` only starts it. A project without a deploy command is
 refused with the reason.
 
-## `aso worker-key new`, `aso worker-keys`, `aso worker-key revoke <id>`
+## `aso worker-key new|set|revoke`, `aso worker-keys`
 
 `new` creates a one-time join code (30 minutes) and prints what to run on the new machine. On
 the LAN, that machine finds the Hub with the code. `--address` is the Hub's address as that
 machine reaches it, for downloading the package and for joining from another network (default:
-this machine's hostname, which on Tailscale is its tailnet name). `--name` labels the key. `aso worker-keys` lists the
-keys, and `revoke` shuts a machine out.
+this machine's hostname, which on Tailscale is its tailnet name). `--name` labels the key.
+
+What the key may do (see [Machines you don't control](installation.md#machines-you-dont-control)):
+
+| Option | Default | |
+|---|---|---|
+| `--projects <ids>` | all | Comma-separated projects it may clone and work on |
+| `--untrusted` | trusted | Its machine only builds; a trusted machine tests its work |
+| `--budget <usd>` | none | USD of model calls its jobs may cause in total |
+
+`set <id>` changes them later: `--projects`, `--all-projects`, `--trusted`, `--untrusted`,
+`--budget`, `--no-budget`. `aso worker-keys` lists the keys with what each may do and has
+spent, and `revoke` shuts a machine out.
 
 ## `aso providers`, `aso provider add|remove`
 

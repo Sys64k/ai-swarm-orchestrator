@@ -21,7 +21,7 @@ import { consoleLinkCommand } from "./commands/console-link.js";
 import { llmCheckCommand } from "./commands/llm-check.js";
 import { syncCommand } from "./commands/sync.js";
 import { deployCommand, statusCommand } from "./commands/status.js";
-import { listWorkerKeysCommand, newWorkerKeyCommand, revokeWorkerKeyCommand } from "./commands/worker-keys.js";
+import { listWorkerKeysCommand, newWorkerKeyCommand, setWorkerKeyCommand, revokeWorkerKeyCommand } from "./commands/worker-keys.js";
 import { layout } from "./layout.js";
 import { approvePlanCommand, planCommand, rejectPlanCommand, replyPlanCommand } from "./commands/plan.js";
 import { startHubCommand } from "./commands/start-hub.js";
@@ -319,7 +319,21 @@ workerKeyCmd
   .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
   .option("--address <address>", "the Hub's address as the new machine reaches it (default: this machine's hostname)")
   .option("--name <name>", "a name for the machine's key (default: its hostname)")
+  .option("--projects <ids>", "comma-separated projects it may clone and work on (default: all)")
+  .option("--untrusted", "someone else's machine: it only builds, and a trusted machine tests its work")
+  .option("--budget <usd>", "USD of model calls its jobs may cause in total", parseUsd)
   .action(newWorkerKeyCommand);
+workerKeyCmd
+  .command("set <id>")
+  .description("Change what a worker key may do: its projects, whether its machine is trusted, its model budget")
+  .option("--projects <ids>", "comma-separated projects it may use")
+  .option("--all-projects", "let it use every project")
+  .option("--trusted", "its machine runs QA too")
+  .option("--untrusted", "its machine only builds; a trusted machine tests its work")
+  .option("--budget <usd>", "USD of model calls its jobs may cause in total", parseUsd)
+  .option("--no-budget", "remove its budget")
+  .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
+  .action((id: string, opts) => setWorkerKeyCommand(id, opts));
 workerKeyCmd
   .command("revoke <id>")
   .description("Revoke a worker key: its machine is disconnected and can't come back with it")
@@ -327,7 +341,7 @@ workerKeyCmd
   .action((id: string, opts: { hub: string }) => revokeWorkerKeyCommand(id, opts));
 program
   .command("worker-keys")
-  .description("List the worker keys: which machine, whether connected, revoked ones too")
+  .description("List the worker keys: which machine, whether connected, what it may do, revoked ones too")
   .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
   .action(listWorkerKeysCommand);
 

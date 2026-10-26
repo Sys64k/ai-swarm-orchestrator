@@ -5,7 +5,7 @@ import { hubGet, hubPost } from "./hub-client.ts";
 import { usePoll } from "./use-poll.ts";
 import { ActionButton, Badge, Banner, Section, TopBar } from "./ui.tsx";
 import type { WorkerKey } from "../lib/types.ts";
-import { joinCommand, workerKeyBadge } from "../lib/view.ts";
+import { joinCommand, workerKeyBadge, workerKeyScope } from "../lib/view.ts";
 
 /** The worker machines' own keys: add a machine with a one-time join code, or shut one out. */
 export function Machines() {
@@ -61,8 +61,25 @@ export function Machines() {
                       {k.id}
                       {b.detail ? ` · ${b.detail}` : ""}
                     </div>
+                    <div className="muted small">{workerKeyScope(k)}</div>
                   </div>
                   <Badge label={b.label} tone={b.tone} />
+                  {!k.revokedAt && (
+                    <ActionButton
+                      label={k.trusted === false ? "Trust" : "Untrust"}
+                      variant="plain"
+                      confirm={
+                        k.trusted === false
+                          ? `Trust ${k.name}? Its machine will also run QA on others' work.`
+                          : `Untrust ${k.name}? Its machine then only builds, and a trusted machine tests its work.`
+                      }
+                      run={async () => {
+                        const r = await hubPost(`worker-keys/${k.id}`, { trusted: k.trusted === false });
+                        if (r.ok) keys.refresh();
+                        return r.ok ? undefined : r.error;
+                      }}
+                    />
+                  )}
                   {!k.revokedAt && (
                     <ActionButton
                       label="Revoke"

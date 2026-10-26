@@ -1781,3 +1781,26 @@ Hub's port. The WebSocket has its own `createNodeWebSocket` on the gateway, usin
 `workerSocket` events as the main port, since node-ws hands every upgrade on a server to the
 app it was created with. In Docker, compose publishes the container's 7423 on
 `127.0.0.1:${ASO_GATEWAY_PORT}` only.
+
+### Worker key scopes (`worker-scope.ts`)
+
+A worker key's record holds its scope: `projects` (absent: all), `trusted` (absent: true),
+`budgetUsd` and `spentUsd`. `WorkerKeys.scopeOf(id)` gives it as a `KeyScope`; machines on the
+Hub's own token have none (fully trusted). The rules are pure functions, checked in three places:
+
+- **Routing:** `TaskManager` passes `refuse(nodeId)` into `selectNode`, which calls
+  `refuseJob(scopeOfNode(nodeId), { project, job })`. A node is refused for a project outside its
+  key's list, for QA (`job: "test"`) when untrusted, and once its budget is spent; the reason
+  shows in the task's waiting reason. Changing a key's scope dispatches again.
+- **Git:** a middleware after `requireWorker` returns 403 when the request's project isn't in the
+  key's list (`mayUseProject`).
+- **Model calls:** `ConversationManager`'s `spend` option asks `refuse(nodeId)` (`budgetSpent`)
+  before each call and reports each call's cost with `record(nodeId, usd)`, which
+  `WorkerKeys.addSpend` adds to the key (saved at most every 30 s, and when the Hub stops). The
+  check comes before a call and the cost after it, so calls at once can overshoot a budget a
+  little.
+
+`scopeOfNode` maps a node to its key through `NodeOwners`: no owner key means the Hub's own
+token (no scope, fully trusted); an owner key that no longer exists gets `REFUSE_ALL`. The Git
+check refuses a key any path that `projectOfGitPath` can't read a project from. Join codes carry a scope to the key
+they become (`createJoinCode(name, now, scope)`); `POST /api/worker-keys/{id}` changes it.

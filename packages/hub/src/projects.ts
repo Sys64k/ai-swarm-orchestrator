@@ -78,7 +78,7 @@ export interface ProjectSetOptions {
   mainBranch?: string;
   /** `false` keeps each project's state in memory only. */
   persist?: boolean;
-  tasks: Pick<TaskManagerOptions, "policies" | "reclaimGraceMs" | "qa" | "acceptance">;
+  tasks: Pick<TaskManagerOptions, "policies" | "reclaimGraceMs" | "qa" | "acceptance" | "refuseWorker">;
   deps: Pick<DependencyManagerOptions, "installer" | "allow">;
   sync: { enabled?: boolean; remote?: string; token?: string; retryMs?: number };
   /** GitHub pull requests for QA-approved work (the token defaults to `sync.token`). */

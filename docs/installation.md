@@ -151,6 +151,7 @@ its traffic gets there:
   over HTTPS and keeps the `wss://` address, since there's no discovery on the internet. An
   address that keeps trying wrong keys or join codes (20 in 10 minutes) is refused for a while;
   the address is the tunnel's `X-Forwarded-For`, trusted only from a proxy on the Hub's machine.
+- **Machines you don't control:** see [below](#machines-you-dont-control).
 - **TLS of your own:** with any other `wss://` address (a reverse proxy or tunnel with HTTPS in
   front of the gateway or the Hub's port), the worker connection, Git and updates all use TLS.
 - **Plain `ws://` over the internet is refused.** If the Hub's address resolves to a public IP
@@ -165,6 +166,30 @@ image, which is about 2 GB: Node plus the libraries headless Chromium needs. See
 [SECURITY.md](../SECURITY.md#agents-and-their-code). Without Docker, `--sandbox none` runs those commands
 directly on the machine instead.
 
+
+### Machines you don't control
+
+A friend's PC or a volunteer's machine can work for the swarm with a key that's limited to
+what it should do. Give the limits when you invite it (`aso worker-key new`), or change them
+later (`aso worker-key set <id>`, or **Trust**/**Untrust** on the console's machines page):
+
+```bash
+aso worker-key new --address wss://agent007.tailc9777f.ts.net:10000 \
+  --untrusted --projects aso-ui --budget 10
+```
+
+- **`--untrusted`:** its machine only builds. QA, which runs the tests, always runs on a
+  trusted machine (yours), so code from a machine you don't control is checked on one you do.
+  The acceptance check and your review still apply.
+- **`--projects`:** it gets jobs from, and can clone, only those projects.
+- **`--budget`:** model calls go through the Hub on your keys, so its jobs cost you. Once
+  they've caused that many dollars of model calls (estimated), its machine gets no more jobs and
+  its agents no more model calls. `aso worker-keys` shows what each key has spent.
+- **What it never gets:** model keys, your GitHub token, the Hub's token, or other projects.
+  Every job runs in a Docker sandbox on its machine, and it can push only its own task branches.
+
+Keys from before these limits, and machines connected with the Hub's own token, are trusted
+for every project with no budget.
 ### Keep a worker running (systemd)
 
 On Linux, install the worker as a systemd user service instead of starting it by hand. It

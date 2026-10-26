@@ -162,6 +162,12 @@ export interface WorkerKey {
   createdAt: string;
   lastUsedAt?: string;
   revokedAt?: string;
+  /** The projects it may use; absent: all. */
+  projects?: string[];
+  /** Absent on an older Hub: trusted. */
+  trusted?: boolean;
+  budgetUsd?: number;
+  spentUsd?: number;
   connected: boolean;
 }
 
