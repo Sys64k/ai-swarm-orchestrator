@@ -267,6 +267,8 @@ export interface Price {
   model: string;
   input: number;
   output: number;
+  cacheRead: number;
+  cacheWrite: number;
   source: "built-in" | "set";
 }
 

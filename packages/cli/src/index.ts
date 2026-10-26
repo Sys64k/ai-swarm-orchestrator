@@ -356,9 +356,11 @@ program
 const priceCmd = program.command("price").description("Set a model's price so task budgets stop it too, or remove one");
 priceCmd
   .command("set <model>")
-  .description("Set a model's price (<provider>/<model> or its name); cache reads and writes count at the input rate")
+  .description("Set a model's price (<provider>/<model> or its name); give the cache rates too, or cached tokens count at the input rate")
   .requiredOption("--input <usd>", "USD per million input tokens", parseUsd)
   .requiredOption("--output <usd>", "USD per million output tokens", parseUsd)
+  .option("--cache-read <usd>", "USD per million cached input tokens read (agents read most input from the cache; default: --input)", parseUsd)
+  .option("--cache-write <usd>", "USD per million input tokens written to the cache (default: --input)", parseUsd)
   .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
   .action(setPriceCommand);
 priceCmd

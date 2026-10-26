@@ -5,7 +5,7 @@ import { hubPost } from "./hub-client.ts";
 import { usePoll } from "./use-poll.ts";
 import { ActionButton, Badge, Banner, Section, TopBar } from "./ui.tsx";
 import type { Models, Price, Provider, ProviderPreset } from "../lib/types.ts";
-import { keyTravelsInClear, priceBody, providerBody, providerDetail, providerId, PROVIDER_FORMS } from "../lib/view.ts";
+import { keyTravelsInClear, priceBody, priceLine, providerBody, providerDetail, providerId, PROVIDER_FORMS } from "../lib/view.ts";
 
 const PRESETS = Object.keys(PROVIDER_FORMS) as ProviderPreset[];
 
@@ -62,7 +62,8 @@ export function Providers() {
         <Section title="Prices" count={prices.data?.length}>
           <p className="muted small">
             USD per million tokens. A model without a price counts as free, so task budgets don&apos;t stop it (the turn limit
-            still does). OpenRouter reports its own prices.
+            still does). OpenRouter reports its own prices. Give the cached price too: agents read most of their input from the
+            cache, which providers charge far less for.
           </p>
           <div className="card-list">
             {prices.data?.map((p) => (
@@ -70,7 +71,7 @@ export function Providers() {
                 <div className="row-main">
                   <span className="row-title mono small">{p.model}</span>
                   <span className="row-sub">
-                    ${p.input} in · ${p.output} out{p.source === "set" ? " · set here" : ""}
+                    {priceLine(p)}
                   </span>
                 </div>
                 {p.source === "set" && (
@@ -173,7 +174,7 @@ function AddProvider({ taken, onAdded }: { taken: string[]; onAdded: () => void 
 
 /** Set a model's price: pick one of the listed models or type a name. */
 function SetPrice({ models, onSet }: { models: string[]; onSet: () => void }) {
-  const [form, setForm] = useState({ model: "", input: "", output: "" });
+  const [form, setForm] = useState({ model: "", input: "", output: "", cacheRead: "" });
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
   const submit = async () => {
@@ -184,7 +185,7 @@ function SetPrice({ models, onSet }: { models: string[]; onSet: () => void }) {
     const r = await hubPost<Price>("prices", built.body);
     setBusy(false);
     if (!r.ok) return setError(r.error);
-    setForm({ model: "", input: "", output: "" });
+    setForm({ model: "", input: "", output: "", cacheRead: "" });
     onSet();
   };
   return (
@@ -197,6 +198,7 @@ function SetPrice({ models, onSet }: { models: string[]; onSet: () => void }) {
       </datalist>
       <input className="input small" inputMode="decimal" placeholder="$ in" value={form.input} onChange={(e) => setForm({ ...form, input: e.target.value })} />
       <input className="input small" inputMode="decimal" placeholder="$ out" value={form.output} onChange={(e) => setForm({ ...form, output: e.target.value })} />
+      <input className="input small" inputMode="decimal" placeholder="$ cached" title="Cached input tokens read; agents read most of their input from the cache. Empty: the input price" value={form.cacheRead} onChange={(e) => setForm({ ...form, cacheRead: e.target.value })} />
       <button type="button" className="button button-plain" disabled={busy} onClick={() => void submit()}>
         Set price
       </button>

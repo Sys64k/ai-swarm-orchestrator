@@ -1109,7 +1109,8 @@ field the provider's preset names (`maxTokensField`): `max_completion_tokens` fo
 reasoning models refuse `max_tokens`, and `max_tokens` elsewhere.
 
 Prices (`llm/pricing.ts`) are looked up per model name, in order: prices set on the Hub
-(`llm/custom-prices.ts`, `<state>/prices.json`, `aso price set`), the built-in Claude table, and
+(`llm/custom-prices.ts`, `<state>/prices.json`, `aso price set`; their cache rates default to
+the input price), the built-in Claude table, and
 prices a provider reports in its model list (OpenRouter's `pricing`, via `registerPrices`).
 Models with none cost $0, so only the turn limit stops them.
 

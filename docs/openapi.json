@@ -2931,6 +2931,14 @@
           "output": {
             "type": "number"
           },
+          "cacheRead": {
+            "type": "number",
+            "description": "Cached input tokens read"
+          },
+          "cacheWrite": {
+            "type": "number",
+            "description": "Input tokens written to the cache"
+          },
           "source": {
             "type": "string",
             "enum": [
@@ -2944,6 +2952,8 @@
           "model",
           "input",
           "output",
+          "cacheRead",
+          "cacheWrite",
           "source"
         ],
         "additionalProperties": false
@@ -2962,6 +2972,14 @@
             "output": {
               "type": "number"
             },
+            "cacheRead": {
+              "type": "number",
+              "description": "Cached input tokens read"
+            },
+            "cacheWrite": {
+              "type": "number",
+              "description": "Input tokens written to the cache"
+            },
             "source": {
               "type": "string",
               "enum": [
@@ -2975,6 +2993,8 @@
             "model",
             "input",
             "output",
+            "cacheRead",
+            "cacheWrite",
             "source"
           ],
           "additionalProperties": false
@@ -3374,6 +3394,18 @@
             "minimum": 0,
             "maximum": 10000,
             "description": "USD per million output tokens"
+          },
+          "cacheRead": {
+            "description": "USD per million cached input tokens read (default: the input price)",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "cacheWrite": {
+            "description": "USD per million input tokens written to the cache (default: the input price)",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 10000
           }
         },
         "required": [

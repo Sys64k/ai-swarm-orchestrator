@@ -1,6 +1,6 @@
 import type {
   Desks,
-  Models, Provider, ProviderPreset, CheckState, DeployStatus, DiffFile, HubNode, HubUpdate, WorkerKey, Plan, PlannedTask, Project, ReviewChecks, Task, TaskDiff, TaskState, TranscriptEntry } from "./types.ts";
+  Models, Price, Provider, ProviderPreset, CheckState, DeployStatus, DiffFile, HubNode, HubUpdate, WorkerKey, Plan, PlannedTask, Project, ReviewChecks, Task, TaskDiff, TaskState, TranscriptEntry } from "./types.ts";
 
 import { PROVIDER_ID } from "./hub-routes.ts";
 
@@ -421,15 +421,20 @@ export function providerDetail(p: Provider): { detail: string; badge: { label: s
 }
 
 /** The body for `POST /api/prices` from the form (dollars per million tokens), or what's wrong. */
-export function priceBody(form: { model: string; input: string; output: string }): { body: { model: string; input: number; output: number } } | { error: string } {
+export function priceBody(form: { model: string; input: string; output: string; cacheRead: string }): { body: { model: string; input: number; output: number; cacheRead?: number } } | { error: string } {
   const model = form.model.trim();
-  const input = Number(form.input.trim().replace(",", "."));
-  const output = Number(form.output.trim().replace(",", "."));
+  const usd = (s: string) => Number(s.trim().replace(",", "."));
+  const valid = (s: string) => s.trim() !== "" && Number.isFinite(usd(s)) && usd(s) >= 0;
   if (!model) return { error: "Name the model" };
-  if (!form.input.trim() || !form.output.trim() || !Number.isFinite(input) || !Number.isFinite(output) || input < 0 || output < 0) {
-    return { error: "Give both prices in dollars per million tokens, e.g. 1.25 and 10" };
-  }
-  return { body: { model, input, output } };
+  if (!valid(form.input) || !valid(form.output)) return { error: "Give both prices in dollars per million tokens, e.g. 1.25 and 10" };
+  if (form.cacheRead.trim() && !valid(form.cacheRead)) return { error: "The cache read price is dollars per million tokens, e.g. 0.125" };
+  return { body: { model, input: usd(form.input), output: usd(form.output), ...(form.cacheRead.trim() ? { cacheRead: usd(form.cacheRead) } : {}) } };
+}
+
+/** A price's line: input and output, and cache rates when they differ from the input price. */
+export function priceLine(p: Price): string {
+  const cache = p.cacheRead !== p.input ? ` · $${p.cacheRead} cached` : "";
+  return `$${p.input} in · $${p.output} out${cache}${p.source === "set" ? " · set here" : ""}`;
 }
 
 /** Whether a key typed on this page would travel unencrypted: plain HTTP to anything but this machine. */

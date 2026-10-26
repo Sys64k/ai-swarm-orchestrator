@@ -23,16 +23,25 @@ const reported = new Map<string, Price>();
 /** Prices set on the Hub (`aso price set`); they win over the others. */
 const custom = new Map<string, Price>();
 
-/** Replace the prices set on the Hub (input and output per million tokens; cache rates as input). */
-export function setCustomPrices(prices: Record<string, { input: number; output: number }>): void {
+/** A price as set on the Hub: per million tokens; cache rates default to the input price. */
+export interface SetPrice {
+  input: number;
+  output: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+}
+
+/** Replace the prices set on the Hub. */
+export function setCustomPrices(prices: Record<string, SetPrice>): void {
   custom.clear();
-  for (const [model, p] of Object.entries(prices)) custom.set(model, { input: p.input, output: p.output, cacheWrite: p.input, cacheRead: p.input });
+  for (const [model, p] of Object.entries(prices)) custom.set(model, { input: p.input, output: p.output, cacheWrite: p.cacheWrite ?? p.input, cacheRead: p.cacheRead ?? p.input });
 }
 
 /** The built-in prices and those set on the Hub (a set one replaces a built-in one); not every reported one. */
 export function priceTable(): PriceEntry[] {
-  const builtIn = Object.entries(PRICES).filter(([m]) => !custom.has(m)).map(([model, p]) => ({ model, input: p.input, output: p.output, source: "built-in" as const }));
-  const set = [...custom].map(([model, p]) => ({ model, input: p.input, output: p.output, source: "set" as const }));
+  const entry = (model: string, p: Price, source: PriceEntry["source"]): PriceEntry => ({ model, input: p.input, output: p.output, cacheRead: p.cacheRead, cacheWrite: p.cacheWrite, source });
+  const builtIn = Object.entries(PRICES).filter(([m]) => !custom.has(m)).map(([model, p]) => entry(model, p, "built-in"));
+  const set = [...custom].map(([model, p]) => entry(model, p, "set"));
   return [...builtIn, ...set].sort((a, b) => a.model.localeCompare(b.model));
 }
 
