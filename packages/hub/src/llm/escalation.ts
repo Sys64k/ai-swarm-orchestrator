@@ -1,18 +1,18 @@
 /**
- * Which model a task's agent works with each round. The desk's model (or the default) tries
- * first; after `juniorRounds` rework rounds the task goes up the ladder of stronger models, one
- * step per further round. A model whose API refused this task (a bad request, a refused key, an
+ * Which model a task's agent works with each round. The desk's model (or the default) gets the
+ * first `juniorTries` tries (the first attempt is one); after those the task goes up the ladder
+ * of stronger models, one step per further try. A model whose API refused this task (a bad request, a refused key, an
  * unknown model) is skipped from then on, so the task moves to another model instead of failing.
  */
 export interface EscalationPolicy {
   /** Stronger models, weakest first, as specs (`anthropic/claude-sonnet-5-5`). */
   ladder: string[];
-  /** Rounds the desk's model gets (the first attempt is round 0) before the ladder takes over. */
-  juniorRounds: number;
+  /** Tries the desk's model gets, counting the first attempt (round 0), before the ladder takes over. */
+  juniorTries: number;
 }
 
-/** Rework rounds on the desk's model before a task escalates, unless set otherwise. */
-export const DEFAULT_JUNIOR_ROUNDS = 2;
+/** Tries on the desk's model (the first attempt and one rework) before a task escalates, unless set otherwise. */
+export const DEFAULT_JUNIOR_TRIES = 2;
 
 export interface RoundModel {
   /** The model's spec; undefined: the Hub's default agent model. */
@@ -37,7 +37,7 @@ export function canonicalSpec(spec: string): string {
 }
 
 const escalatedWhy = (reworkRound: number): string =>
-  reworkRound === 0 ? "the escalation model: no junior rounds" : `escalated after ${reworkRound} rework round${reworkRound === 1 ? "" : "s"}`;
+  reworkRound === 0 ? "the escalation model: no junior tries" : `escalated after ${reworkRound} rework round${reworkRound === 1 ? "" : "s"}`;
 const refusedWhy = (refused: ReadonlySet<string>): string => `${[...refused].join(", ")} refused this task`;
 
 /**
@@ -52,9 +52,9 @@ export function roundModel(policy: EscalationPolicy | undefined, task: Escalatio
   const deskChoice: RoundModel = desk === undefined ? {} : { spec: desk, why: "this desk's model" };
   const seniors = (policy?.ladder ?? []).filter(usable);
 
-  // 1. Past the junior rounds: a step up the ladder per round.
-  if (policy && seniors.length && task.reworkRound >= policy.juniorRounds) {
-    return pick(seniors[Math.min(task.reworkRound - policy.juniorRounds, seniors.length - 1)], escalatedWhy(task.reworkRound));
+  // 1. Past the junior tries: a step up the ladder per round.
+  if (policy && seniors.length && task.reworkRound >= policy.juniorTries) {
+    return pick(seniors[Math.min(task.reworkRound - policy.juniorTries, seniors.length - 1)], escalatedWhy(task.reworkRound));
   }
   // 2. The desk's own model (or the default for a desk without one), unless it refused this task.
   const own = desk ?? defaultSpec;
@@ -91,11 +91,11 @@ export function canSwitchFrom(
  * out. Undefined when no ladder model is left.
  */
 export function buildEscalationPolicy(
-  settings: { escalation?: boolean; escalateTo?: string[]; model?: string; juniorRounds?: number },
+  settings: { escalation?: boolean; escalateTo?: string[]; model?: string; juniorTries?: number },
   canUse: (spec: string) => boolean,
 ): EscalationPolicy | undefined {
   if (settings.escalation === false) return undefined;
   const wanted = settings.escalateTo?.length ? settings.escalateTo : settings.model ? [settings.model] : [];
   const ladder = wanted.filter(canUse);
-  return ladder.length ? { ladder, juniorRounds: settings.juniorRounds ?? DEFAULT_JUNIOR_ROUNDS } : undefined;
+  return ladder.length ? { ladder, juniorTries: settings.juniorTries ?? DEFAULT_JUNIOR_TRIES } : undefined;
 }

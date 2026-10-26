@@ -1,17 +1,17 @@
 import assert from "node:assert/strict";
 import http from "node:http";
 import { describe, it } from "node:test";
-import { buildEscalationPolicy, calledSpec, canonicalSpec, canSwitchFrom, DEFAULT_JUNIOR_ROUNDS, roundModel } from "@aso/hub";
+import { buildEscalationPolicy, calledSpec, canonicalSpec, canSwitchFrom, DEFAULT_JUNIOR_TRIES, roundModel } from "@aso/hub";
 import { createMessage, type AgentMessage } from "@aso/shared";
 import { postTask, reply, ScriptedModel, text, TOKEN, waitFor, withHub, worker } from "./helpers.ts";
 
 delete process.env.ANTHROPIC_API_KEY; // tests must never reach the real API
 
-const policy = { ladder: ["anthropic/claude-sonnet-5-5", "anthropic/claude-opus-5-5"], juniorRounds: 2 };
+const policy = { ladder: ["anthropic/claude-sonnet-5-5", "anthropic/claude-opus-5-5"], juniorTries: 2 };
 const DEFAULT = "claude-haiku-5-5";
 
 describe("which model a task's round uses", () => {
-  it("keeps the desk's model for the junior rounds, then climbs the ladder a step per round", () => {
+  it("keeps the desk's model for the junior tries, then climbs the ladder a step per round", () => {
     const at = (reworkRound: number) => roundModel(policy, { reworkRound }, "openai/gpt-5.4-mini", DEFAULT);
     assert.deepEqual(at(0), { spec: "openai/gpt-5.4-mini", why: "this desk's model" });
     assert.deepEqual(at(1), { spec: "openai/gpt-5.4-mini", why: "this desk's model" });
@@ -22,10 +22,10 @@ describe("which model a task's round uses", () => {
 
   it("uses the default for desks without a model, and calls a ladder step that is the default the default", () => {
     assert.deepEqual(roundModel(policy, { reworkRound: 0 }, undefined, DEFAULT), {});
-    assert.deepEqual(roundModel({ ladder: ["claude-haiku-5-5"], juniorRounds: 1 }, { reworkRound: 1 }, "openai/gpt-5.4-mini", "anthropic/claude-haiku-5-5"), {
+    assert.deepEqual(roundModel({ ladder: ["claude-haiku-5-5"], juniorTries: 1 }, { reworkRound: 1 }, "openai/gpt-5.4-mini", "anthropic/claude-haiku-5-5"), {
       why: "escalated after 1 rework round",
     });
-    assert.deepEqual(roundModel({ ladder: ["x/y"], juniorRounds: 0 }, { reworkRound: 0 }, undefined, DEFAULT), { spec: "x/y", why: "the escalation model: no junior rounds" });
+    assert.deepEqual(roundModel({ ladder: ["x/y"], juniorTries: 0 }, { reworkRound: 0 }, undefined, DEFAULT), { spec: "x/y", why: "the escalation model: no junior tries" });
   });
 
   it("never escalates without a policy", () => {
@@ -55,9 +55,9 @@ describe("which model a task's round uses", () => {
 
   it("builds the Hub's policy from its settings", () => {
     const all = () => true;
-    assert.deepEqual(buildEscalationPolicy({ model: "anthropic/claude-opus-5-5" }, all), { ladder: ["anthropic/claude-opus-5-5"], juniorRounds: DEFAULT_JUNIOR_ROUNDS }, "default: the Architect's model");
-    assert.deepEqual(buildEscalationPolicy({ model: "m", escalateTo: ["a/b", "c/d"], juniorRounds: 1 }, all), { ladder: ["a/b", "c/d"], juniorRounds: 1 });
-    assert.deepEqual(buildEscalationPolicy({ escalateTo: ["a/b", "c/d"] }, (spec) => spec !== "a/b"), { ladder: ["c/d"], juniorRounds: 2 }, "unusable models left out");
+    assert.deepEqual(buildEscalationPolicy({ model: "anthropic/claude-opus-5-5" }, all), { ladder: ["anthropic/claude-opus-5-5"], juniorTries: DEFAULT_JUNIOR_TRIES }, "default: the Architect's model");
+    assert.deepEqual(buildEscalationPolicy({ model: "m", escalateTo: ["a/b", "c/d"], juniorTries: 1 }, all), { ladder: ["a/b", "c/d"], juniorTries: 1 });
+    assert.deepEqual(buildEscalationPolicy({ escalateTo: ["a/b", "c/d"] }, (spec) => spec !== "a/b"), { ladder: ["c/d"], juniorTries: 2 }, "unusable models left out");
     assert.equal(buildEscalationPolicy({ model: "m", escalation: false }, all), undefined);
     assert.equal(buildEscalationPolicy({}, all), undefined, "nothing to escalate to");
     assert.equal(buildEscalationPolicy({ escalateTo: ["a/b"] }, () => false), undefined);
@@ -176,7 +176,7 @@ describe("escalation (Hub)", () => {
     }
   });
 
-  it("starts a round on the ladder's model once the junior rounds are used up", async () => {
+  it("starts a round on the ladder's model once the junior tries are used up", async () => {
     const provider = await fakeProvider();
     const saved = process.env.ASO_LLM_BASE_URL;
     process.env.ASO_LLM_BASE_URL = provider.url;
@@ -188,7 +188,7 @@ describe("escalation (Hub)", () => {
           const r = await firstTurn(w, "greet");
           assert.equal(r.outcome, "ok");
           assert.match(JSON.stringify(r), /from good-model/);
-          assert.match(ctx.hub.tasks.get("greet")!.history.map((h) => h.event).join("\n"), /\(good-model, the escalation model: no junior rounds\)/);
+          assert.match(ctx.hub.tasks.get("greet")!.history.map((h) => h.event).join("\n"), /\(good-model, the escalation model: no junior tries\)/);
           w.ws.close();
         },
         {
@@ -197,7 +197,7 @@ describe("escalation (Hub)", () => {
             agentAdapter: new ScriptedModel(() => assert.fail("the junior model was used"), "claude-haiku-5-5"),
             agentModel: "claude-haiku-5-5",
             escalateTo: ["local/good-model", "nope/missing"],
-            juniorRounds: 0,
+            juniorTries: 0,
           },
         },
       );

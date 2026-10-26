@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Command, InvalidArgumentError, Option } from "commander";
-import { DEFAULT_JUNIOR_ROUNDS } from "@aso/hub";
+import { DEFAULT_JUNIOR_TRIES } from "@aso/hub";
 import {
   resolveToken,
   tokenFile,
@@ -154,7 +154,7 @@ function hubOptions(cmd: Command): Command {
     .option("--model <spec>", "the Architect's model, and agents' without --agent-model: <provider>/<model> (see aso models); default: Claude Opus when Anthropic is a provider", process.env.ASO_MODEL || undefined)
     .option("--agent-model <spec>", "the builder and QA agents' model (default: --model)", process.env.ASO_AGENT_MODEL || undefined)
     .option("--escalate-to <specs>", "stronger models (comma-separated, weakest first) a task moves to after failing rounds on its desk's model (default: --model)", process.env.ASO_ESCALATE_TO || undefined)
-    .option("--junior-rounds <n>", "rework rounds a task gets on its desk's model before it escalates", parseCount, process.env.ASO_JUNIOR_ROUNDS ? Number(process.env.ASO_JUNIOR_ROUNDS) : DEFAULT_JUNIOR_ROUNDS)
+    .option("--junior-tries <n>", "tries a task gets on its desk's model before it escalates, counting the first attempt (2: the first attempt and one rework)", parseCount, process.env.ASO_JUNIOR_TRIES ? Number(process.env.ASO_JUNIOR_TRIES) : DEFAULT_JUNIOR_TRIES)
     .addOption(new Option("--no-escalation", "keep every round on the desk's model").default(process.env.ASO_ESCALATION !== "0"))
     .option("--effort <level>", `model effort: ${EFFORTS.join(", ")}`, parseEffort, (process.env.ASO_EFFORT as Effort) || "high")
     .option("--task-budget <usd>", "estimated LLM spend cap per task", parseUsd, Number(process.env.ASO_TASK_BUDGET) || 5)

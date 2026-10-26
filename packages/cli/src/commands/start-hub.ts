@@ -41,7 +41,7 @@ export interface StartHubOptions {
   llmConcurrency: number;
   /** Comma-separated stronger models a failing task moves to (default: the Architect's). */
   escalateTo?: string;
-  juniorRounds: number;
+  juniorTries: number;
   /** `--no-escalation` turns it off. */
   escalation: boolean;
   /** Git URL of the ASO repository whose main this Hub follows (`--update-from`). */
@@ -85,7 +85,7 @@ export async function startHubCommand(opts: StartHubOptions): Promise<void> {
       maxTurns: opts.maxTurns,
       concurrency: opts.llmConcurrency,
       escalateTo: parseList(opts.escalateTo),
-      juniorRounds: opts.juniorRounds,
+      juniorTries: opts.juniorTries,
       escalation: opts.escalation,
     },
   });
@@ -150,7 +150,7 @@ async function startHubInDocker(root: string, opts: StartHubOptions, token: stri
       ASO_MAX_TURNS: String(opts.maxTurns),
       ASO_LLM_CONCURRENCY: String(opts.llmConcurrency),
       ASO_ESCALATE_TO: opts.escalateTo ?? "",
-      ASO_JUNIOR_ROUNDS: String(opts.juniorRounds),
+      ASO_JUNIOR_TRIES: String(opts.juniorTries),
       ASO_ESCALATION: opts.escalation ? "1" : "0",
       ASO_DEPLOY_RUNNER: "host",
     },

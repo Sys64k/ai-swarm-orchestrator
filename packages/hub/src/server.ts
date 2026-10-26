@@ -181,7 +181,7 @@ export interface HubOptions {
     /** Stronger models a task moves to after failing rounds (default: the Architect's model). */
     escalateTo?: string[];
     /** Rework rounds a task gets on its desk's model before it escalates (default 2). */
-    juniorRounds?: number;
+    juniorTries?: number;
     /** `false`: every round on the desk's model, no escalation. */
     escalation?: boolean;
   };
@@ -319,7 +319,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       return false;
     }
   });
-  if (escalation) log.info(`escalation: after ${escalation.juniorRounds} rework rounds on a desk's model, tasks move to ${escalation.ladder.join(", then ")}`);
+  if (escalation) log.info(`escalation: after ${escalation.juniorTries} tries on a desk's model, tasks move to ${escalation.ladder.join(", then ")}`);
   const conversations = new ConversationManager(adapter, tasks, registry, plans, {
     agentAdapter,
     deskModels,

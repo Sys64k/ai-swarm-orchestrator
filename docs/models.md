@@ -175,10 +175,10 @@ aso desks                            # each desk's model, and how busy each mode
 A task that keeps failing on a cheap model moves up to a stronger one, so the strong model's
 cost is only paid when it's needed:
 
-1. **The desk's model tries first**, for its first attempt and the first rework rounds
-   (`--junior-rounds`, default 2).
+1. **The desk's model tries first.** It gets `--junior-tries` tries (default 2), counting the
+   first attempt: with 2, the first attempt and one rework round.
 2. **Then the task climbs the ladder** (`--escalate-to`, weakest first; default: the Architect's
-   `--model`), one step per further rework round. The stronger model gets the same rework
+   `--model`), one step per further try. The stronger model gets the same rework
    reasons (what QA or the acceptance check found), so it knows what the cheaper one missed.
    It runs on whichever desk is free: the model runs on the Hub, the desk only runs the tools.
 3. **A model whose API refuses the task** (a bad request, a refused key, a model it no longer
@@ -188,14 +188,23 @@ cost is only paid when it's needed:
 
 ```bash
 aso hub-service install ... --agent-model claude-haiku-5-5 \
-  --escalate-to anthropic/claude-sonnet-5-5,anthropic/claude-opus-5-5 --junior-rounds 2
+  --escalate-to anthropic/claude-sonnet-5-5,anthropic/claude-opus-5-5 --junior-tries 2
 ```
 
 - **In the task's history:** each agent conversation names its model and why, e.g.
   `(claude-sonnet-5-5, escalated after 2 rework rounds)` or `(claude-haiku-5-5, the default;
   gemini/models/gemini-3.8-flash refused this task)`.
-- **The rework limit stays** (3 rounds): with the defaults, rounds 0–1 run on the desk's model
-  and rounds 2–3 on the ladder.
+- **The rework limit stays** at 3 rework rounds, so a task gets at most 4 tries. With the
+  defaults:
+
+  | Try | When | Model |
+  |---|---|---|
+  | 1 | the first attempt | the desk's |
+  | 2 | 1st rework (QA or the acceptance check rejected try 1) | the desk's |
+  | 3 | 2nd rework | the ladder's first model |
+  | 4 | 3rd rework | the ladder's next model (or the same, at its top) |
+
+  Rejected after try 4, the task fails.
 - **A person's retry** starts the task again on its desk's model and gives refused models
   another chance (a refusal may have been fixed since).
 - **Off:** `--no-escalation` keeps every round on the desk's model.

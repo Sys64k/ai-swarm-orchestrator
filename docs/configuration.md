@@ -19,6 +19,6 @@ Settings in `~/.config/aso/.env` and the environment.
 | `ASO_CONSOLE_URL` | *(none)* | Default for `--console-url` (also passed into the container) |
 | `ANTHROPIC_API_KEY` | *(none)* | Hub only. Without it, agents fail tasks with "no LLM configured" |
 | *(file)* `.env` | — | Loaded on start: the shell's variables win, then `ASO_ENV_FILE`, then `~/.config/aso/.env`, then a source checkout's `.env`. See `.env.example` |
-| `ASO_MODEL`, `ASO_AGENT_MODEL`, `ASO_EFFORT`, `ASO_TASK_BUDGET`, `ASO_PLAN_BUDGET`, `ASO_MAX_TURNS`, `ASO_LLM_CONCURRENCY`, `ASO_ESCALATE_TO`, `ASO_JUNIOR_ROUNDS`, `ASO_ESCALATION` (`0`: off) | see flags | Defaults for the LLM flags (also passed into the container) |
+| `ASO_MODEL`, `ASO_AGENT_MODEL`, `ASO_EFFORT`, `ASO_TASK_BUDGET`, `ASO_PLAN_BUDGET`, `ASO_MAX_TURNS`, `ASO_LLM_CONCURRENCY`, `ASO_ESCALATE_TO`, `ASO_JUNIOR_TRIES`, `ASO_ESCALATION` (`0`: off) | see flags | Defaults for the LLM flags (also passed into the container) |
 | `ASO_PUSH_CONTACT` | project URL | Contact (`mailto:` or `https:`) sent to push services with notifications (VAPID `sub`) |
 | `ASO_UPDATE_SPEC` | `@aso/cli@latest` | Default source for `aso update` |
