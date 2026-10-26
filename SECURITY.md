@@ -94,7 +94,7 @@ the Hub (`aso hub-service restart`). `aso llm-check` confirms the Anthropic key.
   that resolves to a public IP unless it's `wss://` (`--allow-insecure` overrides).
   Private ranges, loopback and Tailscale's `100.64.0.0/10` count as private.
 - **LAN discovery can't be spoofed into leaking a key.** A worker without `--hub` broadcasts a
-  query that names its key by a hash, never the key. It connects only to an answer whose HMAC
+  query (and sends it to each online Tailscale peer) that names its key by a hash, never the key. It connects only to an answer whose HMAC
   proof (made with the key's hash, which only the Hub holds) covers the worker's nonce, the port
   and the address the answer came from, and only from a private address. The Hub's machine
   answers at most 30 queries per 10 s and stays silent for a key it doesn't know.

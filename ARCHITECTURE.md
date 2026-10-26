@@ -1751,10 +1751,12 @@ sequenceDiagram
   runs on without discovery and logs that.
 - **On the worker.** `startWorker` takes `locate` along with an optional `hub`. Before the first
   connection without an address, and before every reconnect after a failed or lost one, it calls
-  `locate` (`discoverHub`: three sends to `255.255.255.255` and each interface's broadcast
-  address, two seconds of waiting). A different answer replaces the URL, and the Git URLs follow
+  `locate` (`discoverHub`: three sends to `255.255.255.255`, each interface's broadcast
+  address and each online Tailscale peer's IPv4 address from `tailscale status --json`
+  (`shared/src/tailnet.ts`), two seconds of waiting; a tailnet answer waits 300 ms for a LAN
+  one, which wins). A different answer replaces the URL, and the Git URLs follow
   it. With `--hub`, `locate` isn't set and the address is used as given. `aso service install`
   without `--hub` writes a unit without it.
-- **Limits.** IPv4 only. Broadcasts stay in one network: Tailscale, other subnets and VPNs need
-  `--hub`, and so does Wi-Fi with client isolation. The responder's port is fixed for workers at
+- **Limits.** IPv4 only. Broadcasts stay in one network, and only Tailscale peers are asked
+  directly: other subnets and VPNs need `--hub`, and so does Wi-Fi with client isolation. The responder's port is fixed for workers at
   7419.

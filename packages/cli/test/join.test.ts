@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { checkTransport, machineName } from "../dist/join.js";
-import { joinInstructions, keyLine } from "../dist/commands/worker-keys.js";
+import { joinCommand, joinInstructions, keyLine } from "../dist/commands/worker-keys.js";
 
 const resolving = (ips: string[]) => async () => ips;
 
@@ -26,9 +26,10 @@ describe("joining a Hub from anywhere", () => {
 
   it("tells the new machine what to run, and lists keys plainly", () => {
     const lines = joinInstructions("agent007", "CODE123", "2026-10-24T15:00:00.000Z", "ab12");
-    assert.ok(lines.includes('  d=$(mktemp -d) && curl -fo "$d/aso.tgz" http://agent007:7420/dist/aso.tgz && echo "ab12  $d/aso.tgz" | sha256sum -c - && npm install -g "$d/aso.tgz"'), lines.join("\n"));
-    assert.ok(lines.includes("  aso service install --join CODE123"), "on the LAN the worker finds the Hub itself");
-    assert.ok(lines.some((l) => l.includes("add --hub agent007")), "elsewhere it needs the address");
+    // The same line as the console's joinCommand (packages/dashboard/test/view.test.ts asserts this string too).
+    assert.equal(joinCommand("agent007", "CODE123", "ab12"), 'd=$(mktemp -d) && curl -fo "$d/aso.tgz" http://agent007:7420/dist/aso.tgz && echo "ab12  $d/aso.tgz" | sha256sum -c - && npm install -g "$d/aso.tgz" && aso service install --join CODE123');
+    assert.ok(lines.includes(`  ${joinCommand("agent007", "CODE123", "ab12")}`), "one line, without --hub: the worker finds the Hub on the LAN or over Tailscale");
+    assert.ok(lines.some((l) => l.includes("add\n") || l.includes("--hub agent007")), "what to add when it can't");
     assert.equal(keyLine({ id: "k1", name: "avalon", createdAt: "x", connected: true }), "k1  avalon  (connected)");
     assert.equal(keyLine({ id: "k2", name: "mbp", createdAt: "x", connected: false }), "k2  mbp  (never used)");
     assert.equal(keyLine({ id: "k3", name: "old", createdAt: "x", connected: false, revokedAt: "2026-10-24T10:00:00Z" }), "k3  old  (revoked 2026-10-24T10:00:00Z)");

@@ -168,8 +168,10 @@ machine, on a model (`--concurrency`, `--base-url`, `--vision`). See
 
 ## `aso find-hub`
 
-Asks the LAN where the Hub is, with this machine's worker key, and prints its `host:port`.
-`--join <code>` asks with a join code instead. It fails with what to check when no Hub answers.
+Asks the LAN and the Tailscale network where the Hub is, with this machine's worker key, prints
+its `host:port`, and says whether it was found on the LAN or over Tailscale. `--join <code>`
+asks with a join code instead. It fails with what to check when no Hub answers: whether
+Tailscale runs here, and the firewall rule the Hub's machine needs for discovery over Tailscale.
 
 ## `aso sync`
 

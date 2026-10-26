@@ -6,6 +6,7 @@ import {
   acceptDiscoveryReply,
   broadcastAddresses,
   discoverHub,
+  locateHub,
   discoveryKeyId,
   discoveryProof,
   discoverySecret,
@@ -91,6 +92,18 @@ describe("LAN discovery", () => {
     const hub = await fakeHub((q) => answer(KEY, q.nonce, ["127.0.0.1"]));
     try {
       assert.equal(await discoverHub(KEY, { port: hub.port, targets: ["127.0.0.1"], timeoutMs: 1000 }), "127.0.0.1:7420");
+    } finally {
+      hub.close();
+    }
+  });
+
+  it("asks Tailscale peers directly, since broadcasts don't cross Tailscale", async () => {
+    const hub = await fakeHub((q) => answer(KEY, q.nonce, ["127.0.0.1"]));
+    try {
+      const peerOnly = { targets: [], tailnet: { running: true, peers: ["127.0.0.1"] } };
+      assert.equal(await discoverHub(KEY, { port: hub.port, timeoutMs: 1000, ...peerOnly }), "127.0.0.1:7420", "found with no broadcast at all");
+      assert.deepEqual(await locateHub(KEY, { port: hub.port, timeoutMs: 1000, ...peerOnly }), { address: "127.0.0.1:7420", via: "lan" }, "and says which way it answered");
+      assert.equal(await discoverHub(KEY, { port: hub.port, timeoutMs: 300, targets: [], tailnet: { running: true, peers: [] } }), undefined, "and not without the peer");
     } finally {
       hub.close();
     }

@@ -82,8 +82,10 @@ aso service install --join <code>
 
 ### Finding the Hub on the LAN
 
-On the Hub's network a worker needs no address. Without `--hub`, it broadcasts a question on
-UDP port 7419, and the Hub's machine answers with the Hub's address. The worker asks again
+On the Hub's network, or anywhere in your Tailscale network, a worker needs no address. Without
+`--hub`, it broadcasts a question on UDP port 7419 and, when Tailscale runs on it, also asks
+each online machine in your tailnet directly (broadcasts don't cross Tailscale). The Hub's
+machine answers with the Hub's address; a LAN answer is preferred over a tailnet one. The worker asks again
 whenever it can't reach the Hub, so it follows the Hub to a new address (a new DHCP lease, say)
 within seconds, and the Hub's machine needs no fixed IP.
 
@@ -91,9 +93,15 @@ within seconds, and the Hub's machine needs no fixed IP.
   carries a proof made with that credential and the addresses it comes from, and the worker
   connects only to an answer that checks out. A machine on the LAN pretending to be the Hub
   never gets the key. A Hub that doesn't know the credential stays silent.
-- **`aso find-hub`** prints where the Hub is (`--join <code>` before the machine has a key).
+- **It follows the worker too.** A laptop that leaves home keeps working over Tailscale and
+  goes back to the LAN when it returns: every reconnect asks again.
+- **`aso find-hub`** prints where the Hub is and whether it found it on the LAN or over
+  Tailscale (`--join <code>` before the machine has a key), or what to check if it didn't.
 - **An address you give wins.** With `--hub`, the worker uses only that address, as before.
-  Workers on another network (Tailscale, `wss://`) need it: broadcasts don't cross networks.
+  Workers reached through `wss://` need it.
+- **Over Tailscale, the Hub's machine must let UDP 7419 in on `tailscale0`**:
+  `sudo ufw allow in on tailscale0 to any port 7419 proto udp` (with ufw). The Hub's own port
+  needs no rule when the Hub runs in Docker, since Docker's published ports bypass ufw.
 - **What can stop it:** a firewall on the Hub's machine that drops UDP 7419, Wi-Fi client
   isolation, or a VPN on the worker. With NordVPN connected, run
   `nordvpn set lan-discovery on`, or give `--hub`.
@@ -119,8 +127,11 @@ A worker connects out to the Hub, so it needs no open port, wherever it is. What
 its traffic gets there:
 
 - **Tailscale (recommended for your own machines):** put the Hub machine and the worker in the
-  same tailnet and use the Hub's tailnet name: `aso service install --hub agent007 --join
-  <code>`. LAN discovery doesn't reach across Tailscale, so `--hub` is needed here. WireGuard encrypts everything end to end, and nothing of the Hub faces the internet.
+  same tailnet, and run the one-line join command from the console's **Add a machine** (or
+  `aso worker-key new` on the Hub) on the new machine. It finds the Hub over the tailnet by
+  itself (see [Finding the Hub](#finding-the-hub-on-the-lan)); open the console at its tailnet
+  address, so the command downloads aso from there. WireGuard encrypts everything end to end,
+  and nothing of the Hub faces the internet.
 - **TLS:** with a `wss://` address (a reverse proxy or tunnel with HTTPS in front of the Hub's
   port), the worker connection, Git and updates all use TLS.
 - **Plain `ws://` over the internet is refused.** If the Hub's address resolves to a public IP

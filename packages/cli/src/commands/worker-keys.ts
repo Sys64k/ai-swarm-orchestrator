@@ -17,20 +17,26 @@ interface WorkerKey {
  * it is installed, so one swapped on the way doesn't run.
  */
 export function joinInstructions(address: string, code: string, expiresAt: string, sha256?: string): string[] {
-  const http = hubHttpBase(address);
   return [
     `On the new machine (the code works once, until ${expiresAt}):`,
     "",
-    `  ${installCommand(http, sha256)}`,
-    `  aso service install --join ${code}`,
+    `  ${joinCommand(address, code, sha256)}`,
     "",
-    "On this LAN it finds the Hub by itself, and again whenever the Hub's address changes. From",
-    `another network, add --hub ${address}, with both machines on a private network such as`,
-    "Tailscale, or give the Hub a wss:// address.",
+    "It finds the Hub by itself, on this LAN or over Tailscale (both machines in your tailnet), and",
+    "again whenever it moves between them or the Hub's address changes. If it can't, add",
+    `--hub ${address} to the last part, or give the Hub a wss:// address.`,
     "",
     "It gets its own worker key: it can take jobs and use the projects' Git, nothing else, and",
     "`aso worker-key revoke <id>` (or the console) shuts it out.",
   ];
+}
+
+/**
+ * The one line a new machine runs: install aso from the Hub at `address`, then join with `code`.
+ * The console builds the same line (`joinCommand` in packages/dashboard/lib/view.ts): keep them in step.
+ */
+export function joinCommand(address: string, code: string, sha256?: string | null): string {
+  return `${installCommand(hubHttpBase(address), sha256)} && aso service install --join ${code}`;
 }
 
 /**
