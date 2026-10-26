@@ -150,8 +150,9 @@ What the key may do (see [Machines you don't control](installation.md#machines-y
 | `--budget <usd>` | none | USD of model calls its jobs may cause in total |
 
 `set <id>` changes them later: `--projects`, `--all-projects`, `--trusted`, `--untrusted`,
-`--budget`, `--no-budget`. `aso worker-keys` lists the keys with what each may do and has
-spent, and `revoke` shuts a machine out.
+`--budget`, `--no-budget`. `aso worker-keys` lists the keys with what each may do, has spent,
+and its machine's track record (builds, QA and acceptance results, failures, drops, QA runs
+done), and `revoke` shuts a machine out.
 
 ## `aso providers`, `aso provider add|remove`
 

@@ -1,5 +1,5 @@
 import os from "node:os";
-import { describeScope } from "@aso/hub";
+import { describeRecord, describeScope, type TrackRecord } from "@aso/hub";
 import { hubHttpBase } from "@aso/shared";
 import { api } from "../hub-api.js";
 
@@ -13,6 +13,7 @@ interface WorkerKey {
   trusted?: boolean;
   budgetUsd?: number;
   spentUsd?: number;
+  track?: TrackRecord;
   connected: boolean;
 }
 
@@ -71,7 +72,7 @@ export function installCommand(http: string, sha256?: string | null): string {
 /** One line per key, for `aso worker-keys`. */
 export function keyLine(k: WorkerKey): string {
   const state = k.revokedAt ? `revoked ${k.revokedAt}` : k.connected ? "connected" : k.lastUsedAt ? `last used ${k.lastUsedAt}` : "never used";
-  return `${k.id}  ${k.name}  (${state}; ${describeScope(k)})`;
+  return `${k.id}  ${k.name}  (${state}; ${describeScope(k)})\n    ${describeRecord(k.track)}`;
 }
 
 /** `aso worker-key new`: a one-time join code, and the commands to run with it on the new machine. */

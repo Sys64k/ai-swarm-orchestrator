@@ -25,6 +25,7 @@ import type { TranscriptInput } from "./transcripts.js";
 import type { Screenshots, ScreenshotSet } from "./screenshots.js";
 import { acceptanceCounts, unmetReason, type AcceptanceChecker } from "./llm/acceptance.js";
 import type { WorkerJob } from "./worker-scope.js";
+import type { JobOutcome } from "./track-record.js";
 
 const log = createLogger("tasks");
 
@@ -175,6 +176,8 @@ export interface TaskManagerOptions {
   project?: string;
   /** Why a machine may not take a job (its worker key's scope); undefined: it may. */
   refuseWorker?: (nodeId: string, job: WorkerJob) => string | undefined;
+  /** What became of a machine's job, for its track record. */
+  onOutcome?: (nodeId: string, outcome: JobOutcome) => void;
   /**
    * Called when work may have become dispatchable (a node freed up, a task requeued). With
    * several projects sharing the workers, this dispatches all of them; default: this one.
@@ -218,6 +221,7 @@ export class TaskManager {
   private readonly maxQaAttempts: number;
   private readonly maxReworkRounds: number;
   private readonly refuseWorker?: TaskManagerOptions["refuseWorker"];
+  private readonly onOutcome?: TaskManagerOptions["onOutcome"];
   private readonly reclaimGraceMs: number;
   readonly qa: QaOptions;
   private readonly onMerged?: (task: TaskRecord) => void;
@@ -241,6 +245,7 @@ export class TaskManager {
     this.maxQaAttempts = opts.maxQaAttempts ?? 3;
     this.maxReworkRounds = opts.maxReworkRounds ?? 3;
     this.refuseWorker = opts.refuseWorker;
+    this.onOutcome = opts.onOutcome;
     this.reclaimGraceMs = opts.reclaimGraceMs ?? 5 * 60_000;
     this.qa = { ...DEFAULT_QA, ...opts.qa };
     this.onMerged = opts.onMerged;
@@ -348,7 +353,7 @@ export class TaskManager {
         case "in_progress":
         case "testing": {
           const started = task.state === "testing" ? task.qaStarted : task.state === "in_progress";
-          const owner = task.state === "testing" ? task.qaNodeId : task.nodeId;
+          const owner = jobOwner(task);
           if (started) {
             task.detachedAt = now;
             this.note(task, `Hub restarted; holding for ${owner} to reconnect for ${Math.round(this.reclaimGraceMs / 1000)}s`);
@@ -619,6 +624,7 @@ export class TaskManager {
         } else {
           task.state = "failed";
           this.note(task, `failed on ${nodeId}: ${update.detail ?? "no detail"}`);
+          this.onOutcome?.(nodeId, "failed");
         }
         this.kick();
         return undefined;
@@ -664,6 +670,8 @@ export class TaskManager {
 
     this.registry.release(nodeId, task.spec.taskId);
     task.qaNodeId = undefined;
+    this.onOutcome?.(nodeId, "tested");
+    if (task.nodeId) this.onOutcome?.(task.nodeId, feedback.outcome === "pass" ? "qaPassed" : "qaFailed");
     this.onTranscript?.(task.spec.taskId, {
       kind: "qa",
       outcome: feedback.outcome,
@@ -705,7 +713,7 @@ export class TaskManager {
         task.detachedAt = now;
         this.note(task, `${nodeId} disconnected mid-job; holding for ${Math.round(this.reclaimGraceMs / 1000)}s`);
       } else {
-        this.requeue(task, `${nodeId} disconnected before starting`);
+        this.requeue(task, `${nodeId} disconnected before starting`, false);
       }
     }
     this.kick();
@@ -715,7 +723,7 @@ export class TaskManager {
   nodeRegistered(nodeId: string, running: ReadonlyArray<{ taskId: string; job: "implement" | "test" }>): void {
     for (const task of this.tasks.values()) {
       if (task.detachedAt === undefined) continue;
-      const owner = task.state === "testing" ? task.qaNodeId : task.nodeId;
+      const owner = jobOwner(task);
       if (owner !== nodeId) continue;
 
       const job = task.state === "testing" ? "test" : "implement";
@@ -734,7 +742,7 @@ export class TaskManager {
     let changed = false;
     for (const task of this.tasks.values()) {
       if (task.detachedAt !== undefined && now - task.detachedAt >= this.reclaimGraceMs) {
-        const owner = task.state === "testing" ? task.qaNodeId : task.nodeId;
+        const owner = jobOwner(task);
         this.requeue(task, `${owner} did not return within the grace period`);
         changed = true;
       }
@@ -742,9 +750,12 @@ export class TaskManager {
     if (changed) this.kick();
   }
 
-  private requeue(task: TaskRecord, reason: string): void {
+  /** Take a job from its node. `started`: it had begun (a drop counts against the machine); else it was only assigned. */
+  private requeue(task: TaskRecord, reason: string, started = true): void {
     task.detachedAt = undefined;
     task.drops++;
+    const owner = jobOwner(task);
+    if (owner && started) this.onOutcome?.(owner, "dropped");
     if (task.drops >= this.maxDrops) return this.fail(task, `${reason}; gave up after ${task.drops} node losses`);
     if (task.state === "testing") {
       task.qaNodeId = undefined;
@@ -779,6 +790,8 @@ export class TaskManager {
     }
     if (task.state !== "verifying") return;
     if (problem) return this.rework(task, `push verification failed: ${problem}`);
+    // A build counts once its push checks out (the builder is still task.nodeId).
+    if (task.nodeId) this.onOutcome?.(task.nodeId, "built");
 
     if (!this.qa.enabled) {
       this.note(task, "verified; QA disabled");
@@ -821,6 +834,7 @@ export class TaskManager {
     task.acceptance = { result: verdict.result, commit, at, model: verdict.model, summary: verdict.summary, criteria: verdict.criteria };
     const counts = acceptanceCounts(verdict.criteria);
     this.note(task, `acceptance check: ${counts}`);
+    if (task.nodeId) this.onOutcome?.(task.nodeId, verdict.result === "unmet" ? "unmet" : "accepted");
     if (verdict.result === "unmet") this.rework(task, unmetReason(verdict.criteria));
     else this.release(task);
     this.kick();
@@ -1043,4 +1057,9 @@ export class TaskManager {
     while (this.isIdTaken(id));
     return id;
   }
+}
+
+/** The node doing a task's current job: its QA node while testing, else its implementer. */
+function jobOwner(task: TaskRecord): string | undefined {
+  return task.state === "testing" ? task.qaNodeId : task.nodeId;
 }

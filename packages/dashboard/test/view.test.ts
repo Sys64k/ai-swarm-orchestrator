@@ -14,6 +14,7 @@ import {
   joinCommand,
   workerAccess,
   workerKeyBadge,
+  workerKeyRecord,
   workerKeyScope,
   formatDuration,
   hubUpdateView,
@@ -590,6 +591,12 @@ describe("worker machines and their keys", () => {
     );
     assert.match(joinCommand("::1", "C"), /http:\/\/\[::1\]:7420\//);
   });
+  it("says what became of each machine's jobs, as the CLI does", () => {
+    assert.equal(workerKeyRecord({ built: 2, qaPassed: 2, qaFailed: 1, accepted: 1, tested: 1 }), "2 builds · QA passed 2 of 3 · acceptance met 1 of 1 · 1 QA run");
+    assert.equal(workerKeyRecord({ built: 1, failed: 1, dropped: 2 }), "1 build · 1 failed · 2 dropped");
+    assert.equal(workerKeyRecord(undefined), "No jobs yet", "an older Hub, or a new key");
+  });
+
   it("says what each key may do", () => {
     assert.equal(workerKeyScope({}), "Trusted · all projects", "a key from an older Hub");
     assert.equal(workerKeyScope({ trusted: false, projects: ["aso-ui"], budgetUsd: 10, spentUsd: 1.2 }), "Untrusted: builds only · aso-ui · $1.20 of $10");

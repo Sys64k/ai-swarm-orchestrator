@@ -587,6 +587,19 @@ export const WorkerKeyJoinedSchema = z.object({
   name: z.string(),
   key: z.string().describe("The machine's worker key: shown this once; the Hub keeps only its hash"),
 });
+/** What a machine's track record counts (each a number of times). */
+export const JOB_OUTCOMES = ["built", "qaPassed", "qaFailed", "accepted", "unmet", "failed", "dropped", "tested"] as const;
+export type JobOutcome = (typeof JOB_OUTCOMES)[number];
+export const JOB_OUTCOME_MEANING: Record<JobOutcome, string> = {
+  built: "It pushed finished work that checked out",
+  qaPassed: "QA passed that work",
+  qaFailed: "QA failed that work",
+  accepted: "The acceptance check found that work met its criteria",
+  unmet: "It found criteria unmet",
+  failed: "Its agent gave up on a job",
+  dropped: "It went offline in the middle of a job",
+  tested: "It ran QA on someone's work",
+};
 export const WorkerKeySchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -597,6 +610,9 @@ export const WorkerKeySchema = z.object({
   trusted: z.boolean().describe("Its machine runs QA too; an untrusted one only builds"),
   budgetUsd: z.number().optional().describe("USD of model calls its jobs may cause in total"),
   spentUsd: z.number().describe("USD its jobs have caused so far (estimated)"),
+  track: z
+    .object(Object.fromEntries(JOB_OUTCOMES.map((o) => [o, z.number().int().optional().describe(JOB_OUTCOME_MEANING[o])])) as Record<JobOutcome, z.ZodOptional<z.ZodNumber>>)
+    .describe("Its machine's track record: what became of the jobs it took"),
   connected: z.boolean().describe("Whether a worker is connected with it now"),
 });
 export const DiscoveryProofSchema = z.object({ proof: z.string().describe("HMAC-SHA256 over the claim, keyed with the credential's secret (hex)") });

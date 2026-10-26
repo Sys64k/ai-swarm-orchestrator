@@ -35,12 +35,12 @@ describe("joining a Hub from anywhere", () => {
       "through the worker gateway: over TLS, and the worker keeps the address (no discovery on the internet)",
     );
     assert.ok(lines.some((l) => l.includes("add\n") || l.includes("--hub agent007")), "what to add when it can't");
-    assert.equal(keyLine({ id: "k1", name: "avalon", createdAt: "x", connected: true }), "k1  avalon  (connected; trusted, all projects)");
-    assert.equal(keyLine({ id: "k2", name: "mbp", createdAt: "x", connected: false }), "k2  mbp  (never used; trusted, all projects)");
-    assert.equal(keyLine({ id: "k3", name: "old", createdAt: "x", connected: false, revokedAt: "2026-10-24T10:00:00Z" }), "k3  old  (revoked 2026-10-24T10:00:00Z; trusted, all projects)");
+    assert.equal(keyLine({ id: "k1", name: "avalon", createdAt: "x", connected: true }), "k1  avalon  (connected; trusted, all projects)\n    no jobs yet");
+    assert.equal(keyLine({ id: "k2", name: "mbp", createdAt: "x", connected: false }), "k2  mbp  (never used; trusted, all projects)\n    no jobs yet");
+    assert.equal(keyLine({ id: "k3", name: "old", createdAt: "x", connected: false, revokedAt: "2026-10-24T10:00:00Z" }), "k3  old  (revoked 2026-10-24T10:00:00Z; trusted, all projects)\n    no jobs yet");
     assert.equal(
-      keyLine({ id: "k4", name: "friend", createdAt: "x", connected: true, trusted: false, projects: ["aso-ui"], budgetUsd: 10, spentUsd: 1.2 }),
-      "k4  friend  (connected; untrusted, projects aso-ui, $1.20 of $10 spent)",
+      keyLine({ id: "k4", name: "friend", createdAt: "x", connected: true, trusted: false, projects: ["aso-ui"], budgetUsd: 10, spentUsd: 1.2, track: { built: 3, qaPassed: 2, qaFailed: 1 } }),
+      "k4  friend  (connected; untrusted, projects aso-ui, $1.20 of $10 spent)\n    3 builds · QA passed 2 of 3",
     );
   });
 });
