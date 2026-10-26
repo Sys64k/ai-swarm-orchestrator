@@ -1174,6 +1174,17 @@
             "minimum": -9007199254740991,
             "maximum": 9007199254740991
           },
+          "refusedModels": {
+            "description": "Models whose API refused this task's requests; its later rounds use others",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "switchingModel": {
+            "description": "The current attempt's model was refused: its failure requeues the task on another model",
+            "type": "boolean"
+          },
           "budgetBaseUsd": {
             "description": "Spend before the latest retry; the budget counts from here",
             "type": "number"

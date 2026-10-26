@@ -84,6 +84,10 @@ export interface TaskRecord {
   budgetBaseUsd?: number;
   /** Times a person retried this task. */
   retries?: number;
+  /** Models whose API refused this task's requests (canonical specs); its later rounds use others. */
+  refusedModels?: string[];
+  /** Set when the current attempt's model was refused and another can take over: its failure requeues the task. */
+  switchingModel?: boolean;
   /** Files the agent reported touching (FILE_OPERATION), most recent last. */
   filesTouched: string[];
   /** One line per model turn: what the agent did and what it cost. */
@@ -291,6 +295,9 @@ export class TaskManager {
     task.budgetBaseUsd = task.llm.costUsd;
     task.reworkRound = 0;
     task.drops = 0;
+    // A person's retry gives every model another chance (a refusal may have been fixed since).
+    task.refusedModels = undefined;
+    task.switchingModel = undefined;
     task.qaAttempts = 0;
     task.nodeId = undefined;
     task.qaNodeId = undefined;
@@ -533,6 +540,19 @@ export class TaskManager {
     if (task) this.note(task, event);
   }
 
+  /**
+   * A model's API refused this task's request, and another model can take over: the attempt's
+   * failure (the worker reports it next) requeues the task instead of failing it, and later
+   * rounds skip this model. It doesn't count as a rework round.
+   */
+  recordModelRefused(taskId: string, spec: string, error: string): void {
+    const task = this.tasks.get(taskId);
+    if (!task || (task.state !== "assigned" && task.state !== "in_progress")) return;
+    task.refusedModels = [...new Set([...(task.refusedModels ?? []), spec])];
+    task.switchingModel = true;
+    this.note(task, `${spec} refused the request (${error.split("\n")[0].slice(0, 160)}); the task moves to another model`);
+  }
+
   /** Apply a STATUS_UPDATE. Returns an error string if the sender does not own the task. */
   handleStatus(nodeId: string, update: MessageOf<"STATUS_UPDATE">["payload"]): string | undefined {
     if (update.taskId === undefined) return undefined; // idle keepalive
@@ -584,8 +604,15 @@ export class TaskManager {
         return undefined;
       case "failed":
         this.registry.release(nodeId, task.spec.taskId);
-        task.state = "failed";
-        this.note(task, `failed on ${nodeId}: ${update.detail ?? "no detail"}`);
+        if (task.switchingModel) {
+          task.switchingModel = undefined;
+          task.nodeId = undefined;
+          task.state = "pending";
+          this.note(task, `requeued for another model after the failure on ${nodeId}`);
+        } else {
+          task.state = "failed";
+          this.note(task, `failed on ${nodeId}: ${update.detail ?? "no detail"}`);
+        }
         this.kick();
         return undefined;
     }

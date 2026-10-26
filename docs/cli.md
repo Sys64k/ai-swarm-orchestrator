@@ -18,6 +18,9 @@ Every `aso` command and its options.
 | `--allow-deps <list>` | any | npm packages agents may request; `@scope/*` allows a scope |
 | `--console-url <url>` | *(none)* | The console's address. Pull requests then link to their task, e.g. for its QA screenshots |
 | `--model <spec>` | `claude-opus-5-5` when Anthropic is a [provider](models.md#providers); otherwise required | The Architect's model, and agents' without `--agent-model`: `<provider>/<model>` |
+| `--escalate-to <specs>` | `--model` | Stronger models (comma-separated, weakest first) a task moves to after its junior rounds; see [Escalation](models.md#escalation) |
+| `--junior-rounds <n>` | `2` | Rework rounds a task gets on its desk's model before it escalates |
+| `--no-escalation` | | Keep every round on the desk's model |
 | `--agent-model <spec>` | `--model` | The builder and QA agents' model. The Architect keeps `--model`: a strong planner breaking work into small, clear tasks lets a cheaper model build them |
 | `--effort <level>` | `high` | `low`, `medium`, `high`, `xhigh`, `max` |
 | `--task-budget <usd>` | `5` | Estimated LLM spend cap per task |

@@ -169,3 +169,33 @@ aso desks                            # each desk's model, and how busy each mode
 - **One model per round:** an agent keeps the model its desk had when its conversation started;
   a change applies from the next round. Each task's history says which model worked on it.
 - **Stored** in `<projects root>/.aso/models.json` (no secrets: keys stay with the providers).
+
+### Escalation
+
+A task that keeps failing on a cheap model moves up to a stronger one, so the strong model's
+cost is only paid when it's needed:
+
+1. **The desk's model tries first**, for its first attempt and the first rework rounds
+   (`--junior-rounds`, default 2).
+2. **Then the task climbs the ladder** (`--escalate-to`, weakest first; default: the Architect's
+   `--model`), one step per further rework round. The stronger model gets the same rework
+   reasons (what QA or the acceptance check found), so it knows what the cheaper one missed.
+   It runs on whichever desk is free: the model runs on the Hub, the desk only runs the tools.
+3. **A model whose API refuses the task** (a bad request, a refused key, a model it no longer
+   serves) is skipped for that task from then on: the attempt is requeued on another model (the
+   default, else the ladder) instead of failing, without using a rework round. Only when no
+   other model is left does the task fail as before.
+
+```bash
+aso hub-service install ... --agent-model claude-haiku-5-5 \
+  --escalate-to anthropic/claude-sonnet-5-5,anthropic/claude-opus-5-5 --junior-rounds 2
+```
+
+- **In the task's history:** each agent conversation names its model and why, e.g.
+  `(claude-sonnet-5-5, escalated after 2 rework rounds)` or `(claude-haiku-5-5, the default;
+  gemini/models/gemini-3.8-flash refused this task)`.
+- **The rework limit stays** (3 rounds): with the defaults, rounds 0–1 run on the desk's model
+  and rounds 2–3 on the ladder.
+- **A person's retry** starts the task again on its desk's model and gives refused models
+  another chance (a refusal may have been fixed since).
+- **Off:** `--no-escalation` keeps every round on the desk's model.

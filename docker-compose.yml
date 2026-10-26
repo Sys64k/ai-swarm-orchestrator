@@ -35,6 +35,10 @@ services:
       ASO_PLAN_BUDGET: "${ASO_PLAN_BUDGET:-3}"
       ASO_MAX_TURNS: "${ASO_MAX_TURNS:-80}"
       ASO_LLM_CONCURRENCY: "${ASO_LLM_CONCURRENCY:-4}"
+      # A failing task moves to stronger models (docs/models.md, "Escalation").
+      ASO_ESCALATE_TO: "${ASO_ESCALATE_TO:-}"
+      ASO_JUNIOR_ROUNDS: "${ASO_JUNIOR_ROUNDS:-2}"
+      ASO_ESCALATION: "${ASO_ESCALATION:-1}"
       # `host`: deploy commands are handed to `aso start-hub --docker` on the host (the container has no Docker).
       ASO_DEPLOY_RUNNER: "${ASO_DEPLOY_RUNNER:-}"
       # Read from the environment of `aso start-hub --docker`; never baked into the image.
