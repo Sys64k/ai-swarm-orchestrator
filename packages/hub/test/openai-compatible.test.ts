@@ -11,6 +11,7 @@ import {
   startHub,
   toChatMessages,
   toChatTools,
+  withoutProviderData,
 } from "@aso/hub";
 import { makeTargetRepo, TOKEN } from "./helpers.ts";
 
@@ -96,6 +97,31 @@ describe("OpenAI-compatible models: translation", () => {
     assert.equal(res.stopReason, "tool_use");
     assert.equal(res.model, "qwen3-coder:30b");
     assert.deepEqual(res.tokens, { inputTokens: 20, outputTokens: 30, cacheReadTokens: 100, cacheWriteTokens: 0 });
+  });
+
+  it("keeps a tool call's provider data and sends it back next turn, but never to Anthropic (Gemini's thought signature)", () => {
+    const signature = { google: { thought_signature: "sig-abc" } };
+    const answer = accumulateChunks([
+      { choices: [{ delta: { tool_calls: [{ index: 0, id: "c1", function: { name: "read_file", arguments: '{"path":"a"}' }, extra_content: signature }] } }] },
+      { choices: [{ delta: { tool_calls: [{ index: 1, id: "c2", function: { name: "read_file", arguments: '{"path":"b"}' } }] } }] },
+      { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+    ]);
+    const content = fromChatAnswer(answer, "m").content;
+    assert.deepEqual((content[0] as unknown as Record<string, unknown>).aso_provider_data, signature);
+    assert.ok(!("aso_provider_data" in content[1]), "only the call that had some");
+
+    const conversation = [
+      { role: "user" as const, content: "go" },
+      { role: "assistant" as const, content },
+      { role: "user" as const, content: [{ type: "tool_result" as const, tool_use_id: "c1", content: "A" }, { type: "tool_result" as const, tool_use_id: "c2", content: "B" }] },
+    ];
+    const sent = toChatMessages("sys", conversation, { vision: false });
+    const calls = (sent[2] as { tool_calls: Array<{ id: string; extra_content?: unknown }> }).tool_calls;
+    assert.deepEqual(calls.map((c) => [c.id, c.extra_content ?? null]), [["c1", signature], ["c2", null]]);
+
+    const forAnthropic = withoutProviderData(conversation);
+    assert.ok(!JSON.stringify(forAnthropic).includes("aso_provider_data"), "Anthropic's API would refuse the unknown field");
+    assert.equal(forAnthropic[0], conversation[0], "messages without it are passed as they are");
   });
 
   it("maps finish reasons, and refuses tool calls the Hub couldn't run", () => {

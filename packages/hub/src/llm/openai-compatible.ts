@@ -1,5 +1,6 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { LlmError, type LlmAdapter, type LlmRequest, type LlmResponse } from "./adapter.js";
+import { PROVIDER_DATA } from "./provider-data.js";
 
 /**
  * Any model behind an OpenAI-compatible Chat Completions API: OpenAI, Gemini, Mistral, Groq,
@@ -32,6 +33,8 @@ interface ChatToolCall {
   id: string;
   type: "function";
   function: { name: string; arguments: string };
+  /** Provider data to send back with the call (Gemini: `{ google: { thought_signature } }`). */
+  extra_content?: unknown;
 }
 
 type ChatContentPart = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
@@ -82,9 +85,11 @@ export function toChatMessages(system: string, messages: Anthropic.Beta.BetaMess
     }
     if (message.role === "assistant") {
       const text = message.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("\n");
-      const calls = message.content.flatMap((b): ChatToolCall[] =>
-        b.type === "tool_use" ? [{ id: b.id, type: "function", function: { name: b.name, arguments: JSON.stringify(b.input ?? {}) } }] : [],
-      );
+      const calls = message.content.flatMap((b): ChatToolCall[] => {
+        if (b.type !== "tool_use") return [];
+        const extra = (b as typeof b & { [PROVIDER_DATA]?: unknown })[PROVIDER_DATA];
+        return [{ id: b.id, type: "function", function: { name: b.name, arguments: JSON.stringify(b.input ?? {}) }, ...(extra === undefined ? {} : { extra_content: extra }) }];
+      });
       out.push({ role: "assistant", content: text || null, ...(calls.length ? { tool_calls: calls } : {}) });
       continue;
     }
@@ -128,7 +133,9 @@ export function fromChatAnswer(answer: ChatAnswer, requestedModel: string): LlmR
     if (typeof input !== "object" || input === null || Array.isArray(input)) {
       throw new LlmError(`the model's call to ${call.function.name} has arguments that aren't a JSON object`, true);
     }
-    content.push({ type: "tool_use", id: call.id, name: call.function.name, input } as Anthropic.Beta.BetaToolUseBlock);
+    // Kept with the call, so the next turn sends it back (Gemini refuses a call without its thought signature).
+    const extra = call.extra_content === undefined ? {} : { [PROVIDER_DATA]: call.extra_content };
+    content.push({ type: "tool_use", id: call.id, name: call.function.name, input, ...extra } as Anthropic.Beta.BetaToolUseBlock);
   }
   const finish = answer.toolCalls.length ? "tool_calls" : (answer.finishReason ?? "stop");
   const cached = answer.usage?.prompt_tokens_details?.cached_tokens ?? 0;
@@ -149,7 +156,7 @@ export function fromChatAnswer(answer: ChatAnswer, requestedModel: string): LlmR
 interface ChatChunk {
   model?: string;
   choices?: Array<{
-    delta?: { content?: string | null; tool_calls?: Array<{ index?: number; id?: string; function?: { name?: string; arguments?: string } }> };
+    delta?: { content?: string | null; tool_calls?: Array<{ index?: number; id?: string; function?: { name?: string; arguments?: string }; extra_content?: unknown }> };
     finish_reason?: string | null;
   }>;
   usage?: ChatAnswer["usage"];
@@ -171,6 +178,7 @@ export function accumulateChunks(chunks: Iterable<ChatChunk>): ChatAnswer {
       if (d.id) call.id = d.id;
       if (d.function?.name) call.function.name += d.function.name;
       if (d.function?.arguments) call.function.arguments += d.function.arguments;
+      if (d.extra_content !== undefined) call.extra_content = d.extra_content;
       calls.set(index, call);
     }
     if (choice.finish_reason) answer.finishReason = choice.finish_reason;

@@ -1094,6 +1094,7 @@ request is translated:
 | `tool_result` (with `is_error`) | a `tool` message (prefixed `Error:`) |
 | image in a `tool_result` (view_image) | a following `user` message with `image_url` parts with `ASO_LLM_VISION=1`; otherwise a text note |
 | `thinking` blocks | dropped (only valid for their own model) |
+| a tool call's provider data (Gemini's `extra_content` thought signature) | kept on the `tool_use` block as `aso_provider_data` and sent back as the call's `extra_content`; stripped before any Anthropic request (`withoutProviderData`) |
 | tools | `function` tools with the same JSON Schema |
 
 The answer comes back streamed (`stream: true`, `include_usage`), so slow local models keep the
