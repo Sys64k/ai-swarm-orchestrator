@@ -73,7 +73,11 @@ export function suggestFor(
   const now = all.find((e) => e.model === current);
   if (!now || now.samples < min) return { note: `${current}: ${now?.samples ?? 0} of ${min} ${samples} needed to compare it.` };
   const others = all.filter((e) => e.model !== current && e.samples >= min);
-  if (!others.length) return { note: `No other model has ${min} ${samples} yet to compare ${current} with.` };
+  if (!others.length) {
+    // The desks and the reviewer can get one that data with a trial.
+    const trial = role === "architect" ? "" : ` Put one on trial to get it: aso challenger ${role} <model>.`;
+    return { note: `No other model has ${min} ${samples} yet to compare ${current} with.${trial}` };
+  }
 
   const cheaper = others
     .filter((e) => e.unitCostUsd <= now.unitCostUsd * (1 - COST_MARGIN) && e.quality >= now.quality - margin)

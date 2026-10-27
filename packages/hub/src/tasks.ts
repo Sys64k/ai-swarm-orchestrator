@@ -99,6 +99,8 @@ export interface TaskRecord {
   diffBase?: string;
   /** Models whose API refused this task's requests (canonical specs); its later rounds use others. */
   refusedModels?: string[];
+  /** The model on trial it started on (`aso challenger`), in place of its desk's; kept through retries. */
+  challenger?: string;
   /** Set when the current attempt's model was refused and another can take over: its failure requeues the task. */
   switchingModel?: boolean;
   /** Set when the current attempt's agent used all its turns: its failure becomes a rework round (escalation applies). */
@@ -598,6 +600,14 @@ export class TaskManager {
   recordEvent(taskId: string, event: string): void {
     const task = this.tasks.get(taskId);
     if (task) this.note(task, event);
+  }
+
+  /** The task starts on a model on trial (a challenger) instead of its desk's, from now on. */
+  recordChallenger(taskId: string, spec: string): void {
+    const task = this.tasks.get(taskId);
+    if (!task || task.challenger) return;
+    task.challenger = spec;
+    this.note(task, `it starts on ${spec}, a model on trial (aso challenger)`);
   }
 
   /**

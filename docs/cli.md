@@ -195,6 +195,12 @@ puts the Architect, or the acceptance check, on a model; see
 weakest first) and `--junior-tries <n|default>` change it while the Hub runs; see
 [Change it while the Hub runs](models.md#change-it-while-the-hub-runs).
 
+## `aso challenger`
+
+`aso challenger <desks|reviewer> <model|none>` puts a model on trial for a share of a role's work
+(`--share <percent>`, default 10, at most 50; `--budget <usd>`, default 5) until `aso tune` can
+compare it, or ends the trial. See [Trials](models.md#trials-getting-data-on-another-model).
+
 ## `aso tune`
 
 Suggests a model for the desks, the reviewer and the Architect from the track records: one that

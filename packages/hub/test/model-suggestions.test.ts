@@ -47,6 +47,8 @@ describe("model suggestions", () => {
     assert.deepEqual(suggestFor("architect", rows, "sonnet"), { note: "sonnet: 2 of 5 proposed plans needed to compare it." });
     assert.deepEqual(suggestFor("architect", rows, undefined), { note: "No model is set for it." });
     assert.deepEqual(suggestFor("desks", [], "gemini"), { note: "gemini: 0 of 10 settled tasks needed to compare it." });
+    const alone = [row("gemini", { started: [12, 11, 12] })];
+    assert.deepEqual(suggestFor("desks", alone, "gemini"), { note: "No other model has 10 settled tasks yet to compare gemini with. Put one on trial to get it: aso challenger desks <model>." });
   });
 
   it("doesn't flip on small differences", () => {

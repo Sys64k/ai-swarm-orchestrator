@@ -343,7 +343,34 @@ last 30 days (`--since` for another period):
 - **Nothing changes by itself.** `aso tune` prints the `aso desk` commands that apply a
   suggestion (for desks, each connected machine); the console has a *Switch* button. A model no
   provider offers now can't be applied.
-- **It needs data on more than one model** to compare: a model nobody has tried has none.
+- **It needs data on more than one model** to compare: a model nobody has tried has none. A
+  [trial](#trials-getting-data-on-another-model) gets it.
+
+#### Trials: getting data on another model
+
+A model on trial takes a share of a role's work, within a budget, until suggestions can compare
+it:
+
+```bash
+aso challenger desks openai/gpt-6.1-terra             # 10% of new tasks start on it, up to $5
+aso challenger reviewer anthropic/claude-sonnet-5-5 --share 20 --budget 10
+aso challenger desks none                              # end the trial
+```
+
+- **Desks:** a task it takes *starts* on it instead of its desk's model and keeps it through its
+  junior tries and retries; escalation applies as usual, so its all-in cost is measured fairly.
+  Its history says `(…, a model on trial)`.
+- **Reviewer:** a task it takes has its acceptance checks made by it first; if its call fails,
+  the usual reviewer takes over.
+- **Which work:** decided by a hash of the task id (salted by role, so the two trials take
+  different tasks): the same task always gets the same answer.
+- **It ends by itself** once it has the data suggestions need (10 settled tasks it started, or
+  10 met verdicts it gave) or has spent its budget; `aso desks` shows how it stands.
+- **Checked like a role's model:** it must take tools, and can't be a machine's own model. Give
+  it a price so its spending counts.
+- **Not for the Architect:** plans are too few for a share of them to give data soon.
+- **In the console:** *Model providers* → *Trials*. `POST /api/models/challengers`; `GET
+  /api/desks` shows them (`challengers`).
 
 #### Sharing them publicly (a README)
 

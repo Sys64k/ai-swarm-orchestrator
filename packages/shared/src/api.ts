@@ -276,6 +276,35 @@ export const DeskModelSettingsSchema = z.strictObject({
 export const MODEL_ROLES = ["architect", "reviewer"] as const;
 export type ModelRole = (typeof MODEL_ROLES)[number];
 
+/** The roles a challenger model can be tried in: the desks' builders and the reviewer. */
+export const CHALLENGER_ROLES = ["desks", "reviewer"] as const;
+export type ChallengerRole = (typeof CHALLENGER_ROLES)[number];
+/** The share of tasks a challenger takes unless told otherwise, and the most it may take. */
+export const DEFAULT_CHALLENGER_SHARE = 0.1;
+export const MAX_CHALLENGER_SHARE = 0.5;
+/** What a trial may spend unless told otherwise (USD). */
+export const DEFAULT_CHALLENGER_BUDGET_USD = 5;
+
+export const ChallengerBodySchema = z.strictObject({
+  role: z.enum(CHALLENGER_ROLES).describe("desks: tasks start on it; reviewer: it makes their acceptance checks"),
+  model: z.string().min(1).max(200).describe("A model from GET /api/models (<provider>/<model>), or none to end the trial"),
+  share: z.number().min(0.01).max(MAX_CHALLENGER_SHARE).optional().describe("The share of tasks it takes (default 0.1)"),
+  budgetUsd: z.number().min(0.5).max(1000).optional().describe("What the trial may spend in all (default 5)"),
+});
+
+/** A trial, as `GET /api/desks` shows it. */
+export const TrialSchema = z.object({
+  model: z.string(),
+  share: z.number(),
+  budgetUsd: z.number(),
+  since: z.string().describe("When the trial began"),
+  samples: z.number().int().describe("Settled tasks it started (desks) or met verdicts it gave (reviewer) since then"),
+  needed: z.number().int().describe("How many suggestions need to compare it"),
+  spentUsd: z.number(),
+  ended: z.enum(["enough data", "budget spent"]).optional().describe("Why it takes no more tasks"),
+});
+export type Trial = z.infer<typeof TrialSchema>;
+
 export const RoleModelBodySchema = DeskModelSettingsSchema.extend({
   role: z.enum(MODEL_ROLES).describe("architect: who plans; reviewer: who judges work in the acceptance check"),
   model: z.string().min(1).max(200).describe("A model from GET /api/models (<provider>/<model>), or default: the Hub's --model (the reviewer's default is the Architect's model)"),
@@ -563,6 +592,7 @@ export const TaskSchema = z.object({
   filesTouched: z.array(z.string()),
   agentLog: z.array(AgentTurnSchema),
   planId: z.string().optional(),
+  challenger: z.string().optional().describe("The model on trial it started on (aso challenger), instead of its desk's"),
   waitingReason: z.string().optional().describe("Why a queued task is not running yet"),
   routing: z.object({ nodeId: z.string(), score: z.number(), reasons: z.array(z.string()) }).optional().describe("Why its worker was chosen"),
   detail: z.string().optional(),
@@ -747,6 +777,10 @@ export const DesksSchema = z.object({
   escalationSet: z
     .object({ ladder: z.array(z.string()).optional(), juniorTries: z.number().int().optional() })
     .describe("What was changed while the Hub runs (absent: the Hub's start settings)"),
+  challengers: z
+    .object({ desks: TrialSchema.optional(), reviewer: TrialSchema.optional() })
+    .optional()
+    .describe("Models on trial in a role, taking a share of its work (aso challenger)"),
   defaultAgent: z.string().nullable(),
   desks: z.array(z.object({ desk: DeskSchema, model: z.string() })).describe("Desks with a model of their own; the others use the default"),
   models: z

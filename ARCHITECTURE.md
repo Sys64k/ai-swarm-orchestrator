@@ -1969,6 +1969,21 @@ serves it over the last `DEFAULT_PERIOD_DAYS`; `aso tune` and the console's *Sug
 *Track records*) show it and apply it through `aso desk` / `POST /api/desks` and
 `POST /api/models/roles`. Nothing applies by itself.
 
+### Trials (`challengers.ts`)
+
+A challenger is a model on trial in a role (`CHALLENGER_ROLES`: `desks`, `reviewer`), kept by
+`DeskModels` in `models.json` (`challengers`: spec, share, budget, since; checked like a role's
+model). `picked(key, share)` decides by an FNV-1a hash of `<role>:<taskId>`, so it's stable and
+the two roles take different tasks. `trialStatus` (pure) counts, from `since`, the desks' settled
+tasks with `challenger` set and their whole `llm.costUsd`, or the reviewer's met verdicts by
+`acceptanceModel` and their `acceptanceCostUsd`, and ends the trial at `ROLE_RULES.minSamples` or
+the budget. The server's `challengerFor` answers whether a trial takes a task:
+`ConversationManager.maybeChallenger` asks once, before a task's first build
+(`TaskManager.recordChallenger` sets `challenger`, which `ownModelOf` then prefers to the desk's
+model, so escalation and refusals work as for a desk's model); the `AcceptanceChecker` puts the
+reviewer's challenger first in its models for a task it takes. `GET /api/desks` adds
+`challengers`; `POST /api/models/challengers` starts or ends one.
+
 ### A machine's own model (`llm/machine-models.ts`)
 
 A worker started with `--local-model <url>` lists that server's models (`GET /models`) before

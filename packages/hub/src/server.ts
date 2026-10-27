@@ -30,6 +30,12 @@ import {
   DeskAssignmentBodySchema,
   RoleModelBodySchema,
   EscalationBodySchema,
+  ChallengerBodySchema,
+  CHALLENGER_ROLES,
+  DEFAULT_CHALLENGER_BUDGET_USD,
+  DEFAULT_CHALLENGER_SHARE,
+  type ChallengerRole,
+  type Trial,
   ProviderAddBodySchema,
   PriceRemoveBodySchema,
   PriceSetBodySchema,
@@ -69,6 +75,7 @@ import { AcceptanceChecker } from "./llm/acceptance.js";
 import { DeskModels, desksOf } from "./llm/desk-models.js";
 import { checkToolUse } from "./llm/tool-check.js";
 import { currentModels, defaultSince, modelSuggestions } from "./model-suggestions.js";
+import { takesTask, trialStatus } from "./challengers.js";
 import { MACHINE_PREFIX, machineDeskAdapter, MachineModels } from "./llm/machine-models.js";
 import { Providers, resolveModel } from "./llm/providers.js";
 import { CustomPrices } from "./llm/custom-prices.js";
@@ -274,11 +281,13 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       ? undefined
       : typeof opts.acceptanceCheck === "object"
         ? opts.acceptanceCheck
-        : new AcceptanceChecker(async () => {
+        : new AcceptanceChecker(async (task) => {
             // Resolves once the models (and deskModels) are set up: a check waits for that.
             const hubModel = await reviewModel;
-            // The reviewer's; if its call fails, the Architect's, then --model.
-            return [deskModels.roleRoute("reviewer")?.adapter, deskModels.roleRoute("architect")?.adapter, hubModel];
+            // A model on trial for the reviewer, when it takes this task; then the reviewer's; if a
+            // call fails, the Architect's, then --model.
+            const trial = task.spec.taskId ? challengerFor("reviewer", task.spec.taskId) : undefined;
+            return [trial ? routeOf(trial)?.adapter : undefined, deskModels.roleRoute("reviewer")?.adapter, deskModels.roleRoute("architect")?.adapter, hubModel];
           });
   // A machine's worker-key scope (none for the Hub's own token); set once the keys are loaded below.
   let scopeOfNode: (nodeId: string) => KeyScope | undefined = () => undefined;
@@ -397,6 +406,25 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     (spec) => spec.startsWith(MACHINE_PREFIX) || providers.isLocal(spec),
     checkToolUse,
   );
+  /** A model's route, or undefined when the Hub can't use it now. */
+  const routeOf = (spec: string) => {
+    try {
+      return deskModels.route(spec);
+    } catch {
+      return undefined;
+    }
+  };
+  /** How the trial in a role stands, if there is one. */
+  const trialOf = (role: ChallengerRole): Trial | undefined => {
+    const ch = deskModels.challenger(role);
+    return ch && trialStatus(role, ch, routeOf(ch.spec)?.adapter.model ?? ch.spec, tasks.list());
+  };
+  /** The model on trial in `role` when it takes the task `taskId`. */
+  const challengerFor = (role: ChallengerRole, taskId: string): string | undefined => {
+    const ch = deskModels.challenger(role);
+    if (!ch) return undefined;
+    return takesTask(role, ch, trialStatus(role, ch, routeOf(ch.spec)?.adapter.model ?? ch.spec, tasks.list()), taskId) ? ch.spec : undefined;
+  };
   // Only now: the acceptance check asks deskModels for the reviewer's model.
   setReviewModel(adapter);
   // Escalation: a task that keeps failing on its desk's model moves up to stronger ones. These are
@@ -428,6 +456,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       },
     },
     escalation: () => deskModels.escalationPolicy(startEscalation),
+    challenger: (taskId) => challengerFor("desks", taskId),
     taskBudgetUsd: llm.taskBudgetUsd,
     planBudgetUsd: llm.planBudgetUsd,
     maxTurns: llm.maxTurns,
@@ -796,7 +825,15 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   // Which model each desk's agents use: the models to choose from, and the desks' choices.
   const defaultAgentModel = () => (agentAdapter ?? adapter)?.model ?? null;
   /** The desks' and roles' models, as `GET /api/desks` answers. */
-  const deskView = () => deskModels.view(adapter?.model ?? null, defaultAgentModel(), startEscalation);
+  const deskView = () => {
+    const trials = Object.fromEntries(
+      CHALLENGER_ROLES.flatMap((role) => {
+        const trial = trialOf(role);
+        return trial ? [[role, trial]] : [];
+      }),
+    );
+    return { ...deskModels.view(adapter?.model ?? null, defaultAgentModel(), startEscalation), challengers: trials };
+  };
   /** A model named as a person would (`default`, `local-model`, `<provider>/<model>`) → its spec; null: the default. */
   const resolveSpec = async (model: string): Promise<{ spec: string | null } | { error: string }> => {
     if (model === "default") return { spec: null };
@@ -859,6 +896,25 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     if ("error" in resolved) return c.json({ error: resolved.error }, 400);
     try {
       await deskModels.assignRole(role, resolved.spec, givenSettings(settings));
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 400);
+    }
+    return c.json(deskView());
+  });
+  /** Put a model on trial in a role (a share of its work, within a budget), or end the trial with model "none". */
+  app.post("/api/models/challengers", async (c) => {
+    const req = await parsed(c, ChallengerBodySchema);
+    if (!req.ok) return c.json({ error: req.error }, 400);
+    const { role, model, share = DEFAULT_CHALLENGER_SHARE, budgetUsd = DEFAULT_CHALLENGER_BUDGET_USD } = req.data;
+    let spec: string | null = null;
+    if (model !== "none") {
+      const resolved = await resolveSpecOrMachine(model);
+      if ("error" in resolved) return c.json({ error: resolved.error }, 400);
+      if (resolved.spec === null) return c.json({ error: "a trial needs a model; give none to end it" }, 400);
+      spec = resolved.spec;
+    }
+    try {
+      await deskModels.setChallenger(role, spec, { share, budgetUsd });
     } catch (err) {
       return c.json({ error: (err as Error).message }, 400);
     }

@@ -311,6 +311,8 @@ export interface Desks {
   escalation?: EscalationPolicy | null;
   /** What was changed while the Hub runs (absent: its start settings). */
   escalationSet?: Partial<EscalationPolicy>;
+  /** Models on trial for a role (absent from older Hubs). */
+  challengers?: Partial<Record<ChallengerRole, Trial>>;
   defaultAgent: string | null;
   desks: Array<{ desk: string; model: string }>;
   models: Array<{ model: string; baseUrl?: string; concurrency: number; running: number; waiting: number }>;
@@ -381,4 +383,18 @@ export interface ModelSuggestions {
   since: string;
   suggestions: ModelSuggestion[];
   notes: Array<{ role: SuggestionRole; text: string }>;
+}
+
+export type ChallengerRole = "desks" | "reviewer";
+
+/** A model on trial for a role, taking a share of its work (`GET /api/desks`). */
+export interface Trial {
+  model: string;
+  share: number;
+  budgetUsd: number;
+  since: string;
+  samples: number;
+  needed: number;
+  spentUsd: number;
+  ended?: "enough data" | "budget spent";
 }

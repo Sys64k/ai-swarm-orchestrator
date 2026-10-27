@@ -1,5 +1,7 @@
 import type {
+  ChallengerRole,
   Desks,
+  Trial,
   ModelSuggestion,
   ModelSuggestions,
   SuggestionRole,
@@ -1177,4 +1179,30 @@ export function suggestionRequests(s: ModelSuggestion): Array<{ path: string; bo
   return s.apply.map((a): { path: string; body: Record<string, string> } =>
     a.kind === "desk" ? { path: "desks", body: { target: a.target, model: a.model } } : { path: "models/roles", body: { role: a.target, model: a.model } },
   );
+}
+
+/** Mirror MAX_CHALLENGER_SHARE and DEFAULT_CHALLENGER_SHARE (as percentages), DEFAULT_CHALLENGER_BUDGET_USD and ChallengerBodySchema's budget bounds in @aso/shared. */
+export const MAX_TRIAL_SHARE_PERCENT = 50;
+export const DEFAULT_TRIAL_SHARE_PERCENT = 10;
+export const DEFAULT_TRIAL_BUDGET_USD = 5;
+const TRIAL_BUDGET_USD = { min: 0.5, max: 1000 };
+
+/** A trial in a sentence: "openai/gpt-6.1-terra takes 10% of the tasks: 3 of 10 settled so far, $0.80 of $5 spent." */
+export function trialSummary(role: ChallengerRole, t: Trial): string {
+  const work = role === "desks" ? "tasks" : "acceptance checks";
+  const unit = role === "desks" ? "settled" : "met verdicts";
+  const head = t.ended ? `${t.model} took ${Math.round(t.share * 100)}% of the ${work} until it had ${t.ended === "enough data" ? "enough data" : "spent its budget"}` : `${t.model} takes ${Math.round(t.share * 100)}% of the ${work}`;
+  return `${head}: ${t.samples} of ${t.needed} ${unit} so far, ${formatUsd(t.spentUsd)} of ${formatUsd(t.budgetUsd)} spent.`;
+}
+
+/** What `POST /api/models/challengers` takes to start a trial, or why it can't start. */
+export function trialBody(role: ChallengerRole, model: string, sharePercent: string, budgetUsd: string): { body: { role: ChallengerRole; model: string; share: number; budgetUsd: number } } | { error: string } {
+  if (!model) return { error: "Choose a model to try." };
+  const share = Number(sharePercent);
+  if (!Number.isInteger(share) || share < 1 || share > MAX_TRIAL_SHARE_PERCENT) return { error: `The share must be a whole percentage from 1 to ${MAX_TRIAL_SHARE_PERCENT}.` };
+  const budget = Number(budgetUsd);
+  if (!Number.isFinite(budget) || budget < TRIAL_BUDGET_USD.min || budget > TRIAL_BUDGET_USD.max) {
+    return { error: `The budget must be from $${TRIAL_BUDGET_USD.min.toFixed(2)} to $${TRIAL_BUDGET_USD.max}.` };
+  }
+  return { body: { role, model, share: share / 100, budgetUsd: budget } };
 }

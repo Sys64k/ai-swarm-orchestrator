@@ -1,7 +1,8 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import { createLogger, DeskSchema, DeskModelSettingsSchema, MODEL_ROLES, type Desks, type ModelRole } from "@aso/shared";
+import { CHALLENGER_ROLES, createLogger, DeskSchema, DeskModelSettingsSchema, MODEL_ROLES, type ChallengerRole, type Desks, type ModelRole } from "@aso/shared";
+import { ChallengerSchema, type Challenger } from "../challengers.js";
 import { MACHINE_PREFIX } from "./machine-models.js";
 import { JsonFileWriter } from "../push/json-file.js";
 import type { LlmAdapter } from "./adapter.js";
@@ -25,7 +26,9 @@ const ModelsFileSchema = z.object({
   desks: z.record(DeskSchema, z.string().min(1)).default({}),
   roles: z.object({ architect: z.string().min(1).optional(), reviewer: z.string().min(1).optional() }).default({}),
   escalation: z.object({ ladder: z.array(z.string().min(1)).min(1).optional(), juniorTries: z.number().int().min(0).optional() }).default({}),
+  challengers: z.partialRecord(z.enum(CHALLENGER_ROLES), ChallengerSchema).default({}),
 });
+type Challengers = z.infer<typeof ModelsFileSchema>["challengers"];
 type Roles = z.infer<typeof ModelsFileSchema>["roles"];
 /** Escalation as changed while the Hub runs; what's absent comes from the Hub's start settings. */
 export type EscalationChoice = z.infer<typeof ModelsFileSchema>["escalation"];
@@ -89,6 +92,7 @@ export class DeskModels {
     private desks: Record<string, ModelSpec>,
     private roles: Roles,
     private escalation: EscalationChoice,
+    private challengers: Challengers,
     private readonly factory: AdapterFactory,
     private readonly hubConcurrency: number,
     private readonly isLocal: IsLocal,
@@ -101,7 +105,7 @@ export class DeskModels {
   /** `checkTools`: asked before a role or a ladder step goes on a model, so one that can't use tools is refused then, not at every task. */
   static async open(dir: string | undefined, factory: AdapterFactory, hubConcurrency: number, isLocal: IsLocal, checkTools?: ToolCheck): Promise<DeskModels> {
     const file = dir ? path.join(dir, FILE) : undefined;
-    let data: z.infer<typeof ModelsFileSchema> = { models: {}, desks: {}, roles: {}, escalation: {} };
+    let data: z.infer<typeof ModelsFileSchema> = { models: {}, desks: {}, roles: {}, escalation: {}, challengers: {} };
     if (file) {
       try {
         data = ModelsFileSchema.parse(JSON.parse(await readFile(file, "utf8")));
@@ -109,7 +113,7 @@ export class DeskModels {
         if ((err as NodeJS.ErrnoException).code !== "ENOENT") log.warn(`${file} is unreadable, starting with every desk on the default model: ${(err as Error).message}`);
       }
     }
-    return new DeskModels(data.models, data.desks, data.roles, data.escalation, factory, hubConcurrency, isLocal, checkTools, file);
+    return new DeskModels(data.models, data.desks, data.roles, data.escalation, data.challengers, factory, hubConcurrency, isLocal, checkTools, file);
   }
 
   /** The model a desk uses, or undefined for the default agent model. */
@@ -202,18 +206,43 @@ export class DeskModels {
     log.info(`escalation: ladder ${next.ladder ? next.ladder.join(", then ") : "as the Hub started"}; junior tries ${next.juniorTries ?? "as the Hub started"}`);
   }
 
+  /** The model on trial in a role, if any (ended or not). */
+  challenger(role: ChallengerRole): Challenger | undefined {
+    return this.challengers[role];
+  }
+
+  /**
+   * Put a model on trial in a role, or end the trial with `null`. Like a role's model, it must
+   * take tools and can't be a machine's own; a new trial counts from `now`.
+   */
+  async setChallenger(role: ChallengerRole, spec: ModelSpec | null, opts: { share: number; budgetUsd: number }, now = new Date()): Promise<void> {
+    const next: Challengers = { ...this.challengers };
+    if (spec === null) delete next[role];
+    else {
+      if (spec.startsWith(MACHINE_PREFIX)) throw new Error(`a machine's own model serves only its own jobs; it can't be tried for the ${role}`);
+      const route = this.makeRoute(spec, this.settings[spec] ?? {});
+      await this.checkTools?.(route.adapter);
+      if (!this.routes.has(spec)) this.routes.set(spec, route);
+      next[role] = { spec, share: opts.share, budgetUsd: opts.budgetUsd, since: now.toISOString() };
+    }
+    await this.save({ challengers: next }, this.settings);
+    log.info(`challenger for the ${role}: ${spec ? `${spec}, ${Math.round(opts.share * 100)}% of the work, up to $${opts.budgetUsd}` : "none"}`);
+  }
+
   /** Save the choices, dropping settings of models nothing uses any more, so the file holds only what's in use. */
   private async save(
-    changed: { desks?: Record<string, ModelSpec>; roles?: Roles; escalation?: EscalationChoice },
+    changed: { desks?: Record<string, ModelSpec>; roles?: Roles; escalation?: EscalationChoice; challengers?: Challengers },
     settings: Record<ModelSpec, ModelSettings>,
   ): Promise<void> {
-    const { desks = this.desks, roles = this.roles, escalation = this.escalation } = changed;
-    const used = new Set([...Object.values(desks), ...Object.values(roles), ...(escalation.ladder ?? [])]);
+    const { desks = this.desks, roles = this.roles, escalation = this.escalation, challengers = this.challengers } = changed;
+    const tried = Object.values(challengers).map((c) => c.spec);
+    const used = new Set([...Object.values(desks), ...Object.values(roles), ...(escalation.ladder ?? []), ...tried]);
     const kept = Object.fromEntries(Object.entries(settings).filter(([s]) => used.has(s)));
-    await this.writer?.save({ models: kept, desks, roles, escalation });
+    await this.writer?.save({ models: kept, desks, roles, escalation, challengers });
     this.desks = desks;
     this.roles = roles;
     this.escalation = escalation;
+    this.challengers = challengers;
     this.settings = kept;
   }
 
