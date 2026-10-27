@@ -149,6 +149,11 @@ export interface HubOptions {
    */
   apiSync?: boolean;
   /**
+   * Merge an API sync's pull request without a person once QA passed, the acceptance check found
+   * every criterion met and CI passes on it (default: on). Anything less waits for review.
+   */
+  autoMergeSyncs?: boolean;
+  /**
    * Push main to the target repo's remote after merges, and catch up with what was merged there
    * (`followMs`: see ProjectSetOptions). Default: on when an `origin` remote exists.
    */
@@ -313,7 +318,10 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     for (const p of projects.list()) deployer.request(p);
   }
   // A copy that looks out of date is checked again after catching up with GitHub. `close` waits for it.
-  const apiSyncing = opts.apiSync === false ? Promise.resolve() : syncApiCopies(projects.list(), openApiDocument(API_DOC_VERSION), (p) => projects.followForPlanning(p));
+  const apiSyncing =
+    opts.apiSync === false
+      ? Promise.resolve()
+      : syncApiCopies(projects.list(), openApiDocument(API_DOC_VERSION), (p) => projects.followForPlanning(p), { autoMerge: opts.autoMergeSyncs !== false });
   const llm = opts.llm ?? {};
   const maxTokens = llm.maxTokens ?? DEFAULT_MAX_TOKENS;
   const effort = llm.effort ?? "high";

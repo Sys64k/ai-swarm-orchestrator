@@ -1197,6 +1197,10 @@
             "minimum": -9007199254740991,
             "maximum": 9007199254740991
           },
+          "autoMerge": {
+            "description": "Its pull request is merged without a person once QA passed, every acceptance criterion is met and CI passes (API syncs)",
+            "type": "boolean"
+          },
           "supersededBy": {
             "description": "A newer task that does this one's job (a newer sync of the API copy); this one can't be retried",
             "type": "string"

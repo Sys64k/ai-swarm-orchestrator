@@ -159,6 +159,11 @@ function hubOptions(cmd: Command): Command {
     )
     .option("--gateway-host <host>", "interface the worker gateway listens on (the tunnel connects locally)", process.env.ASO_GATEWAY_HOST || "127.0.0.1")
     .addOption(
+      new Option("--no-auto-merge-syncs", "leave API sync pull requests for a person even when QA, every acceptance criterion and CI pass").default(
+        process.env.ASO_AUTO_MERGE_SYNCS !== "0",
+      ),
+    )
+    .addOption(
       new Option("--no-docker-cleanup", "don't tidy Docker after Hub updates and deploys (old build cache, dangling images, old project images)").default(
         process.env.ASO_DOCKER_CLEANUP !== "0",
       ),

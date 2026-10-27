@@ -58,6 +58,7 @@ describe("syncing a project's copy of the Hub API description", () => {
         assert.equal(git(ctx.repoDir, "log", "-1", "--format=%an|%s", branch), `ASO Hub|chore: sync the Hub API description (${API_DOC_VERSION})`);
         assert.equal(git(ctx.repoDir, "rev-parse", "main"), mainBefore, "main untouched");
         assert.equal(task.diffBase, git(ctx.repoDir, "rev-parse", branch), "its acceptance check starts after the Hub's own commit");
+        assert.equal(task.autoMerge, true, "its pull request may merge without a person once everything passes");
         assert.match(task.spec.acceptanceCriteria[0], /isn't changed in the diff \(the Hub's own first commit on this branch put the new copy there, and the diff starts after it\)/);
 
         // The diff the acceptance check reads: an agent's work on top, without the Hub's copy.

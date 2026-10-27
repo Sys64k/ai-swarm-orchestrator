@@ -47,6 +47,7 @@ services:
       ASO_GATEWAY_PORT: "${ASO_GATEWAY_PORT:+7423}"
       ASO_GATEWAY_HOST: "0.0.0.0"
       ASO_GATEWAY_URL: "${ASO_GATEWAY_URL:-}"
+      ASO_AUTO_MERGE_SYNCS: "${ASO_AUTO_MERGE_SYNCS:-1}"
       # Read from the environment of `aso start-hub --docker`; never baked into the image.
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
       # Cloud providers' keys: each makes that provider available (docs/models.md, "Providers").
