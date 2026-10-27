@@ -158,6 +158,11 @@ function hubOptions(cmd: Command): Command {
       process.env.ASO_GATEWAY_PORT ? Number(process.env.ASO_GATEWAY_PORT) : undefined,
     )
     .option("--gateway-host <host>", "interface the worker gateway listens on (the tunnel connects locally)", process.env.ASO_GATEWAY_HOST || "127.0.0.1")
+    .addOption(
+      new Option("--no-docker-cleanup", "don't tidy Docker after Hub updates and deploys (old build cache, dangling images, old project images)").default(
+        process.env.ASO_DOCKER_CLEANUP !== "0",
+      ),
+    )
     .option("--gateway-url <url>", "the worker gateway's public wss:// address (e.g. wss://agent007.tailc9777f.ts.net:10000), for join commands", parseWssUrl, process.env.ASO_GATEWAY_URL || undefined)
     .option("--no-discovery", "do not answer LAN discovery: workers need --hub")
     .option("--docker", "run the Hub and dashboard in Docker (Architect stays on the host)", false)

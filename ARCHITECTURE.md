@@ -1642,7 +1642,11 @@ different from it:
    agent once reverted it to "fix" that, and the task failed.
 
 The task id is `sync-hub-api-<hash of project id and description>`, so each project gets one
-task per version of the description, and a cancelled one is not queued again. Failures are
+task per version of the description, and a cancelled one is not queued again. Queuing a new one
+supersedes the project's older sync tasks (`TaskManager.supersede`): an unfinished one is
+cancelled, and any one not merged gets `supersededBy`, so `retry` refuses it (409) and the
+console shows what replaced it instead of a Retry button. An older sync would only bring back
+an older description. Failures are
 logged, never thrown; `close()` waits for the run, so it never outlives the Hub.
 
 ### Deploys and the Hub's update outside aso-ui
@@ -1838,3 +1842,14 @@ server only, adds the stream up (`accumulateChunks`, now in shared) and sends `M
 its machine (another machine's answer is a protocol error); a machine that disconnects fails its
 waiting calls as retryable; a call times out after 31 minutes. The answer's model is named
 `machine/<model>`, which no price matches, so it costs $0.
+
+### Docker cleanup (`cli/src/docker-cleanup.ts`)
+
+Each Hub update builds a new Hub image and each deploy a new project image, so build cache and
+old images pile up (about 40 GB in a busy day on agent007). With `--docker`, `start-hub` runs
+`DockerCleanup.maybeRun` after the updater's `afterStart` (the Hub's start or a confirmed
+update) and after each successful deploy, at most once an hour: `docker builder prune --filter
+until=24h` (younger cache stays, so the next build is fast), `docker image prune`, and `docker
+rmi` of all but the three newest tags of each repository named like a project
+(`oldProjectImages`; never an image a container uses, never another repository). Failures are
+logged; `--no-docker-cleanup` / `ASO_DOCKER_CLEANUP=0` turns it off.

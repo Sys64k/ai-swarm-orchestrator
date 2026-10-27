@@ -33,6 +33,7 @@ Every `aso` command and its options.
 | `--no-discovery` | | Don't answer LAN discovery: workers then need `--hub` |
 | `--gateway-port <port>` | off | Also listen here for workers coming from the internet through a TLS tunnel: only the worker connection, Git, the package and joining, worker keys only. See [Workers anywhere](installation.md#workers-anywhere) |
 | `--gateway-host <host>` | `127.0.0.1` | Interface the worker gateway listens on (the tunnel connects locally) |
+| `--no-docker-cleanup` | | Don't tidy Docker after Hub updates and deploys. By default, with `--docker`, at most once an hour: build cache older than a day, dangling images, and all but the three newest images of each project's repository (named like the project, never one in use; other repositories are left alone) |
 | `--gateway-url <wss://…>` | *(none)* | The gateway's public address, which join commands for machines on the internet use (`aso worker-key new --internet`, the console's **Add a machine**) |
 | `--update-from <git-url>` | `ASO_UPDATE_FROM` | Keep the Hub on that ASO repository's `main` (see [Automatic Hub updates](installation.md#automatic-hub-updates)). Only for an installed package run as the Hub service |
 

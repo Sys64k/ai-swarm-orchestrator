@@ -48,6 +48,11 @@ export function TaskPage({ id }: { id: string }) {
             {task.retries ? <span className="chip">retry {task.retries}</span> : null}
           </div>
           {task.state === "failed" && task.detail && <Banner tone="bad">{task.detail}</Banner>}
+          {task.supersededBy && (
+            <p className="muted small">
+              Superseded by <Link href={`/tasks/${task.supersededBy}`}>{task.supersededBy}</Link>, which does its job: there&apos;s nothing to retry.
+            </p>
+          )}
           {crew && <p className="small">{crew}</p>}
           {task.state === "pending" && task.waitingReason && <p className="muted small">{task.waitingReason}</p>}
           {review && (

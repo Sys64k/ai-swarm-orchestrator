@@ -16,7 +16,7 @@ export interface DeployRunner {
  * here, where Docker and the operator's tools are. The export is already in the shared projects
  * folder, `<root>/.aso/deploy/<project>`.
  */
-export function startDeployRunner(opts: { hubUrl: string; token: string; root: string; pollMs?: number }): DeployRunner {
+export function startDeployRunner(opts: { hubUrl: string; token: string; root: string; pollMs?: number; onDeployed?: () => void }): DeployRunner {
   let stopped = false;
   let timer: NodeJS.Timeout | undefined;
   const headers = { authorization: `Bearer ${opts.token}`, "content-type": "application/json" };
@@ -32,6 +32,7 @@ export function startDeployRunner(opts: { hubUrl: string; token: string; root: s
       ? await runHere(job, deployWorkDir(path.join(opts.root, ".aso"), project.data))
       : { ok: false, error: `invalid project id ${JSON.stringify(job.project)}`, output: "" };
     log.info(`${job.project} @ ${job.commit.slice(0, 7)}: deploy ${result.ok ? "succeeded" : `failed: ${result.error}`}`);
+    if (result.ok) opts.onDeployed?.();
     const answer = await fetch(`${opts.hubUrl}/api/deploys/${encodeURIComponent(job.id)}/result`, {
       method: "POST",
       headers,
