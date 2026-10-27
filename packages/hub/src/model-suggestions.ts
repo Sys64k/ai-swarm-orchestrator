@@ -67,7 +67,8 @@ export function suggestFor(
   rows: readonly Row[],
   current: string | undefined,
 ): { suggestion?: Omit<ModelSuggestion, "spec" | "apply">; note?: string } {
-  if (!current) return { note: "No model is set for it." };
+  // Without one, the desks have no machine connected (right after a Hub restart, say); a role, no model.
+  if (!current) return { note: role === "desks" ? "No worker machine is connected right now, so no desk's model to compare." : "No model is set for it." };
   const all = rows.map((r) => evidenceOf(r, role)).filter((e): e is SuggestionEvidence => e !== undefined);
   const { minSamples: min, samples, qualityMargin: margin } = ROLE_RULES[role];
   const now = all.find((e) => e.model === current);
