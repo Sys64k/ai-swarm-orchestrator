@@ -295,12 +295,22 @@ export interface Models {
   localError?: string;
 }
 
+/** After `juniorTries` tries on its desk's model, a task moves up the `ladder` (weakest first). */
+export interface EscalationPolicy {
+  ladder: string[];
+  juniorTries: number;
+}
+
 /** Which desks use a model of their own (`GET /api/desks`). */
 export interface Desks {
   architect: string | null;
   reviewer?: string | null;
   /** The roles put on a model of their own (absent from older Hubs). */
   roles?: { architect?: string; reviewer?: string };
+  /** Where a failing task moves (null: escalation is off; absent from older Hubs). */
+  escalation?: EscalationPolicy | null;
+  /** What was changed while the Hub runs (absent: its start settings). */
+  escalationSet?: Partial<EscalationPolicy>;
   defaultAgent: string | null;
   desks: Array<{ desk: string; model: string }>;
   models: Array<{ model: string; baseUrl?: string; concurrency: number; running: number; waiting: number }>;

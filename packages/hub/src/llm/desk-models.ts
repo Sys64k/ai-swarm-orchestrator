@@ -5,6 +5,7 @@ import { createLogger, DeskSchema, DeskModelSettingsSchema, MODEL_ROLES, type De
 import { MACHINE_PREFIX } from "./machine-models.js";
 import { JsonFileWriter } from "../push/json-file.js";
 import type { LlmAdapter } from "./adapter.js";
+import { DEFAULT_JUNIOR_TRIES, type EscalationPolicy } from "./escalation.js";
 import { Semaphore } from "./semaphore.js";
 
 const log = createLogger("models");
@@ -23,8 +24,28 @@ const ModelsFileSchema = z.object({
   models: z.record(z.string().min(1), DeskModelSettingsSchema).default({}),
   desks: z.record(DeskSchema, z.string().min(1)).default({}),
   roles: z.object({ architect: z.string().min(1).optional(), reviewer: z.string().min(1).optional() }).default({}),
+  escalation: z.object({ ladder: z.array(z.string().min(1)).min(1).optional(), juniorTries: z.number().int().min(0).optional() }).default({}),
 });
 type Roles = z.infer<typeof ModelsFileSchema>["roles"];
+/** Escalation as changed while the Hub runs; what's absent comes from the Hub's start settings. */
+export type EscalationChoice = z.infer<typeof ModelsFileSchema>["escalation"];
+
+/** A change to escalation: a value sets it, `null` goes back to the Hub's start setting, absent keeps it. */
+export interface EscalationChange {
+  ladder?: ModelSpec[] | null;
+  juniorTries?: number | null;
+}
+
+/**
+ * The escalation policy in force: what was changed while the Hub runs over `base`, the one its
+ * start settings give (undefined: off). A ladder set while it runs turns escalation on even when
+ * it started without one.
+ */
+export function effectiveEscalation(choice: EscalationChoice, base: EscalationPolicy | undefined): EscalationPolicy | undefined {
+  const ladder = choice.ladder ?? base?.ladder;
+  if (!ladder?.length) return undefined;
+  return { ladder, juniorTries: choice.juniorTries ?? base?.juniorTries ?? DEFAULT_JUNIOR_TRIES };
+}
 
 /** A desk's name: its machine's hostname and job slot. */
 export function deskName(host: string, slot: number): string {
@@ -64,6 +85,7 @@ export class DeskModels {
     private settings: Record<ModelSpec, ModelSettings>,
     private desks: Record<string, ModelSpec>,
     private roles: Roles,
+    private escalation: EscalationChoice,
     private readonly factory: AdapterFactory,
     private readonly hubConcurrency: number,
     private readonly isLocal: IsLocal,
@@ -74,7 +96,7 @@ export class DeskModels {
 
   static async open(dir: string | undefined, factory: AdapterFactory, hubConcurrency: number, isLocal: IsLocal): Promise<DeskModels> {
     const file = dir ? path.join(dir, FILE) : undefined;
-    let data: z.infer<typeof ModelsFileSchema> = { models: {}, desks: {}, roles: {} };
+    let data: z.infer<typeof ModelsFileSchema> = { models: {}, desks: {}, roles: {}, escalation: {} };
     if (file) {
       try {
         data = ModelsFileSchema.parse(JSON.parse(await readFile(file, "utf8")));
@@ -82,7 +104,7 @@ export class DeskModels {
         if ((err as NodeJS.ErrnoException).code !== "ENOENT") log.warn(`${file} is unreadable, starting with every desk on the default model: ${(err as Error).message}`);
       }
     }
-    return new DeskModels(data.models, data.desks, data.roles, factory, hubConcurrency, isLocal, file);
+    return new DeskModels(data.models, data.desks, data.roles, data.escalation, factory, hubConcurrency, isLocal, file);
   }
 
   /** The model a desk uses, or undefined for the default agent model. */
@@ -127,25 +149,64 @@ export class DeskModels {
     const roles: Roles = { ...this.roles };
     if (spec === null) {
       delete roles[role];
-      await this.save(this.desks, roles, this.settings);
+      await this.save({ roles }, this.settings);
     } else {
       if (spec.startsWith(MACHINE_PREFIX)) throw new Error(`a machine's own model serves only its own jobs; the ${role} needs a model the Hub calls`);
       roles[role] = spec;
       const merged = settings ?? this.settings[spec] ?? {};
       const route = this.makeRoute(spec, merged);
-      await this.save(this.desks, roles, { ...this.settings, [spec]: merged });
+      await this.save({ roles }, { ...this.settings, [spec]: merged });
       this.routes.set(spec, route);
     }
     log.info(`${role}: ${spec ?? "the default model"}`);
   }
 
+  /** Escalation as changed while the Hub runs (empty: as it started). */
+  escalationChoice(): EscalationChoice {
+    return { ...this.escalation };
+  }
+
+  /** The escalation policy in force, over `base` from the Hub's start settings. */
+  escalationPolicy(base: EscalationPolicy | undefined): EscalationPolicy | undefined {
+    return effectiveEscalation(this.escalation, base);
+  }
+
+  /**
+   * Change where failing tasks move: the ladder of stronger models (weakest first), the tries on
+   * a desk's model before that, or either back to the Hub's start setting with `null`. Each
+   * ladder model's adapter is built first, so one the Hub can't use is refused, and a failed
+   * save changes nothing. A machine's own model serves only its own jobs, so it can't be a step.
+   */
+  async setEscalation(change: EscalationChange): Promise<void> {
+    const next: EscalationChoice = { ...this.escalation };
+    const routes = new Map<ModelSpec, Route>();
+    if (change.ladder === null) delete next.ladder;
+    else if (change.ladder) {
+      const machine = change.ladder.find((spec) => spec.startsWith(MACHINE_PREFIX));
+      if (machine) throw new Error(`a machine's own model serves only its own jobs; ${machine} can't take escalated tasks`);
+      if (new Set(change.ladder).size !== change.ladder.length) throw new Error("a model can be on the ladder only once");
+      for (const spec of change.ladder) routes.set(spec, this.makeRoute(spec, this.settings[spec] ?? {}));
+      next.ladder = [...change.ladder];
+    }
+    if (change.juniorTries === null) delete next.juniorTries;
+    else if (change.juniorTries !== undefined) next.juniorTries = change.juniorTries;
+    await this.save({ escalation: next }, this.settings);
+    for (const [spec, route] of routes) if (!this.routes.has(spec)) this.routes.set(spec, route);
+    log.info(`escalation: ladder ${next.ladder ? next.ladder.join(", then ") : "as the Hub started"}; junior tries ${next.juniorTries ?? "as the Hub started"}`);
+  }
+
   /** Save the choices, dropping settings of models nothing uses any more, so the file holds only what's in use. */
-  private async save(desks: Record<string, ModelSpec>, roles: Roles, settings: Record<ModelSpec, ModelSettings>): Promise<void> {
-    const used = new Set([...Object.values(desks), ...Object.values(roles)]);
+  private async save(
+    changed: { desks?: Record<string, ModelSpec>; roles?: Roles; escalation?: EscalationChoice },
+    settings: Record<ModelSpec, ModelSettings>,
+  ): Promise<void> {
+    const { desks = this.desks, roles = this.roles, escalation = this.escalation } = changed;
+    const used = new Set([...Object.values(desks), ...Object.values(roles), ...(escalation.ladder ?? [])]);
     const kept = Object.fromEntries(Object.entries(settings).filter(([s]) => used.has(s)));
-    await this.writer?.save({ models: kept, desks, roles });
+    await this.writer?.save({ models: kept, desks, roles, escalation });
     this.desks = desks;
     this.roles = roles;
+    this.escalation = escalation;
     this.settings = kept;
   }
 
@@ -177,7 +238,7 @@ export class DeskModels {
       route = this.makeRoute(spec, merged);
       nextSettings = { ...this.settings, [spec]: merged };
     }
-    await this.save(next, this.roles, nextSettings);
+    await this.save({ desks: next }, nextSettings);
     // New calls use the new settings; calls already running finish on the old ones.
     if (spec !== null && route) this.routes.set(spec, route);
     log.info(`desk${desks.length === 1 ? "" : "s"} ${desks.join(", ")}: ${spec ?? "default agent model"}`);
@@ -185,16 +246,16 @@ export class DeskModels {
 
   /**
    * What `GET /api/desks` answers: the Architect's and the reviewer's model (`hubModel`, the
-   * Hub's `--model`, unless put on another), each desk with a model, and each model in use with
-   * its load.
+   * Hub's `--model`, unless put on another), escalation over `baseEscalation` (the Hub's start
+   * settings), each desk with a model, and each model in use with its load.
    */
-  view(hubModel: string | null, defaultAgent: string | null): Desks {
+  view(hubModel: string | null, defaultAgent: string | null, baseEscalation?: EscalationPolicy): Desks {
     const architect = this.effectiveSpec("architect") ?? hubModel;
     const reviewer = this.effectiveSpec("reviewer") ?? hubModel;
     const desks = Object.entries(this.desks)
       .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
       .map(([desk, model]) => ({ desk, model }));
-    const models = [...new Set([...Object.values(this.desks), ...Object.values(this.roles)])].sort().map((spec) => {
+    const models = [...new Set([...Object.values(this.desks), ...Object.values(this.roles), ...(this.escalation.ladder ?? [])])].sort().map((spec) => {
       const settings = this.settings[spec] ?? {};
       const status = this.routes.get(spec)?.slots.status();
       return {
@@ -205,7 +266,8 @@ export class DeskModels {
         waiting: status?.waiting ?? 0,
       };
     });
-    return { architect, reviewer, roles: { ...this.roles }, defaultAgent, desks, models };
+    const escalation = this.escalationPolicy(baseEscalation) ?? null;
+    return { architect, reviewer, roles: { ...this.roles }, escalation, escalationSet: this.escalationChoice(), defaultAgent, desks, models };
   }
 
   private makeRoute(spec: ModelSpec, settings: ModelSettings): Route {

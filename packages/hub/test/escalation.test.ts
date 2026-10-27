@@ -176,6 +176,49 @@ describe("escalation (Hub)", () => {
     }
   });
 
+  it("takes a ladder set while the Hub runs from the next round, and goes back to the start settings", async () => {
+    const provider = await fakeProvider();
+    const saved = process.env.ASO_LLM_BASE_URL;
+    process.env.ASO_LLM_BASE_URL = provider.url;
+    try {
+      await withHub(
+        async (ctx) => {
+          assert.equal((await call(ctx.port, "/api/desks")).body.escalation, null, "started without escalation");
+          const set = await call(ctx.port, "/api/models/escalation", { ladder: ["good-model"], juniorTries: 0 });
+          assert.equal(set.status, 200, JSON.stringify(set.body));
+          assert.deepEqual(set.body.escalation, { ladder: ["local/good-model"], juniorTries: 0 });
+          assert.deepEqual(set.body.escalationSet, { ladder: ["local/good-model"], juniorTries: 0 });
+
+          const w = await worker(ctx.port, "dev");
+          await postTask(ctx.port, { taskId: "greet", role: "backend", title: "Greet", description: "d" });
+          const r = await firstTurn(w, "greet");
+          assert.match(JSON.stringify(r), /from good-model/, "the round ran on the new ladder");
+
+          for (const body of [{}, { ladder: [] }, { ladder: ["default"] }, { ladder: ["machine/llama"] }, { ladder: ["no-such-model"] }, { juniorTries: -1 }, { ladder: "default", extra: 1 }]) {
+            assert.equal((await call(ctx.port, "/api/models/escalation", body)).status, 400, JSON.stringify(body));
+          }
+          const back = await call(ctx.port, "/api/models/escalation", { ladder: "default", juniorTries: "default" });
+          assert.equal(back.status, 200);
+          assert.equal(back.body.escalation, null, "off again, as it started");
+          assert.deepEqual(back.body.escalationSet, {});
+          w.ws.close();
+        },
+        {
+          llm: {
+            adapter: new ScriptedModel(() => assert.fail("a task agent reached the Architect's model")),
+            agentAdapter: new ScriptedModel(() => assert.fail("the junior model was used"), "claude-haiku-5-5"),
+            agentModel: "claude-haiku-5-5",
+            escalation: false,
+          },
+        },
+      );
+    } finally {
+      if (saved === undefined) delete process.env.ASO_LLM_BASE_URL;
+      else process.env.ASO_LLM_BASE_URL = saved;
+      await provider.close();
+    }
+  });
+
   it("starts a round on the ladder's model once the junior tries are used up", async () => {
     const provider = await fakeProvider();
     const saved = process.env.ASO_LLM_BASE_URL;

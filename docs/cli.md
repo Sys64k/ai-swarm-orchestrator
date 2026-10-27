@@ -182,7 +182,7 @@ name, so task budgets stop that model too. It applies to that model name and win
 built-in or reported price. The cache rates default to the input price: give `--cache-read`,
 since most of an agent's input is read from the cache. `aso price remove <model>` removes it.
 
-## `aso models`, `aso desks`, `aso desk`
+## `aso models`, `aso desks`, `aso desk`, `aso escalation`
 
 `aso models` lists the models desks can use, from every provider. `aso desks` shows
 each desk with a model of its own, and each such model's calls at once and load.
@@ -191,6 +191,9 @@ machine, on a model (`--concurrency`, `--base-url`, `--vision`). See
 [A model per desk](models.md#a-model-per-desk). `aso desk architect|reviewer <model|default>`
 puts the Architect, or the acceptance check, on a model; see
 [The Architect's and the reviewer's model](models.md#the-architects-and-the-reviewers-model).
+`aso escalation` shows where failing tasks move; `aso escalation <models|default>` (comma-separated,
+weakest first) and `--junior-tries <n|default>` change it while the Hub runs; see
+[Change it while the Hub runs](models.md#change-it-while-the-hub-runs).
 
 ## `aso track-records`
 

@@ -269,6 +269,22 @@ export const RoleModelBodySchema = DeskModelSettingsSchema.extend({
   role: z.enum(MODEL_ROLES).describe("architect: who plans; reviewer: who judges work in the acceptance check"),
   model: z.string().min(1).max(200).describe("A model from GET /api/models (<provider>/<model>), or default: the Hub's --model (the reviewer's default is the Architect's model)"),
 });
+/** Most models a task can escalate through, weakest first. */
+export const MAX_ESCALATION_LADDER = 5;
+/** Most tries a task gets on its desk's model before it escalates. */
+export const MAX_JUNIOR_TRIES = 100;
+export const EscalationBodySchema = z
+  .strictObject({
+    ladder: z
+      .union([z.array(z.string().min(1).max(200)).min(1).max(MAX_ESCALATION_LADDER), z.literal("default")])
+      .optional()
+      .describe("Stronger models a failing task moves to, weakest first (from GET /api/models), or default: the Hub's --escalate-to, else its --model"),
+    juniorTries: z
+      .union([z.number().int().min(0).max(MAX_JUNIOR_TRIES), z.literal("default")])
+      .optional()
+      .describe("Tries on the desk's model before a task escalates, counting the first attempt (0: straight to the ladder), or default: the Hub's --junior-tries"),
+  })
+  .refine((b) => b.ladder !== undefined || b.juniorTries !== undefined, "give ladder, juniorTries or both");
 export const DeskAssignmentBodySchema = DeskModelSettingsSchema.extend({
   target: z
     .string()
@@ -711,6 +727,13 @@ export const DesksSchema = z.object({
   roles: z
     .object({ architect: z.string().optional(), reviewer: z.string().optional() })
     .describe("The roles put on a model of their own (absent: on the default)"),
+  escalation: z
+    .object({ ladder: z.array(z.string()), juniorTries: z.number().int() })
+    .nullable()
+    .describe("Where a failing task moves: after juniorTries tries on its desk's model, up the ladder (weakest first); null: escalation is off"),
+  escalationSet: z
+    .object({ ladder: z.array(z.string()).optional(), juniorTries: z.number().int().optional() })
+    .describe("What was changed while the Hub runs (absent: the Hub's start settings)"),
   defaultAgent: z.string().nullable(),
   desks: z.array(z.object({ desk: DeskSchema, model: z.string() })).describe("Desks with a model of their own; the others use the default"),
   models: z

@@ -386,6 +386,64 @@ export function roleModelChoices(role: ModelRole, models: Models, desks?: Pick<D
   return choices;
 }
 
+/** The models a failing task can escalate to: each provider's, plus any on the ladder that aren't listed. Never a machine's own. */
+export function escalationChoices(models: Models, desks?: Pick<Desks, "escalation">): DeskModelChoice[] {
+  const choices: DeskModelChoice[] = models.available.map((m) => ({ value: m.spec, label: m.model, group: m.providerLabel ?? m.providerId ?? m.provider }));
+  for (const step of desks?.escalation?.ladder ?? []) {
+    const value = canonicalSpec(step);
+    if (!choices.some((c) => c.value === value)) choices.push({ value, label: `${value} (not listed)`, group: "Not listed" });
+  }
+  return choices;
+}
+
+/** Where failing tasks move, in a sentence; undefined for an older Hub that doesn't say. */
+export function escalationSummary(desks: Pick<Desks, "escalation" | "escalationSet"> | undefined): string | undefined {
+  if (desks?.escalation === undefined) return undefined;
+  if (desks.escalation === null) return "Off: every round stays on the desk's model.";
+  const { ladder, juniorTries } = desks.escalation;
+  const set = desks.escalationSet ?? {};
+  const changed = set.ladder !== undefined || set.juniorTries !== undefined ? " Changed while the Hub runs." : "";
+  return `After ${juniorTries} ${juniorTries === 1 ? "try" : "tries"} on a desk's model, a task moves to ${ladder.map(canonicalSpec).join(", then ")}.${changed}`;
+}
+
+/** Mirrors MAX_ESCALATION_LADDER in @aso/shared: most steps a ladder may have. */
+export const MAX_ESCALATION_LADDER = 5;
+/** Mirrors MAX_JUNIOR_TRIES in @aso/shared. */
+export const MAX_JUNIOR_TRIES = 100;
+/** Mirrors DEFAULT_JUNIOR_TRIES in the Hub: the tries before escalating when nothing says otherwise. */
+const DEFAULT_JUNIOR_TRIES = 2;
+
+/** What `POST /api/models/escalation` takes: each part a value, or `default` for the Hub's start setting. */
+export interface EscalationBody {
+  ladder?: string[] | "default";
+  juniorTries?: number | "default";
+}
+
+/** Both parts back to the Hub's start settings. */
+export const ESCALATION_RESET_BODY: EscalationBody = { ladder: "default", juniorTries: "default" };
+
+/** The escalation editor's starting point: the ladder and tries in force (an empty ladder when off). */
+export function escalationDraft(desks: Pick<Desks, "escalation"> | undefined): { ladder: string[]; juniorTries: string } {
+  const e = desks?.escalation;
+  return { ladder: e ? e.ladder.map(canonicalSpec) : [], juniorTries: String(e?.juniorTries ?? DEFAULT_JUNIOR_TRIES) };
+}
+
+/** The model a new ladder step starts on: the first choice not on the ladder yet; undefined when it's full or nothing is left. */
+export function nextLadderStep(choices: DeskModelChoice[], ladder: string[]): string | undefined {
+  if (ladder.length >= MAX_ESCALATION_LADDER) return undefined;
+  return choices.find((c) => !ladder.includes(c.value))?.value;
+}
+
+/** What `POST /api/models/escalation` takes from the editor, or why it can't be saved. */
+export function escalationBody(ladder: string[], juniorTries: string): { body: EscalationBody } | { error: string } {
+  if (!ladder.length) return { error: "Add at least one model to the ladder." };
+  if (ladder.length > MAX_ESCALATION_LADDER) return { error: `A ladder has at most ${MAX_ESCALATION_LADDER} models.` };
+  if (new Set(ladder).size !== ladder.length) return { error: "A model can be on the ladder only once." };
+  const tries = Number(juniorTries);
+  if (juniorTries.trim() === "" || !Number.isInteger(tries) || tries < 0 || tries > MAX_JUNIOR_TRIES) return { error: `Tries must be a whole number from 0 to ${MAX_JUNIOR_TRIES}.` };
+  return { body: { ladder, juniorTries: tries } };
+}
+
 /** A role's current choice: its own model's spec, or `default`. */
 export function roleModelOf(desks: Pick<Desks, "roles"> | undefined, role: ModelRole): string {
   const own = desks?.roles?.[role];

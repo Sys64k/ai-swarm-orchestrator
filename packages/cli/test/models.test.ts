@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { deskLines, modelLines, ownModelLines } from "../dist/commands/models.js";
+import { deskLines, escalationLines, modelLines, ownModelLines } from "../dist/commands/models.js";
 
 describe("aso models and aso desks", () => {
   it("lists the models by provider, each by the spec a desk is put on", () => {
@@ -62,5 +62,18 @@ describe("aso models and aso desks", () => {
     );
     assert.equal(deskLines({ architect: "claude-opus-5-5", reviewer: "anthropic/claude-sonnet-5-5", defaultAgent: "x", desks: [], models: [] })[1], "Reviewer (acceptance check): anthropic/claude-sonnet-5-5");
     assert.match(deskLines({ architect: null, defaultAgent: "x", desks: [], models: [] }).join("\n"), /Every desk uses it/);
+  });
+
+  it("says where failing tasks move, and whether that was changed while the Hub runs", () => {
+    assert.deepEqual(escalationLines({ escalation: { ladder: ["anthropic/claude-opus-5-5"], juniorTries: 2 }, escalationSet: {} }), [
+      "Escalation: after 2 tries on a desk's model, to anthropic/claude-opus-5-5",
+    ]);
+    assert.deepEqual(escalationLines({ escalation: { ladder: ["openai/gpt-6.1-sol", "anthropic/claude-opus-5-5"], juniorTries: 1 }, escalationSet: { juniorTries: 1 } }), [
+      "Escalation: after 1 try on a desk's model, to openai/gpt-6.1-sol, then anthropic/claude-opus-5-5 (changed with `aso escalation`)",
+    ]);
+    assert.deepEqual(escalationLines({ escalation: null, escalationSet: {} }), ["Escalation: off (every round on the desk's model)"]);
+    assert.deepEqual(escalationLines({} as never), [], "an older Hub doesn't say");
+    const lines = deskLines({ architect: "a", reviewer: "a", escalation: { ladder: ["b"], juniorTries: 2 }, escalationSet: {}, defaultAgent: "x", desks: [], models: [] });
+    assert.equal(lines[2], "Escalation: after 2 tries on a desk's model, to b", "aso desks shows it under the roles");
   });
 });

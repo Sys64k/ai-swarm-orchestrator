@@ -22,7 +22,7 @@ export function deskLines(d: Desks): string[] {
   // An older Hub sends no reviewer: its acceptance check uses the Architect's model.
   const reviewerModel = d.reviewer ?? d.architect;
   const reviewer = reviewerModel && reviewerModel === d.architect ? `${reviewerModel} (the Architect's)` : (reviewerModel ?? "none");
-  const lines = [`Architect: ${d.architect ?? "none"}`, `Reviewer (acceptance check): ${reviewer}`, `Desks without a model of their own: ${d.defaultAgent ?? "none"}`];
+  const lines = [`Architect: ${d.architect ?? "none"}`, `Reviewer (acceptance check): ${reviewer}`, ...escalationLines(d), `Desks without a model of their own: ${d.defaultAgent ?? "none"}`];
   if (!d.desks.length) return [...lines, "Every desk uses it. `aso desk <host>#<slot> <model>` changes one."];
   lines.push("");
   for (const { desk, model } of d.desks) lines.push(`  ${desk}: ${model}`);
@@ -32,6 +32,31 @@ export function deskLines(d: Desks): string[] {
     lines.push(`${m.model}${m.baseUrl ? ` at ${m.baseUrl}` : ""}: ${m.concurrency} call${m.concurrency === 1 ? "" : "s"} at once${busy}`);
   }
   return lines;
+}
+
+/** Where failing tasks move, as `aso desks` and `aso escalation` show it; nothing for an older Hub that doesn't say. */
+export function escalationLines(d: Pick<Desks, "escalation" | "escalationSet">): string[] {
+  if (d.escalation === undefined) return [];
+  if (d.escalation === null) return ["Escalation: off (every round on the desk's model)"];
+  const { ladder, juniorTries } = d.escalation;
+  const set = d.escalationSet ?? {};
+  const changed = set.ladder !== undefined || set.juniorTries !== undefined ? " (changed with `aso escalation`)" : "";
+  return [`Escalation: after ${juniorTries} ${juniorTries === 1 ? "try" : "tries"} on a desk's model, to ${ladder.join(", then ")}${changed}`];
+}
+
+/** `aso escalation [models]`: show where failing tasks move, or change the ladder and the tries before it. */
+export async function escalationCommand(models: string | undefined, opts: { hub: string; juniorTries?: number | "default" }): Promise<void> {
+  const base = hubHttpBase(opts.hub);
+  if (models === undefined && opts.juniorTries === undefined) {
+    console.log(escalationLines(await api<Desks>(base, "/api/desks")).join("\n") || "This Hub doesn't say; update it.");
+    return;
+  }
+  const body = {
+    ...(models !== undefined ? { ladder: models === "default" ? "default" : models.split(",").map((m) => m.trim()).filter(Boolean) } : {}),
+    ...(opts.juniorTries !== undefined ? { juniorTries: opts.juniorTries } : {}),
+  };
+  const desks = await api<Desks>(base, "/api/models/escalation", { method: "POST", body: JSON.stringify(body) });
+  console.log(escalationLines(desks).join("\n"));
 }
 
 /** `aso models`. */

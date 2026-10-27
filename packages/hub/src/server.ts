@@ -29,6 +29,7 @@ import {
   DiscoveryProofBodySchema,
   DeskAssignmentBodySchema,
   RoleModelBodySchema,
+  EscalationBodySchema,
   ProviderAddBodySchema,
   PriceRemoveBodySchema,
   PriceSetBodySchema,
@@ -390,8 +391,9 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   );
   // Only now: the acceptance check asks deskModels for the reviewer's model.
   setReviewModel(adapter);
-  // Escalation: a task that keeps failing on its desk's model moves up to stronger ones.
-  const escalation = buildEscalationPolicy({ ...llm, model }, (spec) => {
+  // Escalation: a task that keeps failing on its desk's model moves up to stronger ones. These are
+  // the start settings; `aso escalation` can change them while the Hub runs (deskModels keeps that).
+  const startEscalation = buildEscalationPolicy({ ...llm, model }, (spec) => {
     try {
       providers.adapterFor(spec, { maxTokens, effort });
       return true;
@@ -400,6 +402,8 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       return false;
     }
   });
+  // What tasks escalate to now: the start settings, with any change kept from an earlier run.
+  const escalation = deskModels.escalationPolicy(startEscalation);
   if (escalation) log.info(`escalation: after ${escalation.juniorTries} tries on a desk's model, tasks move to ${escalation.ladder.join(", then ")}`);
   // Models worker machines serve themselves, called over their own connections for their own jobs.
   const machineModels = new MachineModels((nodeId, payload) => registry.send(nodeId, "MODEL_CALL", payload), maxTokens);
@@ -415,7 +419,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
         if (keyId) workerKeys.addSpend(keyId, usd);
       },
     },
-    escalation,
+    escalation: () => deskModels.escalationPolicy(startEscalation),
     taskBudgetUsd: llm.taskBudgetUsd,
     planBudgetUsd: llm.planBudgetUsd,
     maxTurns: llm.maxTurns,
@@ -784,13 +788,18 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   // Which model each desk's agents use: the models to choose from, and the desks' choices.
   const defaultAgentModel = () => (agentAdapter ?? adapter)?.model ?? null;
   /** The desks' and roles' models, as `GET /api/desks` answers. */
-  const deskView = () => deskModels.view(adapter?.model ?? null, defaultAgentModel());
+  const deskView = () => deskModels.view(adapter?.model ?? null, defaultAgentModel(), startEscalation);
   /** A model named as a person would (`default`, `local-model`, `<provider>/<model>`) → its spec; null: the default. */
   const resolveSpec = async (model: string): Promise<{ spec: string | null } | { error: string }> => {
     if (model === "default") return { spec: null };
     const resolved = resolveModel(model, (await providers.models()).models, providers.list());
     return "error" in resolved ? resolved : { spec: resolved.spec };
   };
+  /**
+   * Like resolveSpec, but a machine's own model goes as it is: the roles and the ladder can't
+   * take one, and DeskModels refuses it with that reason.
+   */
+  const resolveSpecOrMachine = async (model: string) => (model.startsWith(MACHINE_PREFIX) ? { spec: model } : await resolveSpec(model));
   /** The settings a body gave besides the model, or none. */
   const givenSettings = (settings: Record<string, unknown>) => (Object.keys(settings).length ? settings : undefined);
   app.get("/api/models", async (c) => {
@@ -838,11 +847,32 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     const req = await parsed(c, RoleModelBodySchema);
     if (!req.ok) return c.json({ error: req.error }, 400);
     const { role, model, ...settings } = req.data;
-    // A machine's own model goes as it is, for assignRole to refuse; any other by name, like a desk's.
-    const resolved = model.startsWith(MACHINE_PREFIX) ? { spec: model } : await resolveSpec(model);
+    const resolved = await resolveSpecOrMachine(model);
     if ("error" in resolved) return c.json({ error: resolved.error }, 400);
     try {
       await deskModels.assignRole(role, resolved.spec, givenSettings(settings));
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 400);
+    }
+    return c.json(deskView());
+  });
+  /** Change where failing tasks move: the ladder of stronger models, the tries before it, or either back to the start setting. */
+  app.post("/api/models/escalation", async (c) => {
+    const req = await parsed(c, EscalationBodySchema);
+    if (!req.ok) return c.json({ error: req.error }, 400);
+    const { ladder, juniorTries } = req.data;
+    let specs: string[] | null | undefined = ladder === "default" ? null : undefined;
+    if (Array.isArray(ladder)) {
+      specs = [];
+      for (const model of ladder) {
+        const resolved = await resolveSpecOrMachine(model);
+        if ("error" in resolved) return c.json({ error: resolved.error }, 400);
+        if (resolved.spec === null) return c.json({ error: "default can't be a step on the ladder; give ladder: \"default\" for the Hub's own ladder" }, 400);
+        specs.push(resolved.spec);
+      }
+    }
+    try {
+      await deskModels.setEscalation({ ladder: specs, juniorTries: juniorTries === "default" ? null : juniorTries });
     } catch (err) {
       return c.json({ error: (err as Error).message }, 400);
     }

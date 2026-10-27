@@ -3059,6 +3059,53 @@
             "additionalProperties": false,
             "description": "The roles put on a model of their own (absent: on the default)"
           },
+          "escalation": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "ladder": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "juniorTries": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "ladder",
+                  "juniorTries"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where a failing task moves: after juniorTries tries on its desk's model, up the ladder (weakest first); null: escalation is off"
+          },
+          "escalationSet": {
+            "type": "object",
+            "properties": {
+              "ladder": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "juniorTries": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              }
+            },
+            "additionalProperties": false,
+            "description": "What was changed while the Hub runs (absent: the Hub's start settings)"
+          },
           "defaultAgent": {
             "type": [
               "string",
@@ -3128,6 +3175,8 @@
           "architect",
           "reviewer",
           "roles",
+          "escalation",
+          "escalationSet",
           "defaultAgent",
           "desks",
           "models"
@@ -4215,6 +4264,45 @@
           "role",
           "model"
         ],
+        "additionalProperties": false
+      },
+      "Escalation": {
+        "type": "object",
+        "properties": {
+          "ladder": {
+            "description": "Stronger models a failing task moves to, weakest first (from GET /api/models), or default: the Hub's --escalate-to, else its --model",
+            "anyOf": [
+              {
+                "minItems": 1,
+                "maxItems": 5,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                }
+              },
+              {
+                "type": "string",
+                "const": "default"
+              }
+            ]
+          },
+          "juniorTries": {
+            "description": "Tries on the desk's model before a task escalates, counting the first attempt (0: straight to the ladder), or default: the Hub's --junior-tries",
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100
+              },
+              {
+                "type": "string",
+                "const": "default"
+              }
+            ]
+          }
+        },
         "additionalProperties": false
       },
       "ProviderAdd": {
@@ -6884,6 +6972,50 @@
           },
           "400": {
             "description": "Not a model the Hub can use for it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          }
+        }
+      }
+    },
+    "/api/models/escalation": {
+      "post": {
+        "operationId": "postModelsEscalation",
+        "tags": [
+          "Workers"
+        ],
+        "summary": "Change where failing tasks move: the ladder of stronger models, the tries on a desk's model before it, or either back to the Hub's start setting",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Escalation"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Desks"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not a model the Hub can use for it, or an invalid body",
             "content": {
               "application/json": {
                 "schema": {

@@ -190,8 +190,8 @@ aso desk reviewer default               # back to the Architect's model
   model approved, rejected or couldn't decide, so you can tell whether it holds up.
 - **A machine's own model can't take a role:** it serves only its own machine's jobs.
 - **In the console:** *Model providers* has a picker for each; `aso desks` and `GET /api/desks`
-  show both. A change applies to the next plan or check. Escalation's ladder still starts at
-  `--model` (`--escalate-to` changes it).
+  show both. A change applies to the next plan or check. Escalation's ladder is separate: it
+  starts at `--model` unless [changed](#change-it-while-the-hub-runs).
 - **Stored** with the desks' models in `models.json`; `POST /api/models/roles`.
 
 ### Escalation
@@ -235,6 +235,29 @@ aso hub-service install ... --agent-model claude-haiku-5-5 \
 - **A person's retry** starts the task again on its desk's model and gives refused models
   another chance (a refusal may have been fixed since).
 - **Off:** `--no-escalation` keeps every round on the desk's model.
+
+#### Change it while the Hub runs
+
+The ladder and the tries before it can be changed without a restart, to any provider's models,
+not only Claude's:
+
+```bash
+aso escalation                                                    # where failing tasks move now
+aso escalation openai/gpt-6.1-sol,anthropic/claude-opus-5-5       # the ladder, weakest first
+aso escalation --junior-tries 3                                   # tries on the desk's model first
+aso escalation default --junior-tries default                     # back to the start settings
+```
+
+- **Applies from the next round:** a task already on a step keeps that model until its round ends.
+- **Over the start settings:** what isn't changed comes from `--escalate-to` and `--junior-tries`.
+  A ladder set here turns escalation on even if the Hub started with `--no-escalation`.
+- **Refused like a desk's model:** a model the Hub can't use, a machine's own model, or a model
+  twice on the ladder. Give a ladder model a price (`aso price set`, see
+  [cli.md](cli.md#aso-prices-aso-price-setremove)) so the task budget counts it.
+- **In the console:** *Model providers* → *Failed tasks (escalation)*. `aso desks` and
+  `GET /api/desks` show it (`escalation`, and `escalationSet` for what was changed).
+- **Stored** in `models.json` with the desks' and roles' models; `POST /api/models/escalation`
+  (`{ ladder?: [...] | "default", juniorTries?: n | "default" }`).
 
 ### Track records: how each model has done
 

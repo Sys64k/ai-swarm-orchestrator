@@ -34,6 +34,7 @@ Answers can gain fields over time: clients should ignore fields they don't know.
 | `GET` | `/api/public-stats` | The swarm's track record as the Hub shares it, for anyone (404 unless started with `--public-stats`) |
 | `GET` | `/api/track-records` | How models, machines, desks, roles or projects have done with their jobs (`?by=`, `project`, `role`, `since`) |
 | `POST` | `/api/models/roles` | Put the Architect or the reviewer (the acceptance check) on a model (`{ role, model }`), or back on `default` |
+| `POST` | `/api/models/escalation` | Change where failing tasks move (`{ ladder?, juniorTries? }`, each a value or `default`) while the Hub runs |
 | `GET` | `/api/desks` | Each desk with a model of its own, and each such model's calls at once and load |
 | `POST` | `/api/desks` | Put a desk (`<host>#<slot>`) or a machine (`<host>`) on a model, or back on `default` |
 | `POST` | `/api/discovery/proof` | For the Hub machine's LAN discovery: the proof answering a worker's query, if the Hub holds its credential |

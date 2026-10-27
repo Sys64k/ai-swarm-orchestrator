@@ -71,8 +71,11 @@ export interface ConversationOptions {
   machineModels?: MachineModels;
   /** The default agent model's spec (what `agentAdapter` calls), to compare models by. */
   defaultAgentSpec?: string;
-  /** Stronger models a task moves to after failing rounds; none: every round on its desk's model. */
-  escalation?: EscalationPolicy;
+  /**
+   * Stronger models a task moves to after failing rounds, asked each round so it can change while
+   * the Hub runs; undefined: every round on its desk's model.
+   */
+  escalation?: () => EscalationPolicy | undefined;
   /** A machine's model spending, counted against its worker key's budget. */
   spend?: {
     /** Why its agents may make no more model calls; undefined: they may. */
@@ -318,7 +321,7 @@ export class ConversationManager {
    */
   private roundModelOf(taskId: string, nodeId: string): RoundModel {
     const task = this.tasks.get(taskId);
-    const choice = roundModel(this.opts.escalation, task ?? { reworkRound: 0 }, this.ownModelOf(taskId, nodeId), this.opts.defaultAgentSpec);
+    const choice = roundModel(this.opts.escalation?.(), task ?? { reworkRound: 0 }, this.ownModelOf(taskId, nodeId), this.opts.defaultAgentSpec);
     return choice.spec?.startsWith(MACHINE_PREFIX) && choice.why === "this desk's model" ? { ...choice, why: "this machine's own model" } : choice;
   }
 
@@ -331,7 +334,7 @@ export class ConversationManager {
     const spec = calledSpec({ spec: conv.deskModel }, this.opts.defaultAgentSpec);
     const task = this.tasks.get(conv.subject.id);
     if (!spec || !task) return;
-    if (canSwitchFrom(this.opts.escalation, task, this.ownModelOf(task.spec.taskId, conv.nodeId), this.opts.defaultAgentSpec, spec)) {
+    if (canSwitchFrom(this.opts.escalation?.(), task, this.ownModelOf(task.spec.taskId, conv.nodeId), this.opts.defaultAgentSpec, spec)) {
       this.tasks.recordModelRefused(task.spec.taskId, spec, error);
     }
   }
