@@ -28,6 +28,7 @@ import {
   JoinBodySchema,
   DiscoveryProofBodySchema,
   DeskAssignmentBodySchema,
+  RoleModelBodySchema,
   ProviderAddBodySchema,
   PriceRemoveBodySchema,
   PriceSetBodySchema,
@@ -262,8 +263,18 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   // The acceptance check uses the Architect's model, which exists only further down: it waits for it.
   let setReviewModel: (adapter: LlmAdapter | undefined) => void = () => undefined;
   const reviewModel = new Promise<LlmAdapter | undefined>((resolve) => (setReviewModel = resolve));
+  // The reviewer's model is asked at each check, so it can be changed while the Hub runs: its
+  // own, else the Architect's, else --model (`deskModels` exists by the time a check runs).
   const acceptance =
-    opts.acceptanceCheck === false ? undefined : typeof opts.acceptanceCheck === "object" ? opts.acceptanceCheck : new AcceptanceChecker(reviewModel);
+    opts.acceptanceCheck === false
+      ? undefined
+      : typeof opts.acceptanceCheck === "object"
+        ? opts.acceptanceCheck
+        : new AcceptanceChecker(async () => {
+            // Resolves once the models (and deskModels) are set up: a check waits for that.
+            const hubModel = await reviewModel;
+            return deskModels.roleRoute("reviewer")?.adapter ?? hubModel;
+          });
   // A machine's worker-key scope (none for the Hub's own token); set once the keys are loaded below.
   let scopeOfNode: (nodeId: string) => KeyScope | undefined = () => undefined;
   // Counts a job's outcome on its machine's worker key (machines on the Hub's own token have none).
@@ -361,7 +372,6 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   };
   const adapter = llm.adapter ?? (model ? adapterFor(model) : undefined);
   const agentAdapter = llm.agentAdapter ?? (llm.agentModel && llm.agentModel !== model ? adapterFor(llm.agentModel) : undefined);
-  setReviewModel(adapter);
   if (adapter && acceptance) log.info(`acceptance check: on (${adapter.model})`);
   if (!adapter) log.warn(`no LLM configured${unusable.length ? ` (${unusable.join("; ")})` : ""}: add a provider (aso provider add …) and restart with --model if it isn't Anthropic, to let agents work`);
   else {
@@ -378,6 +388,8 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     llm.concurrency ?? 4,
     (spec) => spec.startsWith(MACHINE_PREFIX) || providers.isLocal(spec),
   );
+  // Only now: the acceptance check asks deskModels for the reviewer's model.
+  setReviewModel(adapter);
   // Escalation: a task that keeps failing on its desk's model moves up to stronger ones.
   const escalation = buildEscalationPolicy({ ...llm, model }, (spec) => {
     try {
@@ -771,9 +783,20 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   app.get("/api/llm", (c) => c.json(conversations.status()));
   // Which model each desk's agents use: the models to choose from, and the desks' choices.
   const defaultAgentModel = () => (agentAdapter ?? adapter)?.model ?? null;
+  /** The desks' and roles' models, as `GET /api/desks` answers. */
+  const deskView = () => deskModels.view(adapter?.model ?? null, defaultAgentModel());
+  /** A model named as a person would (`default`, `local-model`, `<provider>/<model>`) → its spec; null: the default. */
+  const resolveSpec = async (model: string): Promise<{ spec: string | null } | { error: string }> => {
+    if (model === "default") return { spec: null };
+    const resolved = resolveModel(model, (await providers.models()).models, providers.list());
+    return "error" in resolved ? resolved : { spec: resolved.spec };
+  };
+  /** The settings a body gave besides the model, or none. */
+  const givenSettings = (settings: Record<string, unknown>) => (Object.keys(settings).length ? settings : undefined);
   app.get("/api/models", async (c) => {
     const { models: available, errors } = await providers.models();
-    return c.json({ architect: adapter?.model ?? null, defaultAgent: defaultAgentModel(), available, ...(errors.length ? { localError: errors.join("; ") } : {}) });
+    const { architect, reviewer } = deskView();
+    return c.json({ architect, reviewer, defaultAgent: defaultAgentModel(), available, ...(errors.length ? { localError: errors.join("; ") } : {}) });
   });
   // Providers: added with a key (or a local server's address); the API never shows a key.
   app.get("/api/providers", async (c) => c.json(await providers.views()));
@@ -809,7 +832,22 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     if (outcome === "missing") return c.json({ error: "no such provider" }, 404);
     return c.json({ removed: id });
   });
-  app.get("/api/desks", (c) => c.json(deskModels.view(adapter?.model ?? null, defaultAgentModel())));
+  app.get("/api/desks", (c) => c.json(deskView()));
+  /** Put the Architect or the reviewer (the acceptance check) on a model, or back on the default. */
+  app.post("/api/models/roles", async (c) => {
+    const req = await parsed(c, RoleModelBodySchema);
+    if (!req.ok) return c.json({ error: req.error }, 400);
+    const { role, model, ...settings } = req.data;
+    // A machine's own model goes as it is, for assignRole to refuse; any other by name, like a desk's.
+    const resolved = model.startsWith(MACHINE_PREFIX) ? { spec: model } : await resolveSpec(model);
+    if ("error" in resolved) return c.json({ error: resolved.error }, 400);
+    try {
+      await deskModels.assignRole(role, resolved.spec, givenSettings(settings));
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 400);
+    }
+    return c.json(deskView());
+  });
   /** Made at most once per PUBLIC_STATS_CACHE_SEC: the address is public, so asking often costs nothing. */
   let shared: { at: number; stats: PublicStats } | undefined;
   app.get(PUBLIC_STATS_PATH, (c) => {
@@ -839,17 +877,17 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       const without = hosts.filter((host) => !registry.workerSnapshots().some((w) => w.hardware.hostname === host && machineModels.serves(w.nodeId, own)));
       if (without.length) return c.json({ error: `${without.join(", ")} doesn't serve ${own} itself (start its worker with --local-model)` }, 400);
       spec = model;
-    } else if (model !== "default") {
-      const resolved = resolveModel(model, (await providers.models()).models, providers.list());
+    } else {
+      const resolved = await resolveSpec(model);
       if ("error" in resolved) return c.json({ error: resolved.error }, 400);
       spec = resolved.spec;
     }
     try {
-      await deskModels.assign(desks, spec, Object.keys(settings).length ? settings : undefined);
+      await deskModels.assign(desks, spec, givenSettings(settings));
     } catch (err) {
       return c.json({ error: (err as Error).message }, 400);
     }
-    return c.json(deskModels.view(adapter?.model ?? null, defaultAgentModel()));
+    return c.json(deskView());
   });
 
   /** Maps the errors a request can hit to HTTP statuses. */

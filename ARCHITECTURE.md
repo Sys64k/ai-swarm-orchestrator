@@ -1179,7 +1179,13 @@ the container. API answers carry
 
 ### A model per desk (`DeskModels`)
 
-`llm/desk-models.ts` maps desks (`<host>#<slot>`) to model specs (`<provider>/<model>`), with
+`llm/desk-models.ts` maps desks (`<host>#<slot>`), and the two roles (`MODEL_ROLES`: the
+`architect`, and the `reviewer` that runs the acceptance check), to model specs
+(`<provider>/<model>`). The roles default to the Hub's `--model` (the reviewer to the
+Architect's); `ConversationManager.architectRoute` and the server's `reviewerOf` ask for them
+at each plan conversation and check, so a change applies at once, and fall back to `--model`
+when the chosen one can't be used. `POST /api/models/roles` sets them; `GET /api/desks` shows
+both and `roles` (the explicit choices). Desks map with
 optional per-model settings (calls at once, base URL, vision), in
 `<state>/models.json` (mode 600, no secrets; settings of models no desk uses are dropped). Each
 model gets its own adapter, built when a desk is put on it (so one the Hub can't use is

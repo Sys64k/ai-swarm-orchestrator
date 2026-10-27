@@ -5,7 +5,7 @@ import path from "node:path";
 import { describe, it } from "node:test";
 import { DeskModels, desksOf, modelConcurrency, type LlmAdapter } from "@aso/hub";
 import { createMessage, type AgentMessage, type AvailableModel } from "@aso/shared";
-import { postTask, reply, ScriptedModel, tempDir, text, TOKEN, waitFor, withHub, worker } from "./helpers.ts";
+import { postTask, pushTaskBranch, reply, ScriptedModel, tempDir, text, TOKEN, waitFor, withHub, worker } from "./helpers.ts";
 
 delete process.env.ANTHROPIC_API_KEY; // tests must never reach the real API
 
@@ -36,6 +36,41 @@ describe("desk models", () => {
     await reopened.assign(["avalon#1", "avalon#2"], null);
     assert.equal(reopened.modelOf("avalon#1"), undefined, "back on the default");
     assert.doesNotMatch(readFileSync(file, "utf8"), /qwen/, "a model no desk uses is forgotten");
+  });
+
+  it("puts the Architect and the reviewer on models of their own, keeps them, and the reviewer follows the Architect by default", async () => {
+    const dir = tempDir();
+    const models = await open(dir);
+    assert.deepEqual([models.view("opus", "haiku").architect, models.view("opus", "haiku").reviewer], ["opus", "opus"], "both on the Hub's --model");
+    await models.assignRole("architect", "anthropic/claude-sonnet-5-5");
+    assert.deepEqual([models.view("opus", null).architect, models.view("opus", null).reviewer], ["anthropic/claude-sonnet-5-5", "anthropic/claude-sonnet-5-5"], "the reviewer follows the Architect");
+    await models.assignRole("reviewer", "openai:qwen3-coder:30b", { concurrency: 2 });
+    const reopened = await open(dir);
+    assert.equal(reopened.roleModel("reviewer"), "openai:qwen3-coder:30b", "kept across restarts");
+    assert.equal(reopened.view("opus", null).models.find((m) => m.model === "openai:qwen3-coder:30b")?.concurrency, 2, "its settings too, and its load shows");
+    await assert.rejects(reopened.assignRole("architect", "machine/llama"), /a machine's own model serves only its own jobs/);
+    await reopened.assignRole("reviewer", null);
+    assert.equal(reopened.view("opus", null).reviewer, "anthropic/claude-sonnet-5-5", "back on the Architect's");
+    assert.doesNotMatch(readFileSync(path.join(dir, "models.json"), "utf8"), /qwen/, "a model nothing uses is forgotten");
+  });
+
+  it("routes a role to its model, and to the Hub's --model when it has none or can't use it", async () => {
+    let broken = false;
+    const models = await DeskModels.open(undefined, (spec) => {
+      if (broken) throw new Error("provider removed");
+      return fakeAdapter(spec);
+    }, 4, isLocal);
+    assert.equal(models.roleRoute("architect"), undefined, "none: the Hub's --model");
+    await models.assignRole("architect", "anthropic/claude-sonnet-5-5");
+    assert.equal(models.roleRoute("reviewer")?.adapter.model, "anthropic/claude-sonnet-5-5", "the reviewer follows the Architect");
+    broken = true;
+    await assert.rejects(models.assignRole("reviewer", "openai/gpt-5"), /provider removed/, "a model it can't use is refused");
+    assert.equal(models.roleModel("reviewer"), undefined, "and changes nothing");
+    const fresh = await DeskModels.open(undefined, () => {
+      throw new Error("provider removed");
+    }, 4, isLocal);
+    await assert.rejects(fresh.assignRole("architect", "x/y"));
+    assert.equal(fresh.roleRoute("architect", true), undefined);
   });
 
   it("gives a local model one call at once unless told otherwise; Claude gets the Hub's limit", async () => {
@@ -113,6 +148,49 @@ function promptResult(m: AgentMessage) {
 }
 
 describe("desks on their own models (Hub)", () => {
+  it("runs the acceptance check on the reviewer's model, and plans on the Architect's, as chosen while the Hub runs", async () => {
+    const provider = await fakeProvider();
+    const saved = process.env.ASO_LLM_BASE_URL;
+    process.env.ASO_LLM_BASE_URL = provider.url;
+    const hubModel = new ScriptedModel(() => reply([text("from --model")], "end_turn"), "claude-opus-5-5");
+    try {
+      await withHub(
+        async (ctx) => {
+          const set = await call(ctx.port, "/api/models/roles", { role: "reviewer", model: "local-model" });
+          assert.equal(set.status, 200, JSON.stringify(set.body));
+          assert.deepEqual([set.body.architect, set.body.reviewer], ["claude-opus-5-5", "local/local-model"]);
+          assert.equal((await call(ctx.port, "/api/models")).body.reviewer, "local/local-model");
+          assert.equal((await call(ctx.port, "/api/models/roles", { role: "architect", model: "machine/llama" })).status, 400);
+          assert.equal((await call(ctx.port, "/api/models/roles", { role: "boss", model: "local-model" })).status, 400);
+
+          const dev = await worker(ctx.port, "dev");
+          const qa = await worker(ctx.port, "qa");
+          await postTask(ctx.port, { taskId: "greet", role: "backend", title: "Greet", description: "d", acceptanceCriteria: ["it greets"] });
+          assert.equal((await dev.next()).type, "TASK_ASSIGNMENT");
+          dev.send(createMessage("STATUS_UPDATE", "dev", { state: "in_progress", taskId: "greet", slot: 1 }));
+          const commit = await pushTaskBranch(ctx.gitUrl, "greet", { "greet.txt": "hi\n" });
+          dev.send(createMessage("STATUS_UPDATE", "dev", { state: "completed", taskId: "greet", commit }));
+          assert.equal((await qa.next()).type, "TEST_EXECUTION");
+          qa.send(createMessage("FEEDBACK_LOOP", "qa", { taskId: "greet", commit, outcome: "pass", summary: "ok" }));
+          await waitFor(() => ctx.hub.tasks.get("greet")?.jobs?.[0]?.acceptance !== undefined, 10_000, "the acceptance check");
+          assert.equal(ctx.hub.tasks.get("greet")!.jobs![0].acceptanceModel, "local-model", "checked on the reviewer's model");
+          assert.equal(provider.calls(), 1);
+          assert.equal(hubModel.requests.length, 0, "not on --model");
+
+          await call(ctx.port, "/api/models/roles", { role: "architect", model: "local-model" });
+          assert.equal((await call(ctx.port, "/api/llm")).body.model, "local-model", "the Architect plans there now");
+          dev.ws.close();
+          qa.ws.close();
+        },
+        { llm: { adapter: hubModel } },
+      );
+    } finally {
+      if (saved === undefined) delete process.env.ASO_LLM_BASE_URL;
+      else process.env.ASO_LLM_BASE_URL = saved;
+      await provider.close();
+    }
+  });
+
   it("lists the local models, puts a desk on one by name, and runs its agent there", async () => {
     const provider = await fakeProvider();
     const saved = process.env.ASO_LLM_BASE_URL;

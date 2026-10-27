@@ -453,7 +453,7 @@ program
   .action(trackRecordsCommand);
 program
   .command("desk <target> <model>")
-  .description("Put a desk (avalon#4) or a whole machine (avalon) on a model from `aso models`, or `default`")
+  .description("Put a desk (avalon#4), a whole machine (avalon), the Architect (architect) or the acceptance check (reviewer) on a model from `aso models`, or `default`")
   .option("--concurrency <n>", "that model's calls at once (default: 1 for local models, --llm-concurrency for Claude)", parsePositiveInt)
   .option("--base-url <url>", "call this model at another address than its provider's (better: add that server as a provider)")
   .option("--vision", "a local model that accepts images")

@@ -14,6 +14,7 @@ import {
   PriceSchema,
   PricesSchema,
   DesksSchema,
+  RoleModelBodySchema,
   TrackRecordsSchema,
   PublicStatsSchema,
   ModelsSchema,
@@ -75,6 +76,7 @@ export const REQUEST_SCHEMAS = {
   Join: JoinBodySchema,
   DiscoveryProofBody: DiscoveryProofBodySchema,
   DeskAssignment: DeskAssignmentBodySchema,
+  RoleModel: RoleModelBodySchema,
   ProviderAdd: ProviderAddBodySchema,
   PriceSet: PriceSetBodySchema,
   PriceRemove: PriceRemoveBodySchema,
@@ -309,6 +311,10 @@ const WORKERS: ApiOperation[] = [
   {
     method: "post", path: "/api/prices/remove", tag: "Workers", summary: "Remove a price set on this Hub", body: "PriceRemove",
     responses: { 200: ok("Prices"), 400: err("Invalid body"), 404: err("No price set for it") },
+  },
+  {
+    method: "post", path: "/api/models/roles", tag: "Workers", summary: "Put the Architect or the reviewer (the acceptance check) on a model, or back on the default", body: "RoleModel",
+    responses: { 200: ok("Desks"), 400: err("Not a model the Hub can use for it") },
   },
   { method: "get", path: "/api/desks", tag: "Workers", summary: "Which desks use a model of their own, and each such model's calls at once and load", responses: { 200: ok("Desks") } },
   {

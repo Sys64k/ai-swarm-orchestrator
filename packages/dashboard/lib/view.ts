@@ -370,6 +370,28 @@ export function deskModelChoices(models: Models, desks?: Pick<Desks, "desks">, m
   return choices;
 }
 
+export type ModelRole = "architect" | "reviewer";
+
+/**
+ * The models the Architect or the reviewer can be put on: the default first (the Hub's
+ * `--model`; for the reviewer, the Architect's), then each provider's models. A machine's own
+ * models aren't offered: they serve only their own machine's jobs.
+ */
+export function roleModelChoices(role: ModelRole, models: Models, desks?: Pick<Desks, "roles" | "architect">): DeskModelChoice[] {
+  const fallback = role === "architect" ? "the Hub's --model" : `the Architect's: ${desks?.architect ?? models.architect ?? "none"}`;
+  const choices: DeskModelChoice[] = [{ value: "default", label: `Default (${fallback})` }];
+  for (const m of models.available) choices.push({ value: m.spec, label: m.model, group: m.providerLabel ?? m.providerId ?? m.provider });
+  const own = desks?.roles?.[role];
+  if (own && !choices.some((c) => c.value === canonicalSpec(own))) choices.push({ value: canonicalSpec(own), label: `${canonicalSpec(own)} (not listed)`, group: "Not listed" });
+  return choices;
+}
+
+/** A role's current choice: its own model's spec, or `default`. */
+export function roleModelOf(desks: Pick<Desks, "roles"> | undefined, role: ModelRole): string {
+  const own = desks?.roles?.[role];
+  return own ? canonicalSpec(own) : "default";
+}
+
 /** Choices in picker order: ungrouped first, then a group per provider in the order they come. */
 export function choiceGroups(choices: DeskModelChoice[]): Array<{ group?: string; choices: DeskModelChoice[] }> {
   const out: Array<{ group?: string; choices: DeskModelChoice[] }> = [];

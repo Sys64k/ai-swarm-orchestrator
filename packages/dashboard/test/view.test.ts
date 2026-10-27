@@ -3,6 +3,8 @@ import { hubPath } from "../lib/hub-routes.ts";
 import { describe, it } from "node:test";
 import {
   formatUsd,
+  roleModelChoices,
+  roleModelOf,
   plansSummary,
   trackRecordLine,
   trackRecordsPath,
@@ -688,5 +690,32 @@ describe("track records page", () => {
     assert.equal(trackRecordsPath("host", "aso-ui"), "track-records?by=host&project=aso-ui");
     assert.equal(hubPath("GET", ["track-records"]), "/api/track-records");
     assert.equal(hubPath("POST", ["track-records"]), undefined);
+  });
+});
+
+describe("the Architect's and the reviewer's model", () => {
+  const models = {
+    architect: "claude-opus-5-5",
+    defaultAgent: "claude-haiku-5-5",
+    available: [
+      { model: "claude-sonnet-5-5", spec: "anthropic/claude-sonnet-5-5", provider: "anthropic" as const, providerId: "anthropic", providerLabel: "Anthropic" },
+      { model: "gpt-5", spec: "openai/gpt-5", provider: "openai-compatible" as const, providerId: "openai", providerLabel: "OpenAI" },
+    ],
+  };
+
+  it("offers the default and each provider's models, never a machine's own", () => {
+    const architect = roleModelChoices("architect", models, { architect: "claude-opus-5-5", roles: {} });
+    assert.deepEqual(architect.map((c) => c.value), ["default", "anthropic/claude-sonnet-5-5", "openai/gpt-5"]);
+    assert.equal(architect[0].label, "Default (the Hub's --model)");
+    const reviewer = roleModelChoices("reviewer", models, { architect: "anthropic/claude-sonnet-5-5", roles: { architect: "anthropic/claude-sonnet-5-5", reviewer: "openai:qwen" } });
+    assert.equal(reviewer[0].label, "Default (the Architect's: anthropic/claude-sonnet-5-5)");
+    assert.equal(reviewer.at(-1)!.value, "local/qwen", "a model it's on that isn't listed still shows");
+  });
+
+  it("says which choice a role is on", () => {
+    assert.equal(roleModelOf({ roles: { reviewer: "claude-haiku-5-5" } }, "reviewer"), "anthropic/claude-haiku-5-5");
+    assert.equal(roleModelOf({ roles: {} }, "architect"), "default");
+    assert.equal(roleModelOf(undefined, "architect"), "default", "an older Hub");
+    assert.equal(hubPath("POST", ["models", "roles"]), "/api/models/roles");
   });
 });

@@ -2959,6 +2959,13 @@
               "null"
             ]
           },
+          "reviewer": {
+            "description": "The acceptance check's model (the Architect's unless put on another)",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "defaultAgent": {
             "description": "The model of desks without one of their own",
             "type": [
@@ -3016,6 +3023,7 @@
         },
         "required": [
           "architect",
+          "reviewer",
           "defaultAgent",
           "available"
         ],
@@ -3025,10 +3033,31 @@
         "type": "object",
         "properties": {
           "architect": {
+            "description": "The model the Architect plans on",
             "type": [
               "string",
               "null"
             ]
+          },
+          "reviewer": {
+            "description": "The model that judges work in the acceptance check (the Architect's unless put on another)",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "roles": {
+            "type": "object",
+            "properties": {
+              "architect": {
+                "type": "string"
+              },
+              "reviewer": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false,
+            "description": "The roles put on a model of their own (absent: on the default)"
           },
           "defaultAgent": {
             "type": [
@@ -3097,6 +3126,8 @@
         },
         "required": [
           "architect",
+          "reviewer",
+          "roles",
           "defaultAgent",
           "desks",
           "models"
@@ -4142,6 +4173,46 @@
         },
         "required": [
           "target",
+          "model"
+        ],
+        "additionalProperties": false
+      },
+      "RoleModel": {
+        "type": "object",
+        "properties": {
+          "concurrency": {
+            "description": "Calls at once (default: 1 for local/OpenAI-compatible models, the Hub's --llm-concurrency for Claude)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 64
+          },
+          "baseUrl": {
+            "description": "For a model on another OpenAI-compatible server than the Hub's ASO_LLM_BASE_URL",
+            "type": "string",
+            "maxLength": 500,
+            "format": "uri"
+          },
+          "vision": {
+            "description": "For OpenAI-compatible models, whether the model accepts images",
+            "type": "boolean"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "architect",
+              "reviewer"
+            ],
+            "description": "architect: who plans; reviewer: who judges work in the acceptance check"
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "A model from GET /api/models (<provider>/<model>), or default: the Hub's --model (the reviewer's default is the Architect's model)"
+          }
+        },
+        "required": [
+          "role",
           "model"
         ],
         "additionalProperties": false
@@ -6779,6 +6850,50 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/models/roles": {
+      "post": {
+        "operationId": "postModelsRoles",
+        "tags": [
+          "Workers"
+        ],
+        "summary": "Put the Architect or the reviewer (the acceptance check) on a model, or back on the default",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoleModel"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Desks"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not a model the Hub can use for it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
           }
         }
       }

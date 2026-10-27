@@ -34,6 +34,7 @@ const RULES: ReadonlyArray<{ method: "GET" | "POST"; pattern: RegExp }> = [
   { method: "GET", pattern: /^prices$/ },
   { method: "POST", pattern: /^prices(\/remove)?$/ },
   { method: "POST", pattern: /^desks$/ },
+  { method: "POST", pattern: /^models\/roles$/ },
   { method: "GET", pattern: /^nodes$/ },
   { method: "POST", pattern: new RegExp(`^nodes/${NODE_ID}/(${WORKER_ACTIONS.join("|")})$`) },
   { method: "GET", pattern: /^version$/ },

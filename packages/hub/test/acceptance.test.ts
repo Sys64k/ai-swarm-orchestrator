@@ -60,18 +60,18 @@ describe("acceptance check", () => {
   });
 
   it("decides met, unmet or undecided, and never blocks on its own failure", async () => {
-    const met = await new AcceptanceChecker(Promise.resolve(model(() => verdictCall([{ index: 1, verdict: "met", reason: "a" }, { index: 2, verdict: "unclear", reason: "outside the diff" }])))).check(TASK, DIFF);
+    const met = await new AcceptanceChecker(async () => (model(() => verdictCall([{ index: 1, verdict: "met", reason: "a" }, { index: 2, verdict: "unclear", reason: "outside the diff" }])))).check(TASK, DIFF);
     assert.equal(met.result, "met", "unclear doesn't block");
     const scripted = model(() => verdictCall([{ index: 1, verdict: "met", reason: "a" }, { index: 2, verdict: "unmet", reason: "no llm-none scenario" }]));
-    const unmet = await new AcceptanceChecker(Promise.resolve(scripted)).check(TASK, DIFF);
+    const unmet = await new AcceptanceChecker(async () => (scripted)).check(TASK, DIFF);
     assert.equal(unmet.result, "unmet");
     assert.equal(scripted.requests[0].tools[0].name, "report_acceptance");
     assert.ok(unmet.result !== "undecided" && unmet.usage.inputTokens > 0, "its cost is counted");
 
     const failing: LlmAdapter = { name: "x", model: "m", complete: async () => { throw new Error("overloaded"); } };
-    assert.deepEqual(await new AcceptanceChecker(Promise.resolve(failing)).check(TASK, DIFF), { result: "undecided", reason: "the model failed: overloaded", model: "m" });
-    assert.equal((await new AcceptanceChecker(Promise.resolve(undefined)).check(TASK, DIFF)).result, "undecided");
-    assert.equal((await new AcceptanceChecker(Promise.resolve(scripted)).check(TASK, { ...DIFF, files: [] })).result, "undecided");
+    assert.deepEqual(await new AcceptanceChecker(async () => (failing)).check(TASK, DIFF), { result: "undecided", reason: "the model failed: overloaded", model: "m" });
+    assert.equal((await new AcceptanceChecker(async () => (undefined)).check(TASK, DIFF)).result, "undecided");
+    assert.equal((await new AcceptanceChecker(async () => (scripted)).check(TASK, { ...DIFF, files: [] })).result, "undecided");
   });
 
   it("tells the agent what's missing, and the reviewer what was checked", () => {
