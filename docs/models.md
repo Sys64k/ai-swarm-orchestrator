@@ -198,6 +198,9 @@ aso hub-service install ... --agent-model claude-haiku-5-5 \
 - **In the task's history:** each agent conversation names its model and why, e.g.
   `(claude-sonnet-5-5, escalated after 2 rework rounds)` or `(claude-haiku-5-5, the default;
   gemini/models/gemini-3.8-flash refused this task)`.
+- **Running out of turns counts too:** an agent that uses all its turns (`--max-turns`) has its
+  work saved on the branch, and its task goes on in a rework round from there instead of
+  failing, so it escalates like work QA or the acceptance check sent back.
 - **The rework limit stays** at 3 rework rounds, so a task gets at most 4 tries. With the
   defaults:
 

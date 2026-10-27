@@ -96,6 +96,8 @@ export interface TaskRecord {
   refusedModels?: string[];
   /** Set when the current attempt's model was refused and another can take over: its failure requeues the task. */
   switchingModel?: boolean;
+  /** Set when the current attempt's agent used all its turns: its failure becomes a rework round (escalation applies). */
+  outOfTurns?: boolean;
   /** Files the agent reported touching (FILE_OPERATION), most recent last. */
   filesTouched: string[];
   /** One line per model turn: what the agent did and what it cost. */
@@ -335,6 +337,7 @@ export class TaskManager {
     // A person's retry gives every model another chance (a refusal may have been fixed since).
     task.refusedModels = undefined;
     task.switchingModel = undefined;
+    task.outOfTurns = undefined;
     task.qaAttempts = 0;
     task.nodeId = undefined;
     task.qaNodeId = undefined;
@@ -596,6 +599,19 @@ export class TaskManager {
     this.note(task, `${spec} refused the request (${error.split("\n")[0].slice(0, 160)}); the task moves to another model`);
   }
 
+  /**
+   * The task's agent used all its turns. Its work so far is saved on the branch, so the attempt's
+   * failure (the worker reports it next) becomes a rework round that continues from there: it
+   * counts toward the rework limit, so a task that keeps running out escalates to a stronger
+   * model, and fails once the rounds are used up.
+   */
+  recordOutOfTurns(taskId: string, turns: number): void {
+    const task = this.tasks.get(taskId);
+    if (!task || (task.state !== "assigned" && task.state !== "in_progress")) return;
+    task.outOfTurns = true;
+    this.note(task, `the agent used all ${turns} turns before finishing; its work so far is kept, and a rework round continues from it`);
+  }
+
   /** Apply a STATUS_UPDATE. Returns an error string if the sender does not own the task. */
   handleStatus(nodeId: string, update: MessageOf<"STATUS_UPDATE">["payload"]): string | undefined {
     if (update.taskId === undefined) return undefined; // idle keepalive
@@ -652,6 +668,12 @@ export class TaskManager {
           task.nodeId = undefined;
           task.state = "pending";
           this.note(task, `requeued for another model after the failure on ${nodeId}`);
+        } else if (task.outOfTurns) {
+          task.outOfTurns = undefined;
+          this.rework(
+            task,
+            "The agent used all its turns before finishing. Its work so far is on this branch: continue from it, and spend your turns finishing what's left (checking the branch's diff first) rather than exploring the whole project again.",
+          );
         } else {
           task.state = "failed";
           this.note(task, `failed on ${nodeId}: ${update.detail ?? "no detail"}`);

@@ -1176,6 +1176,12 @@ skipping refused models. The choice is pinned on the conversation like a desk mo
 through `DeskModels.route(spec)` (any spec, not only desks'), and named in the history with its
 reason. Ladder models the Hub can't build an adapter for are dropped at start, with a warning.
 
+An agent that reaches the turn limit (`--max-turns`): the conversation calls
+`TaskManager.recordOutOfTurns`, which sets `outOfTurns`; the worker saves the unfinished work on
+the branch and reports `failed`, which then becomes a rework round (`rework`, so it counts toward
+the limit and escalation applies) with a reason telling the agent to continue from the branch.
+When the rounds are used up, the task fails as before.
+
 A non-retryable LLM error on a task conversation (`modelRefused`): if `roundModel` with that
 model refused gives another model, the task records it in `refusedModels` and sets
 `switchingModel`; the worker's `failed` report then requeues the task (`pending`) instead of

@@ -376,7 +376,11 @@ export class ConversationManager {
     }
     if (req.turn > conv.turn) return void fail(`expected turn ${conv.turn}, got ${req.turn}`);
     if (conv.inflight) return void fail(`turn ${req.turn} is already being processed`, true);
-    if (req.turn >= this.maxTurns) return void fail(`conversation reached the limit of ${this.maxTurns} turns`);
+    if (req.turn >= this.maxTurns) {
+      // Not the end of a task: its next round continues from the saved work (and may escalate).
+      if (subject.kind === "task") this.tasks.recordOutOfTurns(subject.id, this.maxTurns);
+      return void fail(`conversation reached the limit of ${this.maxTurns} turns`);
+    }
 
     const expected = [...conv.pendingToolUseIds].sort().join(",");
     const got = req.toolResults.map((r) => r.toolUseId).sort().join(",");

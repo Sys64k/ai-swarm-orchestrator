@@ -628,7 +628,7 @@ console.log("greeting ok");\n`;
     );
   });
 
-  it("warns an agent near the turn limit and keeps its unfinished work for the retry", () => {
+  it("warns an agent near the turn limit, keeps its unfinished work, and goes on in rework rounds until they're used up", () => {
     let warnedAt = -1;
     const model = new ScriptedModel((req) => {
       const turn = (req.messages.length - 1) / 2;
@@ -639,8 +639,12 @@ console.log("greeting ok");\n`;
     return withHub(
       async (ctx) => {
         const record = await runGreet(ctx);
+        // Each time it runs out, a rework round continues from the saved work; when they're used up, the task fails.
         assert.equal(record.state, "failed");
-        assert.match(record.detail ?? "", /reached the limit of 12 turns \(unfinished work saved on task\/greet @ [0-9a-f]{8}; a retry continues from it\)/);
+        assert.equal(record.reworkRound, 3);
+        assert.match(record.detail ?? "", /used all its turns before finishing.*\(gave up after 3 rework rounds\)/s);
+        assert.equal(record.history.filter((h) => /reached the limit of 12 turns \(unfinished work saved on task\/greet @ [0-9a-f]{8}/.test(h.event)).length, 0, "no failure note until the end");
+        assert.equal(record.history.filter((h) => /the agent used all 12 turns before finishing/.test(h.event)).length, 4, "out of turns in every attempt");
         assert.equal(warnedAt, 12 - TURN_WARNING, "warned with 10 turns left");
         assert.equal(git(ctx.repoDir, "show", "task/greet:greeting.txt"), "draft 11", "the last draft is on the branch");
         assert.match(git(ctx.repoDir, "log", "-1", "--format=%s", "task/greet"), /^wip: unfinished \(conversation reached the limit of 12 turns\)/);
