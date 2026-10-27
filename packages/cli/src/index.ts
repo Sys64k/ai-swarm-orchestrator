@@ -41,6 +41,7 @@ import {
 import { startWorkerCommand } from "./commands/start-worker.js";
 import { findHubCommand } from "./commands/find-hub.js";
 import { deskCommand, desksCommand, escalationCommand, modelsCommand } from "./commands/models.js";
+import { tuneCommand } from "./commands/tune.js";
 import { trackRecordsCommand } from "./commands/track-records.js";
 import { addProviderCommand, providersCommand, removeProviderCommand } from "./commands/providers.js";
 import { pricesCommand, removePriceCommand, setPriceCommand } from "./commands/prices.js";
@@ -457,6 +458,13 @@ program
   .option("--json", "print the Hub's answer as JSON")
   .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
   .action(trackRecordsCommand);
+program
+  .command("tune")
+  .description("Suggest a model for the desks, the reviewer and the Architect from the track records: as good for less, or clearly better")
+  .option("--since <time>", "compare jobs started at or after this time (default: the last 30 days)")
+  .option("--json", "print the Hub's answer as JSON")
+  .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
+  .action(tuneCommand);
 program
   .command("desk <target> <model>")
   .description("Put a desk (avalon#4), a whole machine (avalon), the Architect (architect) or the acceptance check (reviewer) on a model from `aso models`, or `default`")

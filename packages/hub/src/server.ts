@@ -57,6 +57,7 @@ import {
   SyncBodySchema,
   type AgentMessage,
   TrackRecordQuerySchema,
+  ModelSuggestionsQuerySchema,
   type PublicStats,
   type PublicStatsShare,
 } from "@aso/shared";
@@ -67,6 +68,7 @@ import { DEFAULT_MAX_TOKENS, type Effort, type LlmAdapter } from "./llm/adapter.
 import { AcceptanceChecker } from "./llm/acceptance.js";
 import { DeskModels, desksOf } from "./llm/desk-models.js";
 import { checkToolUse } from "./llm/tool-check.js";
+import { currentModels, defaultSince, modelSuggestions } from "./model-suggestions.js";
 import { MACHINE_PREFIX, machineDeskAdapter, MachineModels } from "./llm/machine-models.js";
 import { Providers, resolveModel } from "./llm/providers.js";
 import { CustomPrices } from "./llm/custom-prices.js";
@@ -898,6 +900,16 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     const query = TrackRecordQuerySchema.safeParse(c.req.query());
     if (!query.success) return c.json({ error: query.error.issues.map((i) => `${i.path.join(".") || "query"}: ${i.message}`).join("; ") }, 400);
     return c.json(trackRecords(tasks.list(), plans.list(), query.data));
+  });
+  /** Which model each role would do as well on for less, or clearly better on; a person applies it. */
+  app.get("/api/model-suggestions", async (c) => {
+    const query = ModelSuggestionsQuerySchema.safeParse(c.req.query());
+    if (!query.success) return c.json({ error: query.error.issues.map((i) => `${i.path.join(".") || "query"}: ${i.message}`).join("; ") }, 400);
+    const since = query.data.since ?? defaultSince();
+    const machines = registry.workerSnapshots().map((w) => ({ hostname: w.hardware.hostname, slots: w.slots }));
+    const current = currentModels(machines, (d) => deskModels.modelOf(d), deskView());
+    const records = trackRecords(tasks.list(), plans.list(), { by: "model", since });
+    return c.json(modelSuggestions(records, since, current, (await providers.models()).models, [...new Set(machines.map((m) => m.hostname))]));
   });
   app.post("/api/desks", async (c) => {
     const req = await parsed(c, DeskAssignmentBodySchema);

@@ -353,3 +353,32 @@ export interface TrackRecords {
   since: string | null;
   rows: TrackRecordRow[];
 }
+
+export type SuggestionRole = "desks" | "reviewer" | "architect";
+
+/** How a model has done in a role (`GET /api/model-suggestions`). */
+export interface SuggestionEvidence {
+  model: string;
+  samples: number;
+  /** 0 to 1: tasks finished of those settled; met verdicts that held up; proposed plans approved. */
+  quality: number;
+  unitCostUsd: number;
+}
+
+export interface ModelSuggestion {
+  role: SuggestionRole;
+  kind: "cheaper" | "better";
+  current: SuggestionEvidence;
+  suggested: SuggestionEvidence;
+  /** How to choose it; absent when no provider offers it now. */
+  spec?: string;
+  /** What applies it: each connected machine's desks, or the role; empty when no provider offers it now. */
+  apply: Array<{ kind: "desk" | "role"; target: string; model: string }>;
+  reason: string;
+}
+
+export interface ModelSuggestions {
+  since: string;
+  suggestions: ModelSuggestion[];
+  notes: Array<{ role: SuggestionRole; text: string }>;
+}

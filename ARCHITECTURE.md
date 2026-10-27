@@ -1949,6 +1949,23 @@ builds' acceptance verdicts, by `acceptanceModel`; checks from before it was rec
 only by project), with `overturned` counting met verdicts marked so later. `GET /api/track-records`, `aso track-records` (`trackRecordLines`) and the console's
 *Track records* page (`trackRecordLine`) serve it.
 
+### Model suggestions (`model-suggestions.ts`)
+
+`modelSuggestions(byModel, since, current, available, machines)` is pure: from the track records
+by model it takes, per role, each model's evidence (`evidenceOf`: desks from `started`, the
+reviewer from `reviews` met and `overturned`, the Architect from `plans`), and `suggestFor`
+compares the role's current model with the others that reach `MIN_SAMPLES`: `cheaper` when one
+costs `COST_MARGIN` less at no more than `QUALITY_MARGIN` worse, else `better` when one is twice
+that margin better; otherwise a note says what's missing. Names are matched as track records
+keep them (`modelName`: a spec through the providers' list, else without `anthropic/`); a
+suggestion carries the spec to choose it by and `apply`: what applies it (each connected
+machine's desks, or the role), which `aso tune` and the console only format. The current models
+come from `currentModels` (the desks': the one most connected desks use), the default period from
+`defaultSince`. `GET /api/model-suggestions`
+serves it over the last `DEFAULT_PERIOD_DAYS`; `aso tune` and the console's *Suggestions* (on
+*Track records*) show it and apply it through `aso desk` / `POST /api/desks` and
+`POST /api/models/roles`. Nothing applies by itself.
+
 ### A machine's own model (`llm/machine-models.ts`)
 
 A worker started with `--local-model <url>` lists that server's models (`GET /models`) before

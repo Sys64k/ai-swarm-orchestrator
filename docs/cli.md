@@ -195,6 +195,13 @@ puts the Architect, or the acceptance check, on a model; see
 weakest first) and `--junior-tries <n|default>` change it while the Hub runs; see
 [Change it while the Hub runs](models.md#change-it-while-the-hub-runs).
 
+## `aso tune`
+
+Suggests a model for the desks, the reviewer and the Architect from the track records: one that
+does as well for at least 15% less, or clearly better, with the `aso desk` commands that apply it;
+otherwise what data is missing. `--since <date>` (default: the last 30 days), `--json`. See
+[Suggestions](models.md#suggestions-the-cheapest-mix-that-holds-up).
+
 ## `aso track-records`
 
 How models, machines, desks, roles or projects have done with their jobs: tasks finished (on

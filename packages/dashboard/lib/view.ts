@@ -1,5 +1,8 @@
 import type {
   Desks,
+  ModelSuggestion,
+  ModelSuggestions,
+  SuggestionRole,
   Models, Price, Provider, ProviderPreset, CheckState, DeployStatus, DiffFile, HubNode, HubUpdate, WorkerKey, Plan, PlannedTask, Project, ReviewChecks, Task, TaskDiff, TaskState, TrackRecordKey, TrackRecordRow, TranscriptEntry } from "./types.ts";
 
 import { PROVIDER_ID } from "./hub-routes.ts";
@@ -1154,4 +1157,24 @@ export function reviewsSummary(r: TrackRecordRow["reviews"]): string | undefined
     [r.undecided, "undecided"],
   ]);
   return `${plural(r.checks, "acceptance check")}${verdicts ? ` (${verdicts})` : ""}, ${formatUsd(r.costUsd)}`;
+}
+
+/** Mirrors SUGGESTION_ROLE_LABEL in @aso/shared. */
+const SUGGESTION_ROLE: Record<SuggestionRole, string> = { desks: "Desks", reviewer: "Reviewer", architect: "Architect" };
+
+/** A suggestion's title: "Reviewer: gpt-6.1-sol instead of claude-opus-5-5". */
+export function suggestionTitle(s: ModelSuggestion): string {
+  return `${SUGGESTION_ROLE[s.role]}: ${s.suggested.model} instead of ${s.current.model}`;
+}
+
+/** A note on a role without a suggestion: "Desks: gemini: 5 of 10 settled tasks needed to compare it." */
+export function suggestionNote(n: ModelSuggestions["notes"][number]): string {
+  return `${SUGGESTION_ROLE[n.role]}: ${n.text}`;
+}
+
+/** The console requests that apply a suggestion, from what the Hub says applies it. */
+export function suggestionRequests(s: ModelSuggestion): Array<{ path: string; body: Record<string, string> }> {
+  return s.apply.map((a): { path: string; body: Record<string, string> } =>
+    a.kind === "desk" ? { path: "desks", body: { target: a.target, model: a.model } } : { path: "models/roles", body: { role: a.target, model: a.model } },
+  );
 }

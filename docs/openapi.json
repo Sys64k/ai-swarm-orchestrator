@@ -3560,6 +3560,175 @@
         "additionalProperties": false,
         "description": "Track records: how models, machines, desks, roles or projects have done with their jobs"
       },
+      "ModelSuggestions": {
+        "type": "object",
+        "properties": {
+          "since": {
+            "type": "string",
+            "description": "The start of the period compared"
+          },
+          "suggestions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "desks",
+                    "reviewer",
+                    "architect"
+                  ]
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "cheaper",
+                    "better"
+                  ],
+                  "description": "cheaper: as good, for less; better: clearly better, maybe for more"
+                },
+                "current": {
+                  "type": "object",
+                  "properties": {
+                    "model": {
+                      "type": "string",
+                      "description": "The model's name, as track records show it"
+                    },
+                    "samples": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "Settled tasks it started (desks), met verdicts (reviewer) or proposed plans (Architect)"
+                    },
+                    "quality": {
+                      "type": "number",
+                      "description": "0 to 1: tasks finished of those settled; met verdicts that held up; proposed plans approved"
+                    },
+                    "unitCostUsd": {
+                      "type": "number",
+                      "description": "All-in cost per finished task (desks), per check (reviewer) or per plan (Architect)"
+                    }
+                  },
+                  "required": [
+                    "model",
+                    "samples",
+                    "quality",
+                    "unitCostUsd"
+                  ],
+                  "additionalProperties": false
+                },
+                "suggested": {
+                  "type": "object",
+                  "properties": {
+                    "model": {
+                      "type": "string",
+                      "description": "The model's name, as track records show it"
+                    },
+                    "samples": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "Settled tasks it started (desks), met verdicts (reviewer) or proposed plans (Architect)"
+                    },
+                    "quality": {
+                      "type": "number",
+                      "description": "0 to 1: tasks finished of those settled; met verdicts that held up; proposed plans approved"
+                    },
+                    "unitCostUsd": {
+                      "type": "number",
+                      "description": "All-in cost per finished task (desks), per check (reviewer) or per plan (Architect)"
+                    }
+                  },
+                  "required": [
+                    "model",
+                    "samples",
+                    "quality",
+                    "unitCostUsd"
+                  ],
+                  "additionalProperties": false
+                },
+                "spec": {
+                  "description": "How to choose the suggested model (<provider>/<model>); absent when no provider offers it now",
+                  "type": "string"
+                },
+                "apply": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "desk",
+                          "role"
+                        ]
+                      },
+                      "target": {
+                        "type": "string"
+                      },
+                      "model": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "target",
+                      "model"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "description": "What applies it, as `aso desk <target> <model>` does: each connected machine (desk) or the role; empty when no provider offers the model now"
+                },
+                "reason": {
+                  "type": "string",
+                  "description": "The comparison in a sentence"
+                }
+              },
+              "required": [
+                "role",
+                "kind",
+                "current",
+                "suggested",
+                "apply",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "desks",
+                    "reviewer",
+                    "architect"
+                  ]
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "role",
+                "text"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Why a role has no suggestion: what's missing"
+          }
+        },
+        "required": [
+          "since",
+          "suggestions",
+          "notes"
+        ],
+        "additionalProperties": false
+      },
       "PublicStats": {
         "type": "object",
         "properties": {
@@ -5692,6 +5861,51 @@
           },
           "400": {
             "description": "A bad grouping or time",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          }
+        }
+      }
+    },
+    "/api/model-suggestions": {
+      "get": {
+        "operationId": "getModelSuggestions",
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Which model each role (desks, reviewer, Architect) would do as well on for less, or clearly better on, from the track records",
+        "parameters": [
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "description": "Compare jobs started at or after this time (ISO 8601; default: the last 30 days)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelSuggestions"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A bad time",
             "content": {
               "application/json": {
                 "schema": {
