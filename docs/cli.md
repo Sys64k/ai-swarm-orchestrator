@@ -188,6 +188,14 @@ each desk with a model of its own, and each such model's calls at once and load.
 machine, on a model (`--concurrency`, `--base-url`, `--vision`). See
 [A model per desk](models.md#a-model-per-desk).
 
+## `aso track-records`
+
+How models, machines, desks, roles or projects have done with their jobs: tasks finished (on
+the first try, or taking over from another), their builds' QA and acceptance verdicts, how often
+they ran out of turns or failed, and their cost per task finished. `--by
+model|host|desk|role|project` (default `model`), `--project`, `--role`, `--since <date>`,
+`--json`. See [Track records](models.md#track-records-how-each-model-has-done).
+
 ## `aso find-hub`
 
 Asks the LAN and the Tailscale network where the Hub is, with this machine's worker key, prints

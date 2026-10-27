@@ -300,3 +300,34 @@ export interface Desks {
   desks: Array<{ desk: string; model: string }>;
   models: Array<{ model: string; baseUrl?: string; concurrency: number; running: number; waiting: number }>;
 }
+
+export type TrackRecordKey = "model" | "host" | "desk" | "role" | "project";
+
+/** One model's, machine's, desk's, role's or project's record (`GET /api/track-records`). */
+export interface TrackRecordRow {
+  key: string;
+  builds: {
+    jobs: number;
+    built: number;
+    unverified: number;
+    failed: number;
+    outOfTurns: number;
+    modelRefused: number;
+    dropped: number;
+    cancelled: number;
+    qaPassed: number;
+    qaFailed: number;
+    accepted: number;
+    unmet: number;
+  };
+  qaRuns: { runs: number; passed: number; failed: number; errors: number; dropped: number };
+  tasks: { worked: number; finished: number; firstTry: number; tookOver: number };
+  costUsd: number;
+  costPerFinishedUsd?: number;
+}
+
+export interface TrackRecords {
+  by: TrackRecordKey;
+  since: string | null;
+  rows: TrackRecordRow[];
+}

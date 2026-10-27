@@ -216,6 +216,36 @@ aso hub-service install ... --agent-model claude-haiku-5-5 \
   another chance (a refusal may have been fixed since).
 - **Off:** `--no-escalation` keeps every round on the desk's model.
 
+### Track records: how each model has done
+
+The Hub records every job on a task: each build (the first try and every rework round) and
+each QA run, with its machine, desk, **model**, model cost, and what came of it. From those it
+answers which model to put where:
+
+```bash
+aso track-records                    # by model
+aso track-records --by host          # by machine (with their QA runs for others)
+aso track-records --by desk --project aso-ui --since 2026-11-01
+```
+
+It prints, for example:
+
+```
+MODEL                    FINISHED  1ST TRY  TOOK OVER  BUILDS  QA PASSED  ACCEPTED  OUT OF TURNS  FAILED  COST    PER TASK
+models/gemini-3.8-flash  14        9        0          25      14/17      12/13     6             1       $3.10   $0.22
+claude-opus-5-5          3         0        3          3       3/3        3/3       0             0       $2.70   $0.90
+```
+
+- **Finished:** merged tasks whose last build that checked out was this model's (machine's, …).
+  **1st try:** of those, merged after a single build. **Took over:** someone else had built on
+  the task before; with escalation, that's the stronger model rescuing it.
+- **QA passed, accepted:** the verdicts on its builds' work, as good out of all.
+- **Out of turns, failed:** builds whose agent ran out of turns or gave up.
+- **Cost, per task:** its builds' estimated model cost, and that divided by the tasks it finished.
+- Also by **role** (frontend, backend, …) and **project**; `--role` and `--since` narrow it.
+- Jobs are recorded from when the Hub started recording them; older tasks don't count. The
+  core console shows the same under *Track records*, and `GET /api/track-records` serves it.
+
 ### A machine's own model (volunteer GPUs)
 
 A worker machine with its own model server (Ollama, vLLM, LM Studio) can serve the model calls

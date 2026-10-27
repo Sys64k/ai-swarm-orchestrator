@@ -101,6 +101,8 @@ interface Subject {
   firstPrompt(): string;
   active(): boolean;
   recordUsage(usage: LlmUsage): void;
+  /** The model its agent runs on (tasks: for the job's track record). */
+  recordModel?(model: string): void;
   recordTurn(turn: Omit<AgentTurn, "at">): void;
   recordEvent(event: string): void;
 }
@@ -248,7 +250,8 @@ export class ConversationManager {
         spentUsd: () => this.tasks.spentSinceRetry(id),
         firstPrompt: () => taskPrompt(this.tasks.get(id)!),
         active: () => this.tasks.isHeldFor(nodeId, id),
-        recordUsage: (u) => this.tasks.recordLlmUsage(id, u),
+        recordUsage: (u) => this.tasks.recordAgentUsage(id, u),
+        recordModel: (m) => this.tasks.recordJobModel(id, m),
         recordTurn: (t) => this.tasks.recordAgentTurn(id, t),
         recordEvent: (e) => this.tasks.recordEvent(id, e),
       };
@@ -382,6 +385,7 @@ export class ConversationManager {
       const model = this.routeFor(conv)?.adapter.model;
       const on = model && subject.kind === "task" ? ` (${model}${choice.why ? `, ${choice.why}` : ""})` : "";
       subject.recordEvent(`agent conversation started on ${nodeId}${on}`);
+      if (model) subject.recordModel?.(model);
     } else if (conv.nodeId !== nodeId || conv.subject.kind !== subject.kind || conv.subject.id !== subject.id) {
       return void fail(`conversation ${req.conversationId} belongs to another ${conv.subject.kind} or node`);
     }

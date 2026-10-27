@@ -1452,6 +1452,110 @@
               "description": "An agent that worked on a task: one per implementation round or QA run on a new desk"
             }
           },
+          "jobs": {
+            "description": "Every job on it, oldest first: kept since track records began, for them",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "job": {
+                  "type": "string",
+                  "enum": [
+                    "implement",
+                    "test"
+                  ]
+                },
+                "round": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "The task's rework round the job ran in (0: the first try)"
+                },
+                "host": {
+                  "type": "string",
+                  "description": "The worker machine's hostname"
+                },
+                "slot": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "The job slot (desk) on it, from 1"
+                },
+                "nodeId": {
+                  "type": "string",
+                  "description": "The worker's node id at the time"
+                },
+                "model": {
+                  "description": "The model its agent ran on (builds only)",
+                  "type": "string"
+                },
+                "startedAt": {
+                  "type": "string",
+                  "description": "ISO 8601 time"
+                },
+                "endedAt": {
+                  "description": "Absent while it runs",
+                  "type": "string"
+                },
+                "result": {
+                  "description": "How it ended",
+                  "type": "string",
+                  "enum": [
+                    "pushed",
+                    "built",
+                    "unverified",
+                    "failed",
+                    "outOfTurns",
+                    "modelRefused",
+                    "dropped",
+                    "cancelled",
+                    "passed",
+                    "qaFailed",
+                    "error"
+                  ]
+                },
+                "qa": {
+                  "description": "A build's work in QA",
+                  "type": "string",
+                  "enum": [
+                    "passed",
+                    "failed"
+                  ]
+                },
+                "acceptance": {
+                  "description": "A build's work in the acceptance check",
+                  "type": "string",
+                  "enum": [
+                    "met",
+                    "unmet",
+                    "undecided"
+                  ]
+                },
+                "calls": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Model calls its agent made"
+                },
+                "costUsd": {
+                  "type": "number",
+                  "description": "Their estimated cost"
+                }
+              },
+              "required": [
+                "job",
+                "round",
+                "host",
+                "slot",
+                "nodeId",
+                "startedAt",
+                "calls",
+                "costUsd"
+              ],
+              "additionalProperties": false,
+              "description": "One job on a task: a build (implementation or rework round) or a QA run, with what came of it"
+            }
+          },
           "review": {
             "type": "object",
             "properties": {
@@ -2986,6 +3090,234 @@
           "models"
         ],
         "additionalProperties": false
+      },
+      "TrackRecords": {
+        "type": "object",
+        "properties": {
+          "by": {
+            "type": "string",
+            "enum": [
+              "model",
+              "host",
+              "desk",
+              "role",
+              "project"
+            ]
+          },
+          "since": {
+            "description": "When the oldest job counted started (jobs are recorded from when track records began)",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "description": "The model, machine, desk, role or project"
+                },
+                "builds": {
+                  "type": "object",
+                  "properties": {
+                    "jobs": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "Builds that ended"
+                    },
+                    "built": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "A build whose pushed work checked out"
+                    },
+                    "unverified": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "A build whose push failed the Hub's checks"
+                    },
+                    "failed": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "A job whose agent gave up, or whose task failed during it"
+                    },
+                    "outOfTurns": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "A build whose agent used all its turns (its work was kept for the next round)"
+                    },
+                    "modelRefused": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "A build whose model's API refused the request (another model took over)"
+                    },
+                    "dropped": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "A job whose machine went offline before it ended"
+                    },
+                    "cancelled": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "A job ended because its task was cancelled"
+                    },
+                    "qaPassed": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "Builds whose work passed QA"
+                    },
+                    "qaFailed": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "Builds whose work failed QA"
+                    },
+                    "accepted": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "Builds whose work met every acceptance criterion"
+                    },
+                    "unmet": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "Builds whose work had criteria unmet"
+                    }
+                  },
+                  "required": [
+                    "jobs",
+                    "built",
+                    "unverified",
+                    "failed",
+                    "outOfTurns",
+                    "modelRefused",
+                    "dropped",
+                    "cancelled",
+                    "qaPassed",
+                    "qaFailed",
+                    "accepted",
+                    "unmet"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Its builds and what came of them"
+                },
+                "qaRuns": {
+                  "type": "object",
+                  "properties": {
+                    "runs": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "passed": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "failed": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "errors": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "dropped": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "runs",
+                    "passed",
+                    "failed",
+                    "errors",
+                    "dropped"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Its QA runs on others' work (not counted by model: tests run without one)"
+                },
+                "tasks": {
+                  "type": "object",
+                  "properties": {
+                    "worked": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "Tasks it built on"
+                    },
+                    "finished": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "Merged tasks whose last build was its"
+                    },
+                    "firstTry": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "Of those, merged after a single build"
+                    },
+                    "tookOver": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "Of those, tasks someone else built on before it"
+                    }
+                  },
+                  "required": [
+                    "worked",
+                    "finished",
+                    "firstTry",
+                    "tookOver"
+                  ],
+                  "additionalProperties": false,
+                  "description": "The tasks it worked on"
+                },
+                "costUsd": {
+                  "type": "number",
+                  "description": "Estimated model cost of its builds"
+                },
+                "costPerFinishedUsd": {
+                  "description": "costUsd divided by tasks finished",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "key",
+                "builds",
+                "qaRuns",
+                "tasks",
+                "costUsd"
+              ],
+              "additionalProperties": false,
+              "description": "One model's, machine's, desk's, role's or project's track record"
+            },
+            "description": "Most tasks finished first"
+          }
+        },
+        "required": [
+          "by",
+          "since",
+          "rows"
+        ],
+        "additionalProperties": false,
+        "description": "Track records: how models, machines, desks, roles or projects have done with their jobs"
       },
       "Provider": {
         "type": "object",
@@ -4746,6 +5078,78 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/track-records": {
+      "get": {
+        "operationId": "getTrackRecords",
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "How models, machines, desks, roles or projects have done with their jobs",
+        "parameters": [
+          {
+            "name": "by",
+            "in": "query",
+            "required": false,
+            "description": "Group by model (default), host, desk, role or project",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project",
+            "in": "query",
+            "required": false,
+            "description": "Only this project's tasks",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "role",
+            "in": "query",
+            "required": false,
+            "description": "Only tasks of this role",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "description": "Only jobs started at or after this time (ISO 8601)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackRecords"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A bad grouping or time",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
           }
         }
       }

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { addOutcome, describeRecord, WorkerKeys } from "@aso/hub";
 import { createMessage, type AgentMessage } from "@aso/shared";
-import { postTask, pushTaskBranch, tempDir, TOKEN, waitFor, withHub, worker } from "./helpers.ts";
+import { postTask, pushTaskBranch, reply, ScriptedModel, tempDir, text, TOKEN, waitFor, withHub, worker } from "./helpers.ts";
 
 describe("a machine's track record", () => {
   it("counts outcomes and says them plainly", () => {
@@ -89,5 +89,82 @@ describe("track records (Hub)", () => {
       const keys = (await call(ctx.port, "/api/worker-keys")).body as Array<{ id: string; track: Record<string, number> }>;
       assert.deepEqual(keys.find((k) => k.id === flakyKey.id)!.track, {}, "no build, no drop");
     });
+  });
+});
+
+describe("job records and the track-records report (Hub)", () => {
+  const llm = { adapter: new ScriptedModel(() => reply([text("Done.")], "end_turn"), "claude-haiku-5-5") };
+
+  it("records each job with its desk, model, cost and what came of it, and reports them", async () => {
+    await withHub(
+      async (ctx) => {
+        const builder = await worker(ctx.port, "builder", { hostname: "avalon" });
+        await postTask(ctx.port, { taskId: "greet", role: "backend", title: "Greet", description: "d" });
+        payloadOf(await builder.next(), "TASK_ASSIGNMENT");
+        const tester = await worker(ctx.port, "tester", { hostname: "canfod" });
+
+        builder.send(createMessage("STATUS_UPDATE", "builder", { state: "in_progress", taskId: "greet", slot: 2 }));
+        builder.send(createMessage("STATUS_UPDATE", "builder", { state: "in_progress", taskId: "greet", slot: 2 })); // again, as after a reconnect
+        builder.send(createMessage("PROMPT_EXECUTION", "builder", { requestId: crypto.randomUUID(), taskId: "greet", conversationId: crypto.randomUUID(), turn: 0, toolResults: [] } as never));
+        assert.equal(payloadOf(await builder.next(), "PROMPT_RESULT").outcome, "ok");
+        const commit = await pushTaskBranch(ctx.gitUrl, "greet", { "greet.txt": "hi" });
+        builder.send(createMessage("STATUS_UPDATE", "builder", { state: "completed", taskId: "greet", commit }));
+        payloadOf(await tester.next(), "TEST_EXECUTION");
+        tester.send(createMessage("STATUS_UPDATE", "tester", { state: "in_progress", taskId: "greet", slot: 1 }));
+        tester.send(createMessage("FEEDBACK_LOOP", "tester", { taskId: "greet", commit, outcome: "pass", summary: "ok" }));
+        await waitFor(() => ctx.hub.tasks.get("greet")?.state === "merged");
+
+        const jobs = ctx.hub.tasks.get("greet")!.jobs!;
+        assert.deepEqual(
+          jobs.map((j) => [j.job, j.round, j.host, j.slot, j.model, j.result, j.qa, j.calls]),
+          [
+            ["implement", 0, "avalon", 2, "claude-haiku-5-5", "built", "passed", 1],
+            ["test", 0, "canfod", 1, undefined, "passed", undefined, 0],
+          ],
+          "one build despite the repeated report, and one QA run",
+        );
+        assert.ok(jobs.every((j) => j.endedAt));
+
+        const byModel = (await call(ctx.port, "/api/track-records")).body;
+        assert.equal(byModel.by, "model");
+        assert.deepEqual(byModel.rows.map((r: { key: string; builds: { built: number; qaPassed: number }; tasks: { finished: number; firstTry: number } }) => [r.key, r.builds.built, r.builds.qaPassed, r.tasks.finished, r.tasks.firstTry]), [["claude-haiku-5-5", 1, 1, 1, 1]]);
+        const byDesk = (await call(ctx.port, "/api/track-records?by=desk&project=project&role=backend")).body;
+        assert.deepEqual(byDesk.rows.map((r: { key: string }) => r.key), ["avalon #2", "canfod #1"]);
+        assert.equal((await call(ctx.port, "/api/track-records?by=planet")).status, 400);
+        assert.equal((await call(ctx.port, "/api/track-records?since=yesterday")).status, 400);
+        builder.ws.close();
+        tester.ws.close();
+      },
+      { llm, acceptanceCheck: false },
+    );
+  });
+
+  it("ends a job when its agent gives up, when the task is cancelled, and when its machine drops off", async () => {
+    await withHub(
+      async (ctx) => {
+        const w = await worker(ctx.port, "dev", { hostname: "avalon" });
+        await postTask(ctx.port, { taskId: "gives-up", role: "backend", title: "T", description: "d" });
+        payloadOf(await w.next(), "TASK_ASSIGNMENT");
+        w.send(createMessage("STATUS_UPDATE", "dev", { state: "in_progress", taskId: "gives-up", slot: 1 }));
+        w.send(createMessage("STATUS_UPDATE", "dev", { state: "failed", taskId: "gives-up", detail: "can't" }));
+        await waitFor(() => ctx.hub.tasks.get("gives-up")?.state === "failed");
+        assert.deepEqual(ctx.hub.tasks.get("gives-up")!.jobs!.map((j) => j.result), ["failed"]);
+
+        await postTask(ctx.port, { taskId: "stopped", role: "backend", title: "T", description: "d" });
+        payloadOf(await w.next(), "TASK_ASSIGNMENT");
+        w.send(createMessage("STATUS_UPDATE", "dev", { state: "in_progress", taskId: "stopped", slot: 1 }));
+        await waitFor(() => ctx.hub.tasks.get("stopped")?.jobs?.length === 1);
+        assert.equal((await call(ctx.port, "/api/tasks/stopped/cancel", {})).status, 200);
+        assert.deepEqual(ctx.hub.tasks.get("stopped")!.jobs!.map((j) => j.result), ["cancelled"]);
+
+        await postTask(ctx.port, { taskId: "dropped", role: "backend", title: "T", description: "d" });
+        payloadOf(await w.next(), "TASK_ASSIGNMENT");
+        w.send(createMessage("STATUS_UPDATE", "dev", { state: "in_progress", taskId: "dropped", slot: 1 }));
+        await waitFor(() => ctx.hub.tasks.get("dropped")?.jobs?.length === 1);
+        w.ws.close();
+        await waitFor(() => ctx.hub.tasks.get("dropped")?.jobs?.[0].result === "dropped", 5000, "dropped once the grace period is over");
+      },
+      { llm, acceptanceCheck: false, reclaimGraceMs: 50 },
+    );
   });
 });

@@ -14,6 +14,7 @@ import {
   DEFAULT_HUB_PORT,
   DEFAULT_PROJECTS_DIR,
   MAX_WORKER_SLOTS,
+  TRACK_RECORD_KEYS,
 } from "@aso/shared";
 import type { Effort } from "@aso/hub";
 import { startArchitect } from "@aso/architect";
@@ -39,6 +40,7 @@ import {
 import { startWorkerCommand } from "./commands/start-worker.js";
 import { findHubCommand } from "./commands/find-hub.js";
 import { deskCommand, desksCommand, modelsCommand } from "./commands/models.js";
+import { trackRecordsCommand } from "./commands/track-records.js";
 import { addProviderCommand, providersCommand, removeProviderCommand } from "./commands/providers.js";
 import { pricesCommand, removePriceCommand, setPriceCommand } from "./commands/prices.js";
 import { updateCommand } from "./commands/update.js";
@@ -433,6 +435,16 @@ program
   .description("Which desks use a model of their own, and how busy each model is")
   .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
   .action(desksCommand);
+program
+  .command("track-records")
+  .description("How models, machines, desks, roles or projects have done: tasks finished, first tries, QA, acceptance, cost")
+  .addOption(new Option("--by <key>", "group by").choices([...TRACK_RECORD_KEYS]).default("model"))
+  .option("--project <name>", "only this project's tasks")
+  .option("--role <role>", "only tasks of this role (frontend, backend, ...)")
+  .option("--since <time>", "only jobs started at or after this time (ISO 8601, e.g. 2026-10-01)")
+  .option("--json", "print the Hub's answer as JSON")
+  .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
+  .action(trackRecordsCommand);
 program
   .command("desk <target> <model>")
   .description("Put a desk (avalon#4) or a whole machine (avalon) on a model from `aso models`, or `default`")

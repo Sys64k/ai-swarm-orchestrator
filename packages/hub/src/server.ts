@@ -8,6 +8,7 @@ import { serve, type ServerType } from "@hono/node-server";
 import { createGatewayApp, PUBLIC_API_PATHS, requestAddress } from "./gateway.js";
 import { budgetSpent, mayUseProject, projectOfGitPath, REFUSE_ALL, refuseJob, type KeyScope } from "./worker-scope.js";
 import type { JobOutcome } from "./track-record.js";
+import { trackRecords } from "./job-report.js";
 import { createNodeWebSocket } from "@hono/node-ws";
 import type { WSContext } from "hono/ws";
 import {
@@ -52,6 +53,7 @@ import {
   RequestChangesBodySchema,
   SyncBodySchema,
   type AgentMessage,
+  TrackRecordQuerySchema,
 } from "@aso/shared";
 import { API_DOC_VERSION, openApiDocument } from "./api/openapi.js";
 import { syncApiCopies } from "./api-sync.js";
@@ -799,6 +801,11 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     return c.json({ removed: id });
   });
   app.get("/api/desks", (c) => c.json(deskModels.view(adapter?.model ?? null, defaultAgentModel())));
+  app.get("/api/track-records", (c) => {
+    const query = TrackRecordQuerySchema.safeParse(c.req.query());
+    if (!query.success) return c.json({ error: query.error.issues.map((i) => `${i.path.join(".") || "query"}: ${i.message}`).join("; ") }, 400);
+    return c.json(trackRecords(tasks.list(), query.data));
+  });
   app.post("/api/desks", async (c) => {
     const req = await parsed(c, DeskAssignmentBodySchema);
     if (!req.ok) return c.json({ error: req.error }, 400);
