@@ -25,7 +25,7 @@ Every `aso` command and its options.
 | `--effort <level>` | `high` | `low`, `medium`, `high`, `xhigh`, `max` |
 | `--task-budget <usd>` | `5` | Estimated LLM spend cap per task |
 | `--plan-budget <usd>` | `3` | Estimated LLM spend cap per planning round |
-| `--max-turns <n>` | `80` | Model turns per task attempt or planning round. The agent is told to wrap up in its last 10; if it is still cut off, its unfinished work is pushed to the task branch for a retry |
+| `--max-turns <n>` | `80` | Model turns per task attempt or planning round. The agent is told to wrap up in its last 10; if it is still cut off, its unfinished work is pushed to the task branch, and a rework round continues from it (which counts toward the rework limit, so escalation applies) |
 | `--llm-concurrency <n>` | `4` | Concurrent model requests across all workers and the Architect; jobs beyond it wait their turn |
 | `--no-dashboard` | | Skip the dashboard (not supported with `--docker`) |
 | `--no-architect` | | Do not start the Architect |

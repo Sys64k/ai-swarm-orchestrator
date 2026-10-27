@@ -1216,6 +1216,10 @@
               "type": "string"
             }
           },
+          "outOfTurns": {
+            "description": "The current attempt's agent used all its turns: its failure becomes a rework round continuing from the saved work",
+            "type": "boolean"
+          },
           "switchingModel": {
             "description": "The current attempt's model was refused: its failure requeues the task on another model",
             "type": "boolean"
