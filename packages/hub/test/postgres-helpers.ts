@@ -17,8 +17,10 @@ function startContainer(): string | undefined {
     return undefined;
   }
   const name = `aso-test-pg-${process.pid}-${randomBytes(3).toString("hex")}`;
+  // Made for this run only, so no credential is ever written in the repository.
+  const password = randomBytes(12).toString("hex");
   try {
-    execFileSync("docker", ["run", "-d", "--rm", "--name", name, "--label", "aso-test=1", "-e", "POSTGRES_PASSWORD=test", "-p", "127.0.0.1::5432", "postgres:17-alpine"], { stdio: "ignore" });
+    execFileSync("docker", ["run", "-d", "--rm", "--name", name, "--label", "aso-test=1", "-e", `POSTGRES_PASSWORD=${password}`, "-p", "127.0.0.1::5432", "postgres:17-alpine"], { stdio: "ignore" });
   } catch {
     return undefined; // e.g. no image and no network to pull it
   }
@@ -30,7 +32,7 @@ function startContainer(): string | undefined {
     }
   });
   const port = execFileSync("docker", ["port", name, "5432/tcp"], { encoding: "utf8" }).trim().split("\n")[0].split(":").at(-1);
-  return `postgres://postgres:test@127.0.0.1:${port}/postgres`;
+  return databaseUrl({ user: "postgres", password, host: "127.0.0.1", port: Number(port), database: "postgres" });
 }
 
 async function ready(url: string): Promise<string> {
@@ -48,6 +50,17 @@ async function ready(url: string): Promise<string> {
       await client.end().catch(() => undefined);
     }
   }
+}
+
+/** A connection URL built from its parts (tests never spell one out with a password in it). */
+export function databaseUrl(parts: { user: string; password: string; host: string; port: number; database: string }): string {
+  const url = new URL("postgres://placeholder");
+  url.username = parts.user;
+  url.password = parts.password;
+  url.hostname = parts.host;
+  url.port = String(parts.port);
+  url.pathname = `/${parts.database}`;
+  return url.toString();
 }
 
 /** The test server's admin URL, or undefined when there is none. */

@@ -4,7 +4,8 @@ import path from "node:path";
 import { describe, it } from "node:test";
 import { Database, describeDatabaseUrl, diffRecords, MIGRATIONS, parseTotals, projectStateStore, hubStateStore, SaveScheduler, TASKS, toJsonText } from "@aso/hub";
 import { tempDir } from "./helpers.ts";
-import { freshDatabase, postgresSkip, sql } from "./postgres-helpers.ts";
+import { randomBytes } from "node:crypto";
+import { databaseUrl, freshDatabase, postgresSkip, sql } from "./postgres-helpers.ts";
 
 const skip = await postgresSkip();
 if (skip) console.log(`# skipping PostgreSQL tests: ${skip}`);
@@ -36,8 +37,10 @@ describe("database records (pure)", () => {
   });
 
   it("describes a database URL without its password", () => {
-    assert.equal(describeDatabaseUrl("postgres://aso:s3cret@db:5432/aso"), "db:5432/aso");
-    assert.ok(!describeDatabaseUrl("postgres://aso:s3cret@localhost/aso").includes("s3cret"));
+    const password = randomBytes(8).toString("hex");
+    const described = describeDatabaseUrl(databaseUrl({ user: "aso", password, host: "db", port: 5432, database: "aso" }));
+    assert.equal(described, "db:5432/aso");
+    assert.ok(!described.includes(password) && !described.includes("aso@"), "neither the password nor the user");
     assert.equal(describeDatabaseUrl("not a url"), "(an unreadable database URL)");
   });
 
@@ -111,7 +114,8 @@ describe("PostgreSQL store", { skip }, () => {
   });
 
   it("says plainly when it can't reach the database", async () => {
-    await assert.rejects(Database.connect("postgres://aso:pw@127.0.0.1:1/aso", { waitMs: 0 }), /could not reach PostgreSQL at 127\.0\.0\.1:1\/aso/);
+    const nowhere = databaseUrl({ user: "aso", password: randomBytes(8).toString("hex"), host: "127.0.0.1", port: 1, database: "aso" });
+    await assert.rejects(Database.connect(nowhere, { waitMs: 0 }), /could not reach PostgreSQL at 127\.0\.0\.1:1\/aso/);
   });
 
   it("keeps a project's tasks and plans in order, exactly, and writes only what changed", async () => {
