@@ -19,7 +19,8 @@ export function TrackRecordsPage() {
       <main className="page">
         <p className="muted">
           What came of each job: the tasks each one finished (on the first try, or taking over from another), its builds&apos;
-          QA and acceptance verdicts, and their cost. Counted from when the Hub began recording jobs
+          QA and acceptance verdicts, and their cost; for models and projects also the plans made as the Architect and the
+          acceptance checks made as the reviewer. Counted from when the Hub began recording jobs
           {records.data?.since ? ` (the oldest here: ${new Date(records.data.since).toLocaleString()})` : ""}.
         </p>
         <label className="field">

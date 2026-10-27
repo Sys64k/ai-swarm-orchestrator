@@ -998,10 +998,21 @@ export function goodOfTotal(label: string, good: number, bad: number): string | 
   return good + bad ? `${label} ${good} of ${good + bad}` : undefined;
 }
 
+/** "2 approved, 1 rejected": the non-zero counts with their labels, or "". */
+export function counted(pairs: ReadonlyArray<readonly [number, string]>): string {
+  return pairs
+    .filter(([n]) => n > 0)
+    .map(([n, label]) => `${n} ${label}`)
+    .join(", ");
+}
+
 /** The tasks part: "2 tasks finished (1 first try, 1 taken over)", "no task finished yet", or nothing without builds. */
 export function finishedSummary(tasks: TrackRecordRow["tasks"], builds: number): string | undefined {
   if (!tasks.finished) return builds ? "no task finished yet" : undefined;
-  const how = [tasks.firstTry ? `${tasks.firstTry} first try` : "", tasks.tookOver ? `${tasks.tookOver} taken over` : ""].filter(Boolean).join(", ");
+  const how = counted([
+    [tasks.firstTry, "first try"],
+    [tasks.tookOver, "taken over"],
+  ]);
   return `${plural(tasks.finished, "task")} finished (${how || "after rework"})`;
 }
 
@@ -1022,6 +1033,32 @@ export function trackRecordLine(r: TrackRecordRow): string {
     b.dropped ? `${b.dropped} dropped` : undefined,
     q.runs ? `${plural(q.runs, "QA run")}${q.passed + q.failed ? ` (${q.passed} of ${q.passed + q.failed} passed)` : ""}` : undefined,
     r.costUsd || b.jobs ? `${formatUsd(r.costUsd)}${r.costPerFinishedUsd !== undefined ? `, ${formatUsd(r.costPerFinishedUsd)} a task` : ""}` : undefined,
+    plansSummary(r.plans),
+    reviewsSummary(r.reviews),
   ];
   return parts.filter(Boolean).join(" · ");
+}
+
+/** "3 plans (2 approved, 1 rejected; questions first in 2), $1.60", or nothing. */
+export function plansSummary(p: TrackRecordRow["plans"]): string | undefined {
+  if (!p.planned) return undefined;
+  const outcome = counted([
+    [p.approved, "approved"],
+    [p.rejected, "rejected"],
+    [p.failed, "failed"],
+  ]);
+  const asked = p.withQuestions ? `questions first in ${p.withQuestions}` : "";
+  const details = [outcome, asked].filter(Boolean).join("; ");
+  return `${plural(p.planned, "plan")}${details ? ` (${details})` : ""}, ${formatUsd(p.costUsd)}`;
+}
+
+/** "9 acceptance checks (7 met, 1 unmet, 1 undecided), $0.45", or nothing. */
+export function reviewsSummary(r: TrackRecordRow["reviews"]): string | undefined {
+  if (!r.checks) return undefined;
+  const verdicts = counted([
+    [r.met, "met"],
+    [r.unmet, "unmet"],
+    [r.undecided, "undecided"],
+  ]);
+  return `${plural(r.checks, "acceptance check")}${verdicts ? ` (${verdicts})` : ""}, ${formatUsd(r.costUsd)}`;
 }

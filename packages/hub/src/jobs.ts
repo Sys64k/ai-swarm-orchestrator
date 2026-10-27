@@ -72,10 +72,13 @@ export function markQa(jobs: readonly JobRecord[] | undefined, passed: boolean):
   if (build) build.qa = passed ? "passed" : "failed";
 }
 
-/** The acceptance check's verdict on the latest build's work. */
-export function markAcceptance(jobs: readonly JobRecord[] | undefined, result: NonNullable<JobRecord["acceptance"]>): void {
+/** The acceptance check's verdict on the latest build's work, with the model that judged it and its cost. */
+export function markAcceptance(jobs: readonly JobRecord[] | undefined, result: NonNullable<JobRecord["acceptance"]>, by: { model?: string; costUsd?: number } = {}): void {
   const build = lastBuild(jobs);
-  if (build) build.acceptance = result;
+  if (!build) return;
+  build.acceptance = result;
+  if (by.model) build.acceptanceModel = by.model;
+  if (by.costUsd !== undefined) build.acceptanceCostUsd = by.costUsd;
 }
 
 /** How a build ended when its worker reported it failed: the model refused, it ran out of turns, or it gave up. */

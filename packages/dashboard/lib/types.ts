@@ -324,6 +324,10 @@ export interface TrackRecordRow {
   tasks: { worked: number; finished: number; firstTry: number; tookOver: number };
   costUsd: number;
   costPerFinishedUsd?: number;
+  /** Plans made with it, as the Architect's model (by model and project only). */
+  plans: { planned: number; proposed: number; approved: number; rejected: number; failed: number; withQuestions: number; costUsd: number };
+  /** Acceptance checks it made, as the reviewer's model (by model and project only). */
+  reviews: { checks: number; met: number; unmet: number; undecided: number; costUsd: number };
 }
 
 export interface TrackRecords {

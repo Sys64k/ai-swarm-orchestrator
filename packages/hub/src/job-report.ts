@@ -1,4 +1,4 @@
-import { agentName, COUNTED_BUILD_RESULTS, type JobRecord, type TaskState, type TrackRecordQuery, type TrackRecordRow, type TrackRecords } from "@aso/shared";
+import { agentName, COUNTED_BUILD_RESULTS, type JobRecord, type PlanState, type TaskState, type TrackRecordQuery, type TrackRecordRow, type TrackRecords } from "@aso/shared";
 
 /**
  * Track records, rebuilt from the tasks' job records (`jobs.ts`): how each model, machine, desk,
@@ -15,6 +15,22 @@ export interface ReportTask {
   jobs?: JobRecord[];
 }
 
+/** What the report needs of a plan. */
+export interface ReportPlan {
+  project: string;
+  state: PlanState;
+  model?: string;
+  dialogue?: ReadonlyArray<{ kind: string }>;
+  llm: { costUsd: number };
+  createdAt: string;
+}
+
+/** A build or plan whose model wasn't recorded (from before models were). */
+const UNKNOWN_MODEL = "unknown model";
+
+/** Plans and acceptance checks count by model and by project: they have no machine, desk or role. */
+const countsPlansAndReviews = (by: TrackRecordQuery["by"]) => by === "model" || by === "project";
+
 /** The report's costs, to a hundredth of a cent (the records keep a millionth of a dollar). */
 const roundUsd = (usd: number) => Math.round(usd * 1e4) / 1e4;
 
@@ -25,6 +41,8 @@ function emptyRow(key: string): TrackRecordRow {
     qaRuns: { runs: 0, passed: 0, failed: 0, errors: 0, dropped: 0 },
     tasks: { worked: 0, finished: 0, firstTry: 0, tookOver: 0 },
     costUsd: 0,
+    plans: { planned: 0, proposed: 0, approved: 0, rejected: 0, failed: 0, withQuestions: 0, costUsd: 0 },
+    reviews: { checks: 0, met: 0, unmet: 0, undecided: 0, costUsd: 0 },
   };
 }
 
@@ -32,7 +50,7 @@ function emptyRow(key: string): TrackRecordRow {
 function keyOf(job: JobRecord, task: ReportTask, by: TrackRecordQuery["by"]): string | undefined {
   switch (by) {
     case "model":
-      return job.job === "implement" ? (job.model ?? "unknown model") : undefined;
+      return job.job === "implement" ? (job.model ?? UNKNOWN_MODEL) : undefined;
     case "host":
       return job.host;
     case "desk":
@@ -46,7 +64,7 @@ function keyOf(job: JobRecord, task: ReportTask, by: TrackRecordQuery["by"]): st
 
 /** A job that has ended (a build still being checked, `pushed`, hasn't). */
 const ended = (j: JobRecord) => !!j.endedAt && !!j.result && j.result !== "pushed";
-const startedSince = (j: JobRecord, since: string | undefined) => !since || Date.parse(j.startedAt) >= Date.parse(since);
+const startedSince = (j: Pick<JobRecord, "startedAt">, since: string | undefined) => !since || Date.parse(j.startedAt) >= Date.parse(since);
 
 function countBuild(row: TrackRecordRow, job: JobRecord): void {
   const b = row.builds;
@@ -69,6 +87,57 @@ function countQaRun(row: TrackRecordRow, job: JobRecord): void {
 }
 
 /**
+ * Who an acceptance check counts for: its model, or the task's project; nobody in other
+ * groupings. By model only checks that recorded theirs (builds from before that don't).
+ */
+function reviewerKey(build: JobRecord, task: ReportTask, by: TrackRecordQuery["by"]): string | undefined {
+  if (!build.acceptance || !countsPlansAndReviews(by)) return undefined;
+  return by === "model" ? build.acceptanceModel : task.project;
+}
+
+function countReview(row: TrackRecordRow, build: JobRecord): void {
+  const r = row.reviews;
+  r.checks++;
+  if (build.acceptance === "met") r.met++;
+  else if (build.acceptance === "unmet") r.unmet++;
+  else r.undecided++;
+  r.costUsd += build.acceptanceCostUsd ?? 0;
+}
+
+/** Who a plan counts for: the Architect's model, or its project. Undefined: not in this grouping, or never planned. */
+function plannerKey(plan: ReportPlan, by: TrackRecordQuery["by"]): string | undefined {
+  if ((plan.state === "pending" && !plan.model) || !countsPlansAndReviews(by)) return undefined;
+  return by === "model" ? (plan.model ?? UNKNOWN_MODEL) : plan.project;
+}
+
+const hasDialogue = (plan: ReportPlan, kind: string) => plan.dialogue?.some((d) => d.kind === kind) ?? false;
+
+/**
+ * Whether the Architect got as far as proposing: a proposal in the dialogue, or a state only a
+ * proposal leads to (so a plan from before dialogues were kept counts too).
+ */
+function reachedProposal(plan: ReportPlan): boolean {
+  return hasDialogue(plan, "proposal") || plan.state === "proposed" || plan.state === "approved" || plan.state === "rejected";
+}
+
+function countPlan(row: TrackRecordRow, plan: ReportPlan): void {
+  const p = row.plans;
+  p.planned++;
+  if (reachedProposal(plan)) p.proposed++;
+  if (plan.state === "approved") p.approved++;
+  if (plan.state === "rejected") p.rejected++;
+  if (plan.state === "failed") p.failed++;
+  if (hasDialogue(plan, "questions")) p.withQuestions++;
+  p.costUsd += plan.llm.costUsd;
+}
+
+/** The plans a query covers: its project, from its `since`; none with a role filter (plans have no role). */
+function plansInScope(plans: readonly ReportPlan[], query: TrackRecordQuery): ReportPlan[] {
+  if (query.role) return [];
+  return plans.filter((p) => (!query.project || p.project === query.project) && startedSince({ startedAt: p.createdAt }, query.since));
+}
+
+/**
  * Who finished a merged task: whoever made its last build that checked out. Judged over all its
  * builds, so a time filter can't turn a reworked task into a first try. `firstTry`: that was its
  * only build; `tookOver`: someone else had built on it before.
@@ -84,9 +153,10 @@ function finishedBy(task: ReportTask, by: TrackRecordQuery["by"]): { key: string
 
 /**
  * Track records: per model, machine, desk, role or project, what came of its ended builds and
- * QA runs, the tasks it built on and finished, and their cost.
+ * QA runs, the tasks it built on and finished, and their cost. By model and by project also the
+ * plans made (the Architect's model) and the acceptance checks made (the reviewer's model).
  */
-export function trackRecords(tasks: readonly ReportTask[], query: TrackRecordQuery): TrackRecords {
+export function trackRecords(tasks: readonly ReportTask[], plans: readonly ReportPlan[], query: TrackRecordQuery): TrackRecords {
   const rows = new Map<string, TrackRecordRow>();
   const worked = new Map<string, Set<ReportTask>>();
   const rowOf = (key: string) => rows.get(key) ?? rows.set(key, emptyRow(key)).get(key)!;
@@ -103,6 +173,8 @@ export function trackRecords(tasks: readonly ReportTask[], query: TrackRecordQue
       if (job.job === "implement") {
         countBuild(rowOf(key), job);
         workedOn(key).add(task);
+        const reviewer = reviewerKey(job, task, query.by);
+        if (reviewer !== undefined) countReview(rowOf(reviewer), job);
       } else {
         countQaRun(rowOf(key), job);
       }
@@ -115,12 +187,27 @@ export function trackRecords(tasks: readonly ReportTask[], query: TrackRecordQue
     if (finished.tookOver) t.tookOver++;
   }
 
+  for (const plan of plansInScope(plans, query)) {
+    const key = plannerKey(plan, query.by);
+    if (key !== undefined) countPlan(rowOf(key), plan);
+  }
+
   for (const [key, set] of worked) rowOf(key).tasks.worked = set.size;
   const out = [...rows.values()].map((r) => ({
     ...r,
     costUsd: roundUsd(r.costUsd),
+    plans: { ...r.plans, costUsd: roundUsd(r.plans.costUsd) },
+    reviews: { ...r.reviews, costUsd: roundUsd(r.reviews.costUsd) },
     ...(r.tasks.finished ? { costPerFinishedUsd: roundUsd(r.costUsd / r.tasks.finished) } : {}),
   }));
-  out.sort((a, b) => b.tasks.finished - a.tasks.finished || b.builds.jobs - a.builds.jobs || b.qaRuns.runs - a.qaRuns.runs || a.key.localeCompare(b.key));
+  out.sort(
+    (a, b) =>
+      b.tasks.finished - a.tasks.finished ||
+      b.builds.jobs - a.builds.jobs ||
+      b.plans.planned - a.plans.planned ||
+      b.reviews.checks - a.reviews.checks ||
+      b.qaRuns.runs - a.qaRuns.runs ||
+      a.key.localeCompare(b.key),
+  );
   return { by: query.by, since: since ?? null, rows: out };
 }

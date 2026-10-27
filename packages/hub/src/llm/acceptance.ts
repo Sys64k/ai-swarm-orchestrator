@@ -130,9 +130,10 @@ export class AcceptanceChecker {
     }
     const usage = priceUsage(response.model, response.tokens);
     const read = readVerdict(response.content, task.spec.acceptanceCriteria);
-    if ("error" in read) return { result: "undecided", reason: read.error, model: response.model, usage };
+    // The model by the name the Hub calls it, as builds record theirs, so track records line up.
+    if ("error" in read) return { result: "undecided", reason: read.error, model: adapter.model, usage };
     const unmet = read.criteria.some((c) => c.verdict === "unmet");
-    return { result: unmet ? "unmet" : "met", ...read, model: response.model, usage };
+    return { result: unmet ? "unmet" : "met", ...read, model: adapter.model, usage };
   }
 }
 

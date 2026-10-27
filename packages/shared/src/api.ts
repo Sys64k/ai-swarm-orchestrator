@@ -114,6 +114,8 @@ export const JobRecordSchema = z
     result: z.enum(JOB_RESULTS).optional().describe("How it ended"),
     qa: z.enum(["passed", "failed"]).optional().describe("A build's work in QA"),
     acceptance: z.enum(["met", "unmet", "undecided"]).optional().describe("A build's work in the acceptance check"),
+    acceptanceModel: z.string().optional().describe("The model that judged it"),
+    acceptanceCostUsd: z.number().optional().describe("What that check cost (estimated)"),
     calls: z.number().int().describe("Model calls its agent made"),
     costUsd: z.number().describe("Their estimated cost"),
   })
@@ -545,6 +547,7 @@ export const PlanSchema = z.object({
   requirement: z.string(),
   state: PlanStateSchema,
   architectNodeId: z.string().optional(),
+  model: z.string().optional().describe("The model the Architect planned it on (its latest round's)"),
   summary: z.string().optional(),
   tasks: z.array(PlannedTaskSchema).optional(),
   taskIds: z.record(z.string(), z.string()).optional().describe("Plan key → task id, once approved"),
@@ -751,6 +754,26 @@ export const TrackRecordRowSchema = z
       .describe("The tasks it worked on"),
     costUsd: z.number().describe("Estimated model cost of its builds"),
     costPerFinishedUsd: z.number().optional().describe("costUsd divided by tasks finished"),
+    plans: z
+      .object({
+        planned: z.number().int().describe("Plans the Architect worked on with it"),
+        proposed: z.number().int().describe("Of those, plans that reached a proposal"),
+        approved: z.number().int(),
+        rejected: z.number().int(),
+        failed: z.number().int(),
+        withQuestions: z.number().int().describe("Plans where the Architect asked questions first"),
+        costUsd: z.number().describe("Their estimated model cost"),
+      })
+      .describe("Plans made with it (by model and project only)"),
+    reviews: z
+      .object({
+        checks: z.number().int().describe("Acceptance checks it made"),
+        met: z.number().int(),
+        unmet: z.number().int(),
+        undecided: z.number().int(),
+        costUsd: z.number().describe("Their estimated model cost"),
+      })
+      .describe("Acceptance checks it made on builds' work (by model and project only)"),
   })
   .describe("One model's, machine's, desk's, role's or project's track record");
 export type TrackRecordRow = z.infer<typeof TrackRecordRowSchema>;

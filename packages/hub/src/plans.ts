@@ -41,6 +41,8 @@ export interface PlanRecord {
   requirement: string;
   state: PlanState;
   architectNodeId?: string;
+  /** The model the Architect planned it on (its latest round's). */
+  model?: string;
   summary?: string;
   tasks?: PlannedTask[];
   /** Plan key → created task id, once approved. */
@@ -271,6 +273,14 @@ export class PlanManager {
       }
     }
     this.kick();
+  }
+
+  /** The model the Architect's conversation on the plan runs on. */
+  recordModel(planId: string, model: string): void {
+    const plan = this.plans.get(planId);
+    if (!plan || plan.model === model) return;
+    plan.model = model;
+    this.onChange?.();
   }
 
   recordLlmUsage(planId: string, usage: LlmUsage): void {
