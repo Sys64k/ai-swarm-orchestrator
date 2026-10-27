@@ -12,7 +12,8 @@ import { PullRequests, type PullRequestOptions, type PullRequestStatus } from ".
 import { GitSync } from "./git/sync.js";
 import { PlanManager, type PlanRecord } from "./plans.js";
 import type { NodeRegistry } from "./registry.js";
-import { StateStore } from "./state-store.js";
+import type { ProjectStateStore } from "./state-store.js";
+import { projectStateStore, type Database } from "./postgres-store.js";
 import { TaskManager, type AgentTurn, type TaskManagerOptions, type TaskRecord } from "./tasks.js";
 import { Transcripts, type TranscriptInput, type TranscriptSubject } from "./transcripts.js";
 import { Screenshots } from "./screenshots.js";
@@ -57,7 +58,13 @@ export interface Project {
   transcripts: Transcripts;
   /** The screenshots of each task's last passing QA run. */
   screenshots: Screenshots;
-  store?: StateStore;
+  /** Its tasks and plans: the database's, or its state file. */
+  store?: ProjectStateStore;
+  /**
+   * Its `.git/aso/` folder: transcripts and screenshots, and the state file when there is no
+   * database (so it isn't the store's location: that can be the database).
+   */
+  stateDir?: string;
 }
 
 export class ProjectError extends Error {
@@ -78,6 +85,8 @@ export interface ProjectSetOptions {
   mainBranch?: string;
   /** `false` keeps each project's state in memory only. */
   persist?: boolean;
+  /** Keep tasks and plans in this database instead of each project's state file (imported once). */
+  database?: Database;
   tasks: Pick<TaskManagerOptions, "policies" | "reclaimGraceMs" | "qa" | "acceptance" | "refuseWorker" | "onOutcome">;
   deps: Pick<DependencyManagerOptions, "installer" | "allow">;
   sync: { enabled?: boolean; remote?: string; token?: string; retryMs?: number };
@@ -356,15 +365,16 @@ export class ProjectSet {
 
   private async add(id: string, dir: string): Promise<Project> {
     const repo = await HubRepository.open(dir, this.opts.mainBranch);
-    const store = this.opts.persist === false ? undefined : new StateStore(path.join(await repo.gitDir(), "aso"));
+    const stateDir = this.opts.persist === false ? undefined : path.join(await repo.gitDir(), "aso");
+    const store = stateDir === undefined ? undefined : projectStateStore(this.opts.database, id, stateDir);
     const saved = await store?.load<TaskRecord, PlanRecord>();
-    const transcripts = new Transcripts(store ? path.join(store.dir, "transcripts") : undefined);
-    const screenshots = new Screenshots(store ? path.join(store.dir, "screenshots") : undefined);
+    const transcripts = new Transcripts(stateDir ? path.join(stateDir, "transcripts") : undefined);
+    const screenshots = new Screenshots(stateDir ? path.join(stateDir, "screenshots") : undefined);
     const sync = await GitSync.create(repo, { ...this.opts.sync, enabled: this.opts.sync.enabled ?? true });
     const { gate, status: pullRequests } = await PullRequests.create(sync, repo.mainBranch, { token: this.opts.sync.token, ...this.opts.pullRequests });
     log.info(`project ${id}: ${gate ? `QA-approved work goes to pull requests on ${pullRequests.repo}` : `merged on the Hub (${pullRequests.reason})`}`);
     // Filled in below; the managers' callbacks only run after construction.
-    const project = { id, dir, repo, sync, pullRequests, transcripts, screenshots, store } as Project;
+    const project = { id, dir, repo, sync, pullRequests, transcripts, screenshots, store, stateDir } as Project;
     /** The managers report changes while they are still being constructed; listeners wait for both. */
     const ready = () => project.tasks !== undefined && project.plans !== undefined;
     const persist = () => {
@@ -427,7 +437,7 @@ export class ProjectSet {
       state.timer = setInterval(() => void this.follow(project), followMs);
       state.timer.unref();
     }
-    log.info(`project ${id}: ${dir}${store ? ` (state in ${store.dir})` : ""}`);
+    log.info(`project ${id}: ${dir}${store ? ` (state in ${store.location})` : ""}`);
     return project;
   }
 }

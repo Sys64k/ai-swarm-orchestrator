@@ -12,7 +12,7 @@ import {
 } from "@aso/shared";
 import type { ProjectSet } from "../projects.js";
 import type { NodeRegistry } from "../registry.js";
-import type { StateStore } from "../state-store.js";
+import type { HubStateStore } from "../state-store.js";
 import type { Transcripts } from "../transcripts.js";
 
 /** Tasks and plans of every project, looked up by their Hub-wide ids. */
@@ -27,6 +27,24 @@ import { MACHINE_PREFIX, type MachineModels } from "./machine-models.js";
 import { calledSpec, canSwitchFrom, roundModel, type EscalationPolicy, type RoundModel } from "./escalation.js";
 import { architectSystemPrompt, CONTINUE_PROMPT, planPrompt, systemPrompt, taskPrompt } from "./prompts.js";
 
+/** The model usage totals, kept across restarts. */
+const TOTALS_KEY = "llm-totals";
+
+/** Model calls and their estimated cost, all tasks and plans together, since `since`. */
+export interface UsageTotals {
+  calls: number;
+  costUsd: number;
+  since: string;
+}
+
+/** Saved totals, if they are usable: counts that are non-negative numbers (`since` defaults to `now`). */
+export function parseTotals(saved: unknown, now: string): UsageTotals | undefined {
+  if (typeof saved !== "object" || saved === null) return undefined;
+  const { calls, costUsd, since } = saved as Record<string, unknown>;
+  const count = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0;
+  if (!count(calls) || !count(costUsd)) return undefined;
+  return { calls, costUsd, since: typeof since === "string" && !Number.isNaN(Date.parse(since)) ? since : now };
+}
 const log = createLogger("llm");
 
 /** A planning round's spend cap: enough for the Architect to read a large codebase before it plans. */
@@ -68,7 +86,7 @@ export interface ConversationOptions {
   /** Drop idle conversations after this long. */
   idleTimeoutMs?: number;
   /** Saves conversations after every turn so agents can carry on after a Hub restart. */
-  store?: StateStore;
+  store?: HubStateStore;
   /** Records the agent's text, tool calls and tool results for the console. */
   transcripts?: Pick<Transcripts, "append">;
 }
@@ -144,9 +162,9 @@ export class ConversationManager {
   private readonly maxTurns: number;
   private readonly idleTimeoutMs: number;
   private readonly slots: Semaphore;
-  private readonly store?: StateStore;
+  private readonly store?: HubStateStore;
   private readonly transcripts?: Pick<Transcripts, "append">;
-  private totals = { calls: 0, costUsd: 0 };
+  private totals: UsageTotals = { calls: 0, costUsd: 0, since: new Date().toISOString() };
   private readonly agentAdapter: LlmAdapter | undefined;
 
   constructor(
@@ -171,6 +189,7 @@ export class ConversationManager {
   /** Load conversations saved before a Hub restart (after tasks and plans are restored). */
   async restore(): Promise<void> {
     if (!this.store) return;
+    this.totals = parseTotals(await this.store.loadValue(TOTALS_KEY), this.totals.since) ?? this.totals;
     const saved = await this.store.loadConversations<SavedConversation>();
     for (const c of saved) {
       const subject = this.makeSubject(c.subject.kind, c.subject.id, c.subject.role, c.nodeId);
@@ -319,7 +338,7 @@ export class ConversationManager {
       maxTurns: this.maxTurns,
       queue: this.slots.status(),
       conversations: this.conversations.size,
-      totals: { calls: this.totals.calls, costUsd: round(this.totals.costUsd) },
+      totals: { calls: this.totals.calls, costUsd: round(this.totals.costUsd), since: this.totals.since },
       ...(this.paused ? { paused: { ...this.paused } } : {}),
     };
   }
@@ -436,6 +455,7 @@ export class ConversationManager {
       const usage = priceUsage(response.model, response.tokens);
       this.totals.calls++;
       this.totals.costUsd += usage.costUsd;
+      this.store?.saveValue(TOTALS_KEY, this.totals);
       conv.subject.recordUsage(usage);
       this.opts.spend?.record(conv.nodeId, usage.costUsd);
 

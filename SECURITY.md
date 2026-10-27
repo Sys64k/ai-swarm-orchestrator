@@ -20,6 +20,7 @@ it and which version (`aso --version`) you ran.
 | **Sign-in code** | `…/login?code=…` | Nowhere: made by `aso console-link` or *Sign in another device* | Signs one browser in to the core console or aso-ui, once, within minutes | Expires and works once |
 | **GitHub token** | `github_pat_…` | `ASO_GIT_TOKEN` on the Hub machine | The Hub pushes `main`, opens and merges pull requests and reads CI checks | Revoke it on GitHub and set a new one |
 | **Anthropic API key** | `sk-ant-…` | `ANTHROPIC_API_KEY` on the Hub machine only, or added as a provider | Model calls, which cost money | Revoke it in the Anthropic console and set a new one |
+| **Database password** | random text | `~/.config/aso/db-password` on the Hub machine (mode 600), or inside `ASO_DATABASE_URL` | Reading and changing every task, plan and agent conversation in the Hub's database. With `--docker` the database isn't published on any port, so only the Hub's container network reaches it | Change it in Postgres (`ALTER USER aso PASSWORD …`), then in the file, and restart the Hub |
 | **Provider keys** | `sk-…`, `sk-or-…`, … | `<projects root>/.aso/providers.json` on the Hub (mode 600), from `aso provider add`; or `OPENAI_API_KEY` etc. in the Hub's `.env` | Model calls at that provider, which may cost money | `aso provider remove <id>` (or delete it from the `.env` and restart); revoke it at the provider |
 
 `ASO_TOKEN`, `ASO_GIT_TOKEN` and `ANTHROPIC_API_KEY` are read from the environment or from

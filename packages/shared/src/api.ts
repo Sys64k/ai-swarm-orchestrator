@@ -263,6 +263,10 @@ export const HealthSchema = z.object({
   /** Details of the only project, kept for tools from before projects (null with several). */
   targetDir: z.string().nullable().optional(),
   stateDir: z.string().nullable().optional(),
+  storage: z
+    .enum(["postgres", "files", "memory"])
+    .optional()
+    .describe("Where tasks, plans and conversations are kept: a PostgreSQL database, state files, or memory only"),
   mainBranch: z.string().nullable().optional(),
   sync: SyncStatusSchema.nullable().optional(),
   qa: z
@@ -574,7 +578,13 @@ export const LlmStatusSchema = z.object({
   maxTurns: z.number().int(),
   queue: z.object({ limit: z.number().int(), running: z.number().int(), waiting: z.number().int() }).describe("Model requests at once, now and waiting"),
   conversations: z.number().int(),
-  totals: z.object({ calls: z.number().int(), costUsd: z.number() }),
+  totals: z
+    .object({
+      calls: z.number().int(),
+      costUsd: z.number(),
+      since: z.string().optional().describe("When counting began: kept across restarts when the Hub saves its state, else since it started"),
+    })
+    .describe("Model calls and their estimated cost, all tasks and plans together"),
   paused: z
     .object({ reason: z.string(), since: Timestamp })
     .optional()

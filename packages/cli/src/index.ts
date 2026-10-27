@@ -158,6 +158,8 @@ function hubOptions(cmd: Command): Command {
       process.env.ASO_GATEWAY_PORT ? Number(process.env.ASO_GATEWAY_PORT) : undefined,
     )
     .option("--gateway-host <host>", "interface the worker gateway listens on (the tunnel connects locally)", process.env.ASO_GATEWAY_HOST || "127.0.0.1")
+    // No default here: help output would show the URL (and its password) from ASO_DATABASE_URL.
+    .option("--database-url <url>", "keep tasks, plans and conversations in this PostgreSQL database (default: ASO_DATABASE_URL; with --docker, a database container of its own)")
     .addOption(
       new Option("--no-auto-merge-syncs", "leave API sync pull requests for a person even when QA, every acceptance criterion and CI pass").default(
         process.env.ASO_AUTO_MERGE_SYNCS !== "0",
