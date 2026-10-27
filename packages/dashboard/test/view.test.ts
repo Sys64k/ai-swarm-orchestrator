@@ -690,9 +690,10 @@ describe("track records page", () => {
       costPerFinishedUsd: undefined,
       started: undefined,
       plans: { planned: 3, proposed: 3, approved: 2, rejected: 1, failed: 0, withQuestions: 2, costUsd: 1.6 },
-      reviews: { checks: 9, met: 7, unmet: 1, undecided: 1, costUsd: 0.45 },
+      reviews: { checks: 9, met: 7, overturned: 2, unmet: 1, undecided: 1, costUsd: 0.45 },
     };
-    assert.equal(trackRecordLine(opus), "3 plans (2 approved, 1 rejected; questions first in 2), $1.60 · 9 acceptance checks (7 met, 1 unmet, 1 undecided), $0.45");
+    assert.equal(trackRecordLine(opus), "3 plans (2 approved, 1 rejected; questions first in 2), $1.60 · 9 acceptance checks (7 met (2 overturned later), 1 unmet, 1 undecided), $0.45");
+    assert.match(trackRecordLine({ ...opus, reviews: { ...opus.reviews, overturned: undefined } }), /\(7 met, 1 unmet/, "an older Hub doesn't say");
     assert.equal(plansSummary({ ...opus.plans, approved: 0, rejected: 0, withQuestions: 0 }), "3 plans, $1.60");
   });
 

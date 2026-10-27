@@ -53,6 +53,7 @@ export function publicStats(byModel: TrackRecords, parts: PublicStatsShare["part
             plansApproved: r.plans.approved,
             checks: r.reviews.checks,
             checksMet: r.reviews.met,
+            checksOverturned: r.reviews.overturned,
             // Cost per task: all in, for the tasks that started on this model (track records' `started`).
             ...(shareCosts
               ? { costUsd: roundUsd(costOf(r)), ...(r.started.costPerFinishedUsd !== undefined ? { costPerTaskUsd: roundUsd(r.started.costPerFinishedUsd) } : {}) }

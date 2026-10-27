@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
-import { Deployer, deployEnv, deployNotification, HostDeployQueue, runCommand, startHub, type DeployStatus } from "@aso/hub";
+import { Deployer, deployEnv, deployNotification, failedInCommand, HostDeployQueue, lastBuild, runCommand, startHub, type DeployStatus } from "@aso/hub";
 import { createMessage } from "@aso/shared";
 import { git, makeTargetRepo, postTask, pushTaskBranch, tempDir, TOKEN, waitFor, withHub, worker } from "./helpers.ts";
 
@@ -14,15 +14,21 @@ describe("runCommand", () => {
   it("reports success, the exit code, and the end of the output", async () => {
     assert.deepEqual(await runCommand("echo out; echo err >&2", { cwd: tempDir(), env, timeoutSec: 10 }), { ok: true, output: "out\nerr\n" });
     const failed = await runCommand("echo nope; exit 3", { cwd: tempDir(), env, timeoutSec: 10 });
-    assert.deepEqual(failed, { ok: false, error: "exited with code 3", output: "nope\n" });
+    assert.deepEqual(failed, { ok: false, error: "exited with code 3", exitCode: 3, output: "nope\n" });
     const long = await runCommand("yes x | head -c 50000", { cwd: tempDir(), env, timeoutSec: 10 });
     assert.equal(long.output.length, 20_000, "only the end is kept");
+  });
+
+  it("tells a failure of the project's command from the Hub failing to run it", () => {
+    assert.equal(failedInCommand({ state: "failed", exitCode: 1 }), true);
+    assert.equal(failedInCommand({ state: "failed" }), false, "stopped, timed out or never started");
+    assert.equal(failedInCommand({ state: "succeeded" }), false);
   });
 
   it("stops the whole command, children included, when it runs too long", async () => {
     const started = Date.now();
     const r = await runCommand("sleep 30 & sleep 30", { cwd: tempDir(), env, timeoutSec: 1 });
-    assert.deepEqual([r.ok, r.error], [false, "timed out after 1 s"]);
+    assert.deepEqual([r.ok, r.error, r.exitCode], [false, "timed out after 1 s", undefined], "stopped, not failed: no exit code");
     assert.ok(Date.now() - started < 10_000);
   });
 });
@@ -373,6 +379,49 @@ describe("deploying from the Hub", () => {
           return d?.state === "succeeded" && d;
         });
         assert.equal(last.output, "README.md\n");
+      },
+      { deploy: { runner: "host" } },
+    ));
+
+  it("counts a failed deploy of a task's merge against the acceptance check that passed it, but not a Hub problem", () =>
+    withHub(
+      async (ctx) => {
+        const stateDir = path.join(ctx.repoDir, ".git", "aso");
+        mkdirSync(stateDir, { recursive: true });
+        writeFileSync(path.join(stateDir, "deploy.json"), JSON.stringify({ project: { command: "npm run build" } }));
+        const dev = await worker(ctx.port, "dev");
+        const qa = await worker(ctx.port, "qa");
+        await postTask(ctx.port, { taskId: "greet", role: "backend", title: "Greet", description: "x" });
+        assert.equal((await dev.next()).type, "TASK_ASSIGNMENT");
+        dev.send(createMessage("STATUS_UPDATE", "dev", { state: "in_progress", taskId: "greet", slot: 1 }));
+        const commit = await pushTaskBranch(ctx.gitUrl, "greet", { "greeting.txt": "hello\n" });
+        dev.send(createMessage("STATUS_UPDATE", "dev", { state: "completed", taskId: "greet", commit }));
+        assert.equal((await qa.next()).type, "TEST_EXECUTION");
+        qa.send(createMessage("STATUS_UPDATE", "qa", { state: "in_progress", taskId: "greet" }));
+        qa.send(createMessage("FEEDBACK_LOOP", "qa", { taskId: "greet", commit, outcome: "pass", summary: "ok" }));
+        const task = await waitFor(() => ctx.hub.tasks.get("greet")?.state === "merged" && ctx.hub.tasks.get("greet"), 10_000, "merged");
+        // As if the acceptance check had passed it (this Hub runs without one).
+        lastBuild(task.jobs)!.acceptance = "met";
+
+        const post = (id: string, body: unknown) =>
+          fetch(`http://127.0.0.1:${ctx.port}/api/deploys/${id}/result`, {
+            method: "POST",
+            headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+            body: JSON.stringify(body),
+          });
+        const nextJob = () => waitFor(async () => (await call(ctx.port, "/api/deploys/next")).body.job, 5_000, "a deploy job");
+        assert.equal((await post((await nextJob()).id, { ok: false, error: "stopped by SIGTERM", output: "" })).status, 200);
+        await waitFor(async () => (await call(ctx.port, "/api/projects/project")).body.deploy.last?.state === "failed");
+        assert.equal(lastBuild(task.jobs)!.overturned, undefined, "the Hub stopping a deploy says nothing about the work");
+
+        assert.equal((await call(ctx.port, "/api/projects/project/deploy", "POST")).status, 202);
+        const job = await nextJob();
+        assert.equal(job.commit, task.mainCommit, "the merge's own commit");
+        assert.equal((await post(job.id, { ok: false, error: "exited with code 1", exitCode: 1, output: "Type error" })).status, 200);
+        await waitFor(() => lastBuild(task.jobs)!.overturned === "deployFailed", 5_000, "counted against the check");
+        assert.ok(task.history.some((h) => h.event === `the deploy of its merge @ ${task.mainCommit!.slice(0, 8)} failed`));
+        dev.ws.close();
+        qa.ws.close();
       },
       { deploy: { runner: "host" } },
     ));

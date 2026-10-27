@@ -139,6 +139,9 @@ on the Hub machine:
   are stopped.
 - **Results.** Your phone gets *"aso-ui: deployed"* or *"aso-ui: deploy failed"* with the last
   lines of output. `GET /api/projects/<id>` shows the latest deploy under `deploy.last`, and
-  `<projects root>/.aso/deploy/<id>.log` has the end of its output.
+  `<projects root>/.aso/deploy/<id>.log` has the end of its output. When the command itself
+  fails (exits non-zero, `deploy.last.exitCode`), the task merged as that commit counts against
+  the acceptance check that passed it; see
+  [When a reviewer's "met" proves wrong](models.md#when-a-reviewers-met-proves-wrong).
 - **Edits apply at once.** The file is read on every deploy; no Hub restart needed. Without
   an entry, a project doesn't deploy.

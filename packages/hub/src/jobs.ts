@@ -1,4 +1,4 @@
-import type { JobRecord, JobResult } from "@aso/shared";
+import type { JobRecord, JobResult, OverturnReason } from "@aso/shared";
 
 /**
  * The bookkeeping of a task's jobs (`TaskRecord.jobs`): one record per build and per QA run,
@@ -79,6 +79,17 @@ export function markAcceptance(jobs: readonly JobRecord[] | undefined, result: N
   build.acceptance = result;
   if (by.model) build.acceptanceModel = by.model;
   if (by.costUsd !== undefined) build.acceptanceCostUsd = by.costUsd;
+}
+
+/**
+ * The last build's work, which the acceptance check passed, proved wrong later. Only a `met`
+ * verdict can be overturned, and only once (the first reason stays). Whether it was marked.
+ */
+export function markOverturned(jobs: readonly JobRecord[] | undefined, reason: OverturnReason): boolean {
+  const build = lastBuild(jobs);
+  if (build?.acceptance !== "met" || build.overturned) return false;
+  build.overturned = reason;
+  return true;
 }
 
 /** How a build ended when its worker reported it failed: the model refused, it ran out of turns, or it gave up. */

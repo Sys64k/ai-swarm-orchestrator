@@ -10,7 +10,7 @@ const stats = {
   costs: { totalUsd: 13.02, perTaskUsd: 0.31 },
   models: [
     { model: "gemini/models/gemini-3.8-flash", finished: 34, firstTry: 26, tookOver: 0, builds: 50, qaPassed: 30, qaFailed: 4, accepted: 28, unmet: 3, plansProposed: 0, plansApproved: 0, checks: 0, checksMet: 0, costUsd: 7.5, costPerTaskUsd: 0.22 },
-    { model: "claude-opus-5-5", finished: 8, firstTry: 0, tookOver: 8, builds: 8, qaPassed: 8, qaFailed: 0, accepted: 8, unmet: 0, plansProposed: 14, plansApproved: 12, checks: 40, checksMet: 34, costUsd: 5.52 },
+    { model: "claude-opus-5-5", finished: 8, firstTry: 0, tookOver: 8, builds: 8, qaPassed: 8, qaFailed: 0, accepted: 8, unmet: 0, plansProposed: 14, plansApproved: 12, checks: 40, checksMet: 34, checksOverturned: 2, costUsd: 5.52 },
     { model: "idle-model", finished: 0, firstTry: 0, tookOver: 0, builds: 0, qaPassed: 0, qaFailed: 0, accepted: 0, unmet: 0, plansProposed: 0, plansApproved: 0, checks: 0, checksMet: 0 },
   ],
 };
@@ -22,10 +22,13 @@ describe("the swarm's stats in the README", () => {
       md,
       /^\*\*Built by its own swarm\.\*\* Since 27 Oct 2026, the swarm has merged \*\*42 tasks\*\*, \*\*71%\*\* on the first try \(8 finished by a stronger model taking over\), from \*\*12 of 14\*\* proposed plans approved, at about \*\*\$0\.31 per task\*\* in model costs\./,
     );
-    assert.match(md, /\| Model \| Tasks finished \| First try \| QA passed \| Acceptance met \| Plans approved \| Checks it made: met \| Cost per task started on it \|/);
+    assert.match(md, /\| Model \| Tasks finished \| First try \| QA passed \| Acceptance met \| Plans approved \| Checks it made: met \| Its met held up \| Cost per task started on it \|/);
+    assert.match(md, /Its met held up: of the work it passed/, "says what held up means");
     assert.match(md, /Cost per task started on it: all in/, "says what the cost covers");
-    assert.match(md, /\| `gemini-3\.8-flash` \| 34 \| 76% \| 30 of 34 \| 28 of 31 \| – \| – \| \$0\.22 \|/);
-    assert.match(md, /\| `claude-opus-5-5` \| 8 \| 0% \| 8 of 8 \| 8 of 8 \| 12 of 14 \| 34 of 40 \| – \|/);
+    assert.match(md, /\| `gemini-3\.8-flash` \| 34 \| 76% \| 30 of 34 \| 28 of 31 \| – \| – \| – \| \$0\.22 \|/);
+    assert.match(md, /\| `claude-opus-5-5` \| 8 \| 0% \| 8 of 8 \| 8 of 8 \| 12 of 14 \| 34 of 40 \| 32 of 34 \| – \|/, "2 of its 34 met verdicts were overturned");
+    const older = renderStats({ ...stats, models: stats.models.map(({ checksOverturned, ...m }) => m) });
+    assert.match(older, /\| 34 of 40 \| – \| – \|/, "a Hub from before overturns were counted doesn't say");
     assert.ok(!md.includes("idle-model"), "a model that did nothing isn't listed");
     assert.match(md, /last: 3 Nov 2026/);
   });

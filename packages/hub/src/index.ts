@@ -42,7 +42,7 @@ export { JOIN_CODE_TTL_MS, WorkerKeys, type ScopeSettings, type WorkerKeyView } 
 export { NodeOwners, nodeIdsInUse } from "./node-owners.js";
 export { mergedTaskBranches, pruneMergedTaskBranches } from "./git/task-branches.js";
 export { Notifier, TEST_NOTIFICATION } from "./push/notifier.js";
-export { Deployer, deployEnv, deployNotification, deployWorkDir, HostDeployQueue, runCommand, runHere, type DeployJob, type RunResult, DEPLOY_FILE, DEPLOYED_FILE, DEPLOY_TIMEOUT_SEC, type DeployCommand, type DeployStatus } from "./deploy.js";
+export { Deployer, deployEnv, deployNotification, deployWorkDir, failedInCommand, HostDeployQueue, runCommand, runHere, type DeployJob, type RunResult, DEPLOY_FILE, DEPLOYED_FILE, DEPLOY_TIMEOUT_SEC, type DeployCommand, type DeployStatus } from "./deploy.js";
 export { duration, WorkerWatch, WORKER_FORGET_MS, WORKER_OFFLINE_ALERT_MS } from "./push/workers.js";
 export { notableChanges, type ProjectState, type PushNotification } from "./push/changes.js";
 export { encryptPayload, generateVapidKeys, sendPush, vapidAuthorization, MAX_PAYLOAD_BYTES, type PushResult, type VapidKeys } from "./push/web-push.js";
@@ -58,6 +58,6 @@ export { AttemptLimiter, clientAddress, createGatewayApp, gatewayAccess, GATEWAY
 export { addOutcome, describeRecord, JOB_OUTCOMES, type JobOutcome, type TrackRecord } from "./track-record.js";
 export { trackRecords, type ReportPlan, type ReportTask } from "./job-report.js";
 export { PUBLIC_STATS_CACHE_SEC, publicModelName, publicStats, publicStatsFor } from "./public-stats.js";
-export { addBuildUsage, endJob, failedBuildResult, JOBS_LIMIT, lastBuild, markAcceptance, markQa, markVerified, openJob, startJob, type Desk, type JobKind } from "./jobs.js";
+export { addBuildUsage, endJob, failedBuildResult, JOBS_LIMIT, lastBuild, markAcceptance, markOverturned, markQa, markVerified, openJob, startJob, type Desk, type JobKind } from "./jobs.js";
 export { budgetSpent, describeScope, mayUseProject, projectOfGitPath, REFUSE_ALL, refuseJob, type KeyScope, type WorkerJob } from "./worker-scope.js";
 export { MACHINE_PREFIX, MachineModels } from "./llm/machine-models.js";

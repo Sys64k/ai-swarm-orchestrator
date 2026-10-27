@@ -28,7 +28,7 @@ import type { Screenshots, ScreenshotSet } from "./screenshots.js";
 import { acceptanceCounts, unmetReason, type AcceptanceChecker } from "./llm/acceptance.js";
 import type { WorkerJob } from "./worker-scope.js";
 import type { JobOutcome } from "./track-record.js";
-import { addBuildUsage, endJob, failedBuildResult, markAcceptance, markQa, markVerified, openJob, startJob, type JobKind } from "./jobs.js";
+import { addBuildUsage, endJob, failedBuildResult, markAcceptance, markOverturned, markQa, markVerified, openJob, startJob, type JobKind } from "./jobs.js";
 
 const log = createLogger("tasks");
 
@@ -997,12 +997,14 @@ export class TaskManager {
         this.onMerged?.(task);
         break;
       case "closed":
+        markOverturned(task.jobs, "closed");
         task.state = "cancelled";
         this.note(task, `pull request #${pr.number} closed without merging; cancelled`);
         break;
       case "changes_requested":
         task.review.handled.push(outcome.reviewId);
         task.review.rounds++;
+        markOverturned(task.jobs, "changesRequested");
         this.note(task, `${outcome.author} asked for changes on pull request #${pr.number}`);
         this.sendBack(task, { reason: `Review round ${task.review.rounds}: ${outcome.summary}`, failures: [], output: outcome.details }, "back to an agent");
         break;
@@ -1070,6 +1072,7 @@ export class TaskManager {
     const pr = task.review.pr;
     const text = message.trim();
     task.review.rounds++;
+    markOverturned(task.jobs, "changesRequested");
     this.note(task, `a person asked for changes on pull request #${pr.number} in ASO`);
     const firstLine = text.split("\n")[0];
     const reason = `Review round ${task.review.rounds}: a person asked for changes: ${firstLine.length > 500 ? `${firstLine.slice(0, 499)}…` : firstLine}`;
@@ -1078,6 +1081,12 @@ export class TaskManager {
     );
     this.sendBack(task, { reason, failures: [], output: `What the reviewer asked for:\n${text}` }, "back to an agent");
     return task;
+  }
+
+  /** The deploy of a task's merge commit failed in the project's own command: counts against the acceptance check that passed its work. */
+  deployFailed(commit: string): void {
+    const task = [...this.tasks.values()].find((t) => t.state === "merged" && t.mainCommit === commit);
+    if (task && markOverturned(task.jobs, "deployFailed")) this.note(task, `the deploy of its merge @ ${commit.slice(0, 8)} failed`);
   }
 
   private async merge(task: TaskRecord): Promise<void> {

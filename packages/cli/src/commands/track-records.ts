@@ -60,7 +60,7 @@ function planLines(r: TrackRecords): string[] {
   const rows = r.rows.filter((x) => x.plans.planned || x.reviews.checks);
   if (!rows.length) return [];
   return table(
-    [r.by.toUpperCase(), "PLANS", "PROPOSED", "APPROVED", "REJECTED", "ASKED FIRST", "PLAN COST", "CHECKS", "MET", "UNMET", "UNDECIDED", "CHECK COST"],
+    [r.by.toUpperCase(), "PLANS", "PROPOSED", "APPROVED", "REJECTED", "ASKED FIRST", "PLAN COST", "CHECKS", "MET", "OVERTURNED", "UNMET", "UNDECIDED", "CHECK COST"],
     rows.map((x) => [
       x.key,
       String(x.plans.planned),
@@ -71,6 +71,8 @@ function planLines(r: TrackRecords): string[] {
       usd(x.plans.costUsd),
       String(x.reviews.checks),
       String(x.reviews.met),
+      // An older Hub doesn't say.
+      x.reviews.overturned === undefined ? "-" : String(x.reviews.overturned),
       String(x.reviews.unmet),
       String(x.reviews.undecided),
       usd(x.reviews.costUsd),
@@ -96,7 +98,15 @@ export function trackRecordLines(r: TrackRecords): string[] {
     );
   }
   if (plans.length) {
-    lines.push("", "Plans (as the Architect) and acceptance checks (as the reviewer):", "", ...plans, "", "ASKED FIRST: plans where it asked questions before proposing.");
+    lines.push(
+      "",
+      "Plans (as the Architect) and acceptance checks (as the reviewer):",
+      "",
+      ...plans,
+      "",
+      "ASKED FIRST: plans where it asked questions before proposing.",
+      "OVERTURNED: of its met verdicts, those proved wrong later (a person asked for changes or closed the pull request, or the deploy failed).",
+    );
   }
   return lines;
 }

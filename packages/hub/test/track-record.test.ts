@@ -164,7 +164,7 @@ describe("job records and the track-records report (Hub)", () => {
         const build = ctx.hub.tasks.get("greet")!.jobs![0];
         assert.deepEqual([build.acceptance, build.acceptanceModel, build.acceptanceCostUsd], ["met", "reviewer-model", 0.03]);
         const reviewer = (await call(ctx.port, "/api/track-records?by=model")).body.rows.find((r: { key: string }) => r.key === "reviewer-model");
-        assert.deepEqual(reviewer.reviews, { checks: 1, met: 1, unmet: 0, undecided: 0, costUsd: 0.03 });
+        assert.deepEqual(reviewer.reviews, { checks: 1, met: 1, overturned: 0, unmet: 0, undecided: 0, costUsd: 0.03 });
         builder.ws.close();
         tester.ws.close();
       },

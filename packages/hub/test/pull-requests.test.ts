@@ -3,7 +3,7 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, describe, it } from "node:test";
-import { autoMergeBlock, changesRequested, checkState, GitHubError, mergeBlock, parseDiff, parseGitHubRemote, parseGitHubRepo, pullRequestBody, reviewFeedback, startHub, summarizeChecks, type TaskRecord } from "@aso/hub";
+import { autoMergeBlock, changesRequested, lastBuild, checkState, GitHubError, mergeBlock, parseDiff, parseGitHubRemote, parseGitHubRepo, pullRequestBody, reviewFeedback, startHub, summarizeChecks, type TaskRecord } from "@aso/hub";
 import { createMessage } from "@aso/shared";
 import { git, gitAsync, makeTargetRepo, postTask, pushTaskBranch, tempDir, TOKEN, waitFor, withHub, worker, writeFiles, type HubContext, type TestClient } from "./helpers.ts";
 
@@ -240,7 +240,7 @@ function withGitHub(fn: (ctx: HubContext) => Promise<void>, opts: Record<string,
 async function implementAndPass(ctx: HubContext, dev: TestClient, qa: TestClient, taskId: string, files: Record<string, string>, summary?: string): Promise<string> {
   const assignment = await dev.next();
   assert.ok(assignment.type === "TASK_ASSIGNMENT" && assignment.payload.taskId === taskId, `assigned ${taskId}`);
-  dev.send(createMessage("STATUS_UPDATE", "dev", { state: "in_progress", taskId }));
+  dev.send(createMessage("STATUS_UPDATE", "dev", { state: "in_progress", taskId, slot: 1 }));
   const commit = await pushTaskBranch(ctx.gitUrl, taskId, files);
   dev.send(createMessage("STATUS_UPDATE", "dev", { state: "completed", taskId, commit, ...(summary ? { detail: summary } : {}) }));
   const run = await qa.next();
@@ -288,6 +288,13 @@ const reviewed = (ctx: HubContext, taskId: string) =>
     const t = ctx.hub.tasks.get(taskId);
     return t?.state === "awaiting_review" && t.review?.pr && t;
   }, 10_000, `${taskId} awaiting review with a PR`);
+
+/** As if the acceptance check had passed the task's last build (these tests run without one). */
+const passedAcceptance = (ctx: HubContext, taskId: string) => {
+  lastBuild(ctx.hub.tasks.get(taskId)!.jobs)!.acceptance = "met";
+};
+/** What overturned the acceptance check's verdict on the task's build that went to review, if anything. */
+const overturnedOf = (ctx: HubContext, taskId: string) => ctx.hub.tasks.get(taskId)!.jobs!.find((j) => j.acceptance === "met")?.overturned;
 
 describe("pull requests on GitHub", () => {
   it("opens a pull request after QA instead of merging, and merges into the Hub's main once merged on GitHub", () =>
@@ -340,10 +347,12 @@ describe("pull requests on GitHub", () => {
       await postTask(ctx.port, task("greet"));
       await implementAndPass(ctx, dev, qa, "greet", { "greeting.txt": "hello\n" });
       const number = (await reviewed(ctx, "greet")).review!.pr!.number;
+      passedAcceptance(ctx, "greet");
 
       github.review(number, "COMMENTED", "just a thought");
       await ctx.hub.projects.checkReviews("project");
       assert.equal(ctx.hub.tasks.get("greet")!.state, "awaiting_review", "a comment is not a decision");
+      assert.equal(overturnedOf(ctx, "greet"), undefined);
 
       github.review(number, "CHANGES_REQUESTED", "Say hello politely.", [{ path: "greeting.txt", line: 1, body: "Use 'Hello there'" }]);
       await ctx.hub.projects.checkReviews("project");
@@ -354,6 +363,7 @@ describe("pull requests on GitHub", () => {
       assert.match(back.payload.rework.output ?? "", /- greeting\.txt:1: Use 'Hello there'/);
       const t = ctx.hub.tasks.get("greet")!;
       assert.deepEqual([t.reworkRound, t.review!.rounds], [0, 1], "review rounds do not count towards the rework limit");
+      assert.equal(overturnedOf(ctx, "greet"), "changesRequested", "the acceptance check had passed what the person sent back");
 
       dev.send(createMessage("STATUS_UPDATE", "dev", { state: "in_progress", taskId: "greet" }));
       const fixed = await continueTaskBranch(ctx, "greet", { "greeting.txt": "Hello there\n" });
@@ -388,9 +398,11 @@ describe("pull requests on GitHub", () => {
       await postTask(ctx.port, task("one"));
       await implementAndPass(ctx, dev, qa, "one", { "one.txt": "1\n" });
       const first = (await reviewed(ctx, "one")).review!.pr!.number;
+      passedAcceptance(ctx, "one");
       github.pulls.get(first)!.state = "closed";
       await ctx.hub.projects.checkReviews("project");
       assert.equal(ctx.hub.tasks.get("one")!.state, "cancelled");
+      assert.equal(overturnedOf(ctx, "one"), "closed", "a person closed what the acceptance check passed");
 
       await postTask(ctx.port, task("two"));
       await implementAndPass(ctx, dev, qa, "two", { "two.txt": "2\n" });
@@ -398,6 +410,7 @@ describe("pull requests on GitHub", () => {
       const res = await fetch(`http://127.0.0.1:${ctx.port}/api/tasks/two/cancel`, { method: "POST", headers: { authorization: `Bearer ${TOKEN}` } });
       assert.equal(res.status, 200);
       await waitFor(() => github.pulls.get(second)!.state === "closed", 5000, "PR closed");
+      assert.equal(ctx.hub.tasks.get("two")!.jobs!.at(-1)!.overturned, undefined, "cancelled here: not a verdict on the work");
       assert.match(github.pulls.get(second)!.comments.at(-1)!, /cancelled from the ASO console/);
       dev.ws.close();
       qa.ws.close();
@@ -752,6 +765,7 @@ describe("reviewing in ASO", () => {
       await implementAndPass(ctx, dev, qa, "greet", { "greeting.txt": "hello\n" });
       const number = (await reviewed(ctx, "greet")).review!.pr!.number;
 
+      passedAcceptance(ctx, "greet");
       assert.equal((await api(ctx.port, "POST", "tasks/greet/request-changes", { message: "   " })).status, 400);
       assert.equal((await api(ctx.port, "POST", "tasks/greet/request-changes", {})).status, 400);
       const res = await api(ctx.port, "POST", "tasks/greet/request-changes", { message: "Say hello politely.\nAnd end with a full stop." });
@@ -764,6 +778,7 @@ describe("reviewing in ASO", () => {
       assert.equal(back.payload.rework.output, "What the reviewer asked for:\nSay hello politely.\nAnd end with a full stop.");
       const t = ctx.hub.tasks.get("greet")!;
       assert.deepEqual([t.reworkRound, t.review!.rounds], [0, 1], "a review round, not a rework round");
+      assert.equal(overturnedOf(ctx, "greet"), "changesRequested");
       await waitFor(() => github.pulls.get(number)!.comments.length > 0, 5000, "comment on the PR");
       assert.equal(
         github.pulls.get(number)!.comments.at(-1),

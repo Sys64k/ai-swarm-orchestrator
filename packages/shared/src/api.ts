@@ -101,6 +101,13 @@ export const JOB_RESULT_MEANING: Record<JobResult, string> = {
   error: "A QA run that couldn't run the tests at all",
 };
 
+/**
+ * Why work the acceptance check passed proved wrong later: a person asked for changes on its pull
+ * request, closed it without merging, or the deploy of its merge failed in the project's own command.
+ */
+export const OVERTURN_REASONS = ["changesRequested", "closed", "deployFailed"] as const;
+export type OverturnReason = (typeof OVERTURN_REASONS)[number];
+
 export const JobRecordSchema = z
   .object({
     job: z.enum(["implement", "test"]),
@@ -116,6 +123,10 @@ export const JobRecordSchema = z
     acceptance: z.enum(["met", "unmet", "undecided"]).optional().describe("A build's work in the acceptance check"),
     acceptanceModel: z.string().optional().describe("The model that judged it"),
     acceptanceCostUsd: z.number().optional().describe("What that check cost (estimated)"),
+    overturned: z
+      .enum(OVERTURN_REASONS)
+      .optional()
+      .describe("Work the acceptance check passed (met) that proved wrong later: a person asked for changes, closed its pull request, or the deploy of its merge failed"),
     calls: z.number().int().describe("Model calls its agent made"),
     costUsd: z.number().describe("Their estimated cost"),
   })
@@ -356,6 +367,7 @@ export const DeployStatusSchema = z.object({
   startedAt: Timestamp,
   finishedAt: Timestamp.optional(),
   error: z.string().optional(),
+  exitCode: z.number().int().optional().describe("When the command ran to its end and failed: its exit code"),
   output: z.string().optional().describe("The end of the command's output"),
 });
 
@@ -375,6 +387,7 @@ export const DeployNextSchema = z.object({ job: DeployJobSchema.nullable().descr
 export const DeployResultBodySchema = z.strictObject({
   ok: z.boolean(),
   error: z.string().max(2000).optional(),
+  exitCode: z.number().int().optional().describe("When the command ran to its end and failed: its exit code"),
   output: z.string().max(20_000),
 });
 export const DeployResultAcceptedSchema = z.object({ accepted: z.literal(true) });
@@ -815,6 +828,10 @@ export const TrackRecordRowSchema = z
       .object({
         checks: z.number().int().describe("Acceptance checks it made"),
         met: z.number().int(),
+        overturned: z
+          .number()
+          .int()
+          .describe("Of the met, those proved wrong later (a job record's overturned)"),
         unmet: z.number().int(),
         undecided: z.number().int(),
         costUsd: z.number().describe("Their estimated model cost"),
@@ -891,6 +908,7 @@ export const PublicStatsSchema = z
           plansApproved: z.number().int(),
           checks: z.number().int().describe("Acceptance checks it made as the reviewer"),
           checksMet: z.number().int(),
+          checksOverturned: z.number().int().optional().describe("Of its met checks, those proved wrong later (absent from Hubs before it)"),
           costUsd: z.number().optional().describe("Its builds, plans and checks (only when the Hub shares costs)"),
           costPerTaskUsd: z.number().optional().describe("What a finished task costs when it starts on this model, all in: every build on any model, acceptance checks, its share of its plan, and failed tasks (only when the Hub shares costs)"),
         }),
