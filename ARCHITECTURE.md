@@ -1820,3 +1820,14 @@ and `accepted` / `unmet` (the verdicts on that work, credited to the builder, `t
 `WorkerKeys.recordOutcome`. Counting as things happen is needed because node ids change on
 every reconnect. Machines on the Hub's own token have no key and no record. `describeRecord`
 (CLI) and `workerKeyRecord` (console) say it in words.
+
+### Docker cleanup (`cli/src/docker-cleanup.ts`)
+
+Each Hub update builds a new Hub image and each deploy a new project image, so build cache and
+old images pile up (about 40 GB in a busy day on agent007). With `--docker`, `start-hub` runs
+`DockerCleanup.maybeRun` after the updater's `afterStart` (the Hub's start or a confirmed
+update) and after each successful deploy, at most once an hour: `docker builder prune --filter
+until=24h` (younger cache stays, so the next build is fast), `docker image prune`, and `docker
+rmi` of all but the three newest tags of each repository named like a project
+(`oldProjectImages`; never an image a container uses, never another repository). Failures are
+logged; `--no-docker-cleanup` / `ASO_DOCKER_CLEANUP=0` turns it off.

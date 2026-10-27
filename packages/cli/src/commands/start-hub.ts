@@ -10,6 +10,7 @@ import { HUB_SERVICE, runsAsSystemdService } from "../service.js";
 import { sanitizeUrl } from "@aso/hub";
 import { HubUpdater, updatePaths } from "../self-update.js";
 import { armUpdateWatchdog, restartHubService } from "../systemd.js";
+import { DockerCleanup, projectIds } from "../docker-cleanup.js";
 
 const log = createLogger("cli");
 
@@ -29,6 +30,8 @@ export interface StartHubOptions {
   gatewayHost: string;
   /** The gateway's public wss:// address, for join commands. */
   gatewayUrl?: string;
+  /** Tidy Docker after updates and deploys (`--no-docker-cleanup` turns it off). */
+  dockerCleanup: boolean;
   docker: boolean;
   testCommand: string;
   qa: boolean;
@@ -171,13 +174,18 @@ async function startHubInDocker(root: string, opts: StartHubOptions, token: stri
   let deploys: DeployRunner | undefined;
   let discovery: DiscoveryResponder | undefined;
   const updater = hubUpdater(opts, token);
+  // Every update and deploy builds images; without this their cache and old versions fill the disk.
+  const cleanup = opts.dockerCleanup ? new DockerCleanup(() => projectIds(root)) : undefined;
   if (await waitForHealth(`http://127.0.0.1:${opts.port}/api/health`, exited)) {
     if (opts.architect) architect = launchArchitect(opts.port);
-    deploys = startDeployRunner({ hubUrl: `http://127.0.0.1:${opts.port}`, token, root });
+    deploys = startDeployRunner({ hubUrl: `http://127.0.0.1:${opts.port}`, token, root, onDeployed: () => void cleanup?.maybeRun("a deploy") });
     discovery = startDiscovery(opts, opts.port, token);
     // A version that never answers is rolled back by the watchdog the previous one armed. Checks
-    // for the next update start once this one confirmed.
-    void updater?.afterStart().then(() => updater.start());
+    // for the next update start once this one confirmed (and Docker is tidied after it).
+    void updater
+      ?.afterStart()
+      .then(() => cleanup?.maybeRun("the Hub's start or update"))
+      .then(() => updater.start());
   }
 
   onShutdown(async (signal) => {
