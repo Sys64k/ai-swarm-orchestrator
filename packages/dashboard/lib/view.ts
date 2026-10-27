@@ -1149,7 +1149,7 @@ export function plansSummary(p: TrackRecordRow["plans"]): string | undefined {
 export function reviewsSummary(r: TrackRecordRow["reviews"]): string | undefined {
   if (!r.checks) return undefined;
   const verdicts = counted([
-    [r.met, "met"],
+    [r.met, r.overturned ? `met (${r.overturned} overturned later)` : "met"],
     [r.unmet, "unmet"],
     [r.undecided, "undecided"],
   ]);

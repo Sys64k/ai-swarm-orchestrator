@@ -57,7 +57,17 @@ export interface DeployJob {
 export interface RunResult {
   ok: boolean;
   error?: string;
+  /** When the command ran to its end and failed: its exit code. Not set when it was stopped or couldn't start. */
+  exitCode?: number;
   output: string;
+}
+
+/**
+ * Whether a deploy failed in the project's own command (it ran and exited non-zero), rather than
+ * the Hub failing to start it or stopping it: only that says something about the work merged.
+ */
+export function failedInCommand(status: Pick<DeployStatus, "state" | "exitCode">): boolean {
+  return status.state === "failed" && status.exitCode !== undefined;
 }
 
 /** Runs a job's command in `cwd`, the export of its commit. */
@@ -193,7 +203,7 @@ export class Deployer {
     }
     const status: DeployStatus = { state: "running", commit, startedAt: new Date().toISOString() };
     this.last.set(project.id, status);
-    const finish = (result: Pick<DeployStatus, "state" | "error" | "output">) => {
+    const finish = (result: Pick<DeployStatus, "state" | "error" | "exitCode" | "output">) => {
       Object.assign(status, result, { finishedAt: new Date().toISOString() });
       log[result.state === "succeeded" ? "info" : "warn"](
         `${project.id} @ ${short(status.commit)}: deploy ${result.state}${result.error ? `: ${result.error}` : ""}`,
@@ -218,7 +228,11 @@ export class Deployer {
       this.lastDeployedCommit.set(project.id, status.commit);
       await this.deployedFile.write(Object.fromEntries(this.lastDeployedCommit));
     }
-    finish(result.ok ? { state: "succeeded", output: result.output } : { state: "failed", error: result.error, output: result.output });
+    finish(
+      result.ok
+        ? { state: "succeeded", output: result.output }
+        : { state: "failed", error: result.error, ...(result.exitCode !== undefined ? { exitCode: result.exitCode } : {}), output: result.output },
+    );
   }
 }
 
@@ -276,7 +290,8 @@ export function runCommand(
       clearTimeout(timer);
       if (timedOut) resolve({ ok: false, error: `timed out after ${opts.timeoutSec} s`, output });
       else if (code === 0) resolve({ ok: true, output });
-      else resolve({ ok: false, error: code === null ? `stopped by ${signal}` : `exited with code ${code}`, output });
+      else if (code === null) resolve({ ok: false, error: `stopped by ${signal}`, output });
+      else resolve({ ok: false, error: `exited with code ${code}`, exitCode: code, output });
     });
   });
 }

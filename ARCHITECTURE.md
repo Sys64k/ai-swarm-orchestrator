@@ -1907,6 +1907,7 @@ rebuilt from the records, so it covers every machine, desk and model.
 | `failed` | `failedBuildResult`: `modelRefused` (`switchingModel`), `outOfTurns` (the task's `outOfTurns` mark) or `failed` |
 | QA's verdict | the QA run ends `passed` / `qaFailed`, and the last build gets `qa` |
 | The acceptance check | the last build gets `acceptance`, `acceptanceModel` (by the name the Hub calls it, like a build's `model`) and `acceptanceCostUsd` |
+| A person asks for changes (GitHub or ASO) or closes the pull request; the deploy of its merge fails in the command (`deployFailed(commit)`, from the deploy's `exitCode`) | `markOverturned`: a `met` last build gets `overturned` (`changesRequested`, `closed`, `deployFailed`), once |
 | A drop (`requeue` of a started job), a cancel, a task failing | `dropped`, `cancelled`, `failed` |
 
 `trackRecords(tasks, query)` is pure: it groups ended jobs by model, host, desk, role or
@@ -1927,7 +1928,7 @@ set), cached a minute; `scripts/readme-stats.mjs` renders it into the README dai
 counts `plans` (a plan's `model` is the Architect's, recorded by `PlanManager.recordModel` when
 its conversation starts; plans have no role, so `role` leaves them out) and `reviews` (the
 builds' acceptance verdicts, by `acceptanceModel`; checks from before it was recorded count
-only by project). `GET /api/track-records`, `aso track-records` (`trackRecordLines`) and the console's
+only by project), with `overturned` counting met verdicts marked so later. `GET /api/track-records`, `aso track-records` (`trackRecordLines`) and the console's
 *Track records* page (`trackRecordLine`) serve it.
 
 ### A machine's own model (`llm/machine-models.ts`)

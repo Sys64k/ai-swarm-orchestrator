@@ -41,12 +41,12 @@ describe("aso track-records", () => {
   });
 
   it("adds a table of plans and acceptance checks, for models that planned or reviewed", () => {
-    const opus = { ...row("claude-opus-5-5", { finished: 0 }), builds: { ...row("x").builds, jobs: 0 }, tasks: { worked: 0, finished: 0, firstTry: 0, tookOver: 0 }, plans: { planned: 4, proposed: 3, approved: 2, rejected: 1, failed: 0, withQuestions: 2, costUsd: 1.6 }, reviews: { checks: 9, met: 7, unmet: 1, undecided: 1, costUsd: 0.45 } };
+    const opus = { ...row("claude-opus-5-5", { finished: 0 }), builds: { ...row("x").builds, jobs: 0 }, tasks: { worked: 0, finished: 0, firstTry: 0, tookOver: 0 }, plans: { planned: 4, proposed: 3, approved: 2, rejected: 1, failed: 0, withQuestions: 2, costUsd: 1.6 }, reviews: { checks: 9, met: 7, overturned: 2, unmet: 1, undecided: 1, costUsd: 0.45 } };
     const lines = trackRecordLines({ by: "model", since: null, rows: [row("gemini"), opus] });
     const work = lines.indexOf(lines.find((l) => l.startsWith("MODEL  "))!);
     assert.ok(!lines[work + 2]?.startsWith("claude-opus-5-5"), "a model that only planned and reviewed isn't in the work table");
     const plansHeader = lines.findIndex((l) => /^MODEL\s+PLANS\s+PROPOSED/.test(l));
     assert.ok(plansHeader > work);
-    assert.match(lines[plansHeader + 1], /^claude-opus-5-5\s+4\s+3\s+2\s+1\s+2\s+\$1\.60\s+9\s+7\s+1\s+1\s+\$0\.45$/);
+    assert.match(lines[plansHeader + 1], /^claude-opus-5-5\s+4\s+3\s+2\s+1\s+2\s+\$1\.60\s+9\s+7\s+2\s+1\s+1\s+\$0\.45$/, "2 of 7 met overturned");
   });
 });

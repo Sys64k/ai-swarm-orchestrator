@@ -46,7 +46,7 @@ function emptyRow(key: string): TrackRecordRow {
     costUsd: 0,
     started: { settled: 0, finished: 0, costUsd: 0 },
     plans: { planned: 0, proposed: 0, approved: 0, rejected: 0, failed: 0, withQuestions: 0, costUsd: 0 },
-    reviews: { checks: 0, met: 0, unmet: 0, undecided: 0, costUsd: 0 },
+    reviews: { checks: 0, met: 0, overturned: 0, unmet: 0, undecided: 0, costUsd: 0 },
   };
 }
 
@@ -105,6 +105,7 @@ function countReview(row: TrackRecordRow, build: JobRecord): void {
   if (build.acceptance === "met") r.met++;
   else if (build.acceptance === "unmet") r.unmet++;
   else r.undecided++;
+  if (build.overturned) r.overturned++;
   r.costUsd += build.acceptanceCostUsd ?? 0;
 }
 

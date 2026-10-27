@@ -187,7 +187,8 @@ aso desk reviewer default               # back to the Architect's model
 - **Defaults:** the Architect uses the Hub's `--model`; the reviewer uses the Architect's model.
 - **The reviewer runs on every task** (the Architect only on plans), so a cheaper reviewer
   saves the most. The [track records](#track-records-how-each-model-has-done) show what each
-  model approved, rejected or couldn't decide, so you can tell whether it holds up.
+  model approved, rejected or couldn't decide, and how many of its approvals were
+  [overturned](#when-a-reviewers-met-proves-wrong) later, so you can tell whether it holds up.
 - **A machine's own model can't take a role:** it serves only its own machine's jobs.
 - **In the console:** *Model providers* has a picker for each; `aso desks` and `GET /api/desks`
   show both. A change applies to the next plan or check. Escalation's ladder is separate: it
@@ -295,8 +296,26 @@ claude-opus-5-5          3         0        3          3       3/3        3/3   
   `costPerFinishedUsd`, its own builds per task it finished.
 - **Plans and acceptance checks** (by model and by project), in a second table: the plans each
   model made as the Architect (proposed, approved, rejected, how many asked questions first, and
-  their cost), and the acceptance checks it made as the reviewer (met, unmet, undecided, cost).
+  their cost), and the acceptance checks it made as the reviewer (met, overturned, unmet,
+  undecided, cost).
 - Also by **role** (frontend, backend, …) and **project**; `--role` and `--since` narrow it.
+
+#### When a reviewer's "met" proves wrong
+
+A reviewer that passes everything would look perfect by its met count alone, and cheap. So the
+Hub keeps track of work the acceptance check passed that didn't hold up, and counts it against
+the model that judged it (**overturned**):
+
+- **A person asked for changes** on the task's pull request, on GitHub or in ASO.
+- **A person closed the pull request** without merging. (Cancelling the task in ASO doesn't
+  count: that's not a verdict on the work.)
+- **The deploy of its merge failed** in the project's own command (it ran and exited non-zero).
+  A deploy the Hub couldn't start, or stopped (a restart, a timeout), doesn't count.
+
+Only a `met` verdict can be overturned, once, and only on projects with pull requests or a
+deploy. Compare reviewers on overturned out of met: few overturns at a low cost is the one to
+keep. Public stats share it per model (`checksOverturned`), and the README shows how much of each
+reviewer's met held up.
 - Jobs are recorded from when the Hub started recording them; older tasks don't count. The
   core console shows the same under *Track records*, and `GET /api/track-records` serves it.
 
@@ -308,7 +327,7 @@ anyone, on its own port and on the worker gateway (so through Tailscale Funnel t
 - **Always:** tasks merged, how many on the first try or taken over, plans proposed and
   approved.
 - **`models`:** the same per model, with QA and acceptance rates and the acceptance checks it
-  made; **`costs`:** model costs in total, per task, and per model (each model's cost per task is
+  made (met, and how many of those were overturned); **`costs`:** model costs in total, per task, and per model (each model's cost per task is
   the all-in one, for tasks that started on it). `totals` shares neither.
 - **Never** machines, desks, people, projects or task titles. A machine's own model is only
   "a machine's own model". `--public-stats-projects aso-ui` counts only those projects' work.

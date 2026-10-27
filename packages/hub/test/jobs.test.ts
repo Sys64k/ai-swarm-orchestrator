@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { addBuildUsage, endJob, failedBuildResult, JOBS_LIMIT, lastBuild, markAcceptance, markQa, markVerified, openJob, startJob } from "@aso/hub";
+import { addBuildUsage, endJob, failedBuildResult, JOBS_LIMIT, lastBuild, markAcceptance, markOverturned, markQa, markVerified, openJob, startJob } from "@aso/hub";
 
 const desk = (slot = 1, nodeId = "avalon-1") => ({ host: "avalon", slot, nodeId });
 
@@ -41,6 +41,19 @@ describe("a task's job records", () => {
     for (let i = 1; i <= JOBS_LIMIT; i++) jobs = startJob(jobs, "implement", desk(1, `n${i}`), i, "t");
     assert.equal(jobs.length, JOBS_LIMIT);
     assert.equal(jobs[0].nodeId, "n1");
+  });
+
+  it("marks a met verdict that proved wrong later, once, and nothing else", () => {
+    const jobs = startJob(undefined, "implement", desk(), 0, "t1");
+    endJob(jobs, "implement", "pushed", "t2");
+    markVerified(jobs, true);
+    markAcceptance(jobs, "unmet");
+    assert.equal(markOverturned(jobs, "changesRequested"), false, "an unmet verdict wasn't wrong to pass anything");
+    markAcceptance(jobs, "met");
+    assert.equal(markOverturned(jobs, "changesRequested"), true);
+    assert.equal(markOverturned(jobs, "deployFailed"), false, "the first reason stays");
+    assert.equal(jobs[0].overturned, "changesRequested");
+    assert.equal(markOverturned(undefined, "closed"), false, "a task without builds");
   });
 
   it("names how a failed build ended", () => {

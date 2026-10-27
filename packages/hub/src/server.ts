@@ -81,7 +81,7 @@ import { isOutdated, NodeError, NodeRegistry, type NodeEntry, type NodeTransport
 import type { RoutingPolicies } from "./routing.js";
 import { Notifier, TEST_NOTIFICATION } from "./push/notifier.js";
 import { WorkerWatch } from "./push/workers.js";
-import { Deployer, deployNotification, HostDeployQueue } from "./deploy.js";
+import { Deployer, deployNotification, failedInCommand, HostDeployQueue } from "./deploy.js";
 import { hubUpdateNotification } from "./hub-update.js";
 import { NodeOwners, nodeIdsInUse } from "./node-owners.js";
 import { WorkerKeys, type WorkerKeyView } from "./worker-keys.js";
@@ -340,7 +340,10 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   if (conversationDir) {
     deployer = new Deployer({
       dir: conversationDir,
-      onResult: (project, status) => void notifier?.send(deployNotification(project, status)),
+      onResult: (project, status) => {
+        if (failedInCommand(status)) projects.get(project)?.tasks.deployFailed(status.commit);
+        void notifier?.send(deployNotification(project, status));
+      },
       run: hostDeploys?.run,
     });
     await deployer.load();

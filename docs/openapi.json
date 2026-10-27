@@ -809,6 +809,12 @@
                   "error": {
                     "type": "string"
                   },
+                  "exitCode": {
+                    "description": "When the command ran to its end and failed: its exit code",
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
                   "output": {
                     "description": "The end of the command's output",
                     "type": "string"
@@ -1538,6 +1544,15 @@
                 "acceptanceCostUsd": {
                   "description": "What that check cost (estimated)",
                   "type": "number"
+                },
+                "overturned": {
+                  "description": "Work the acceptance check passed (met) that proved wrong later: a person asked for changes, closed its pull request, or the deploy of its merge failed",
+                  "type": "string",
+                  "enum": [
+                    "changesRequested",
+                    "closed",
+                    "deployFailed"
+                  ]
                 },
                 "calls": {
                   "type": "integer",
@@ -3488,6 +3503,12 @@
                       "minimum": -9007199254740991,
                       "maximum": 9007199254740991
                     },
+                    "overturned": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "Of the met, those proved wrong later (a job record's overturned)"
+                    },
                     "unmet": {
                       "type": "integer",
                       "minimum": -9007199254740991,
@@ -3506,6 +3527,7 @@
                   "required": [
                     "checks",
                     "met",
+                    "overturned",
                     "unmet",
                     "undecided",
                     "costUsd"
@@ -3685,6 +3707,12 @@
                   "description": "Acceptance checks it made as the reviewer"
                 },
                 "checksMet": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "checksOverturned": {
+                  "description": "Of its met checks, those proved wrong later (absent from Hubs before it)",
                   "type": "integer",
                   "minimum": -9007199254740991,
                   "maximum": 9007199254740991
@@ -4066,6 +4094,12 @@
           "error": {
             "type": "string",
             "maxLength": 2000
+          },
+          "exitCode": {
+            "description": "When the command ran to its end and failed: its exit code",
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
           },
           "output": {
             "type": "string",

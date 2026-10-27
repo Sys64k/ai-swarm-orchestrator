@@ -36,7 +36,12 @@ export function startDeployRunner(opts: { hubUrl: string; token: string; root: s
     const answer = await fetch(`${opts.hubUrl}/api/deploys/${encodeURIComponent(job.id)}/result`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ ok: result.ok, ...(result.error ? { error: result.error.slice(0, 2000) } : {}), output: result.output.slice(-20_000) }),
+      body: JSON.stringify({
+        ok: result.ok,
+        ...(result.error ? { error: result.error.slice(0, 2000) } : {}),
+        exitCode: result.exitCode, // JSON leaves it out when undefined
+        output: result.output.slice(-20_000),
+      }),
     });
     if (!answer.ok) log.warn(`the Hub did not take the result of ${job.project}'s deploy (${answer.status}); it may have restarted`);
     return true;

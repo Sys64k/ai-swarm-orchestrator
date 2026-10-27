@@ -117,10 +117,20 @@ describe("track records of plans and acceptance checks", () => {
     const rows = trackRecords(reviewed, plans, { by: "model" }).rows;
     const opus = rows.find((r) => r.key === "opus")!;
     assert.deepEqual(opus.plans, { planned: 4, proposed: 3, approved: 2, rejected: 1, failed: 0, withQuestions: 2, costUsd: 1.6 });
-    assert.deepEqual(opus.reviews, { checks: 2, met: 1, unmet: 1, undecided: 0, costUsd: 0.11 });
+    assert.deepEqual(opus.reviews, { checks: 2, met: 1, overturned: 0, unmet: 1, undecided: 0, costUsd: 0.11 });
     assert.equal(opus.builds.jobs, 0, "Opus only planned and reviewed here");
     assert.deepEqual(rows.find((r) => r.key === "gemini")!.plans, { planned: 1, proposed: 0, approved: 0, rejected: 0, failed: 1, withQuestions: 0, costUsd: 0.4 });
     assert.deepEqual(rows.find((r) => r.key === "haiku")!.reviews.undecided, 1, "a model can review its own kind's work");
+  });
+
+  it("counts a reviewer's met verdicts that proved wrong later", () => {
+    const overturned = [
+      task([build("gemini", "built", { acceptance: "met", acceptanceModel: "sol", overturned: "changesRequested" })]),
+      task([build("gemini", "built", { acceptance: "met", acceptanceModel: "sol" })]),
+      task([build("gemini", "built", { acceptance: "met", acceptanceModel: "sol", overturned: "deployFailed" })], { project: "blog" }),
+    ];
+    assert.deepEqual(trackRecords(overturned, [], { by: "model" }).rows.find((r) => r.key === "sol")!.reviews, { checks: 3, met: 3, overturned: 2, unmet: 0, undecided: 0, costUsd: 0 });
+    assert.equal(trackRecords(overturned, [], { by: "project" }).rows.find((r) => r.key === "blog")!.reviews.overturned, 1);
   });
 
   it("counts them per project too, and never per machine, desk or role", () => {
