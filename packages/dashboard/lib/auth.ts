@@ -5,7 +5,12 @@
  * doesn't get the token.
  */
 
-export const SESSION_COOKIE = "aso_session";
+/**
+ * Its own name: browsers keep cookies per host, not per port, so the console and aso-ui on one
+ * machine (e.g. :443 and :8443) share a cookie jar. aso-ui's is `aso_session`; with the same
+ * name, signing in to one signed the other out.
+ */
+export const SESSION_COOKIE = "aso_console_session";
 /** Browsers cap cookie lifetime at 400 days. */
 export const SESSION_MAX_AGE_SEC = 400 * 24 * 60 * 60;
 

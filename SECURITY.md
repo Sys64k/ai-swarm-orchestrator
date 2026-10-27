@@ -118,6 +118,9 @@ the Hub (`aso hub-service restart`). `aso llm-check` confirms the Anthropic key.
 - **Session cookies hold no token.** Both consoles sign their session cookie (HMAC-SHA256 with a
   key derived from the Hub token), so copying a browser's cookies gives access to that console
   until it expires or the token is rotated, never the token itself.
+- **Each console has its own cookie** (`aso_console_session` for the core console, `aso_session`
+  for aso-ui): a browser shares cookies between ports of one host, so on one machine with both
+  (`:443` and `:8443`) they would otherwise sign each other out.
 - **Session cookies follow HTTPS.** aso-ui marks its cookie Secure over HTTPS (also behind a
   proxy, via `X-Forwarded-Proto`), not over plain HTTP, so LAN sign-in works.
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { browserOrigin, isPublicPath, isSameOrigin, isSignedIn, isValidSession, mismatchHint, newSessionValue, SESSION_MAX_AGE_SEC, normalizeToken, redirectTo, safeNext, signInLink, cleanSignInCode } from "../lib/auth.ts";
+import { browserOrigin, isPublicPath, isSameOrigin, isSignedIn, isValidSession, mismatchHint, newSessionValue, SESSION_COOKIE, SESSION_MAX_AGE_SEC, normalizeToken, redirectTo, safeNext, signInLink, cleanSignInCode } from "../lib/auth.ts";
 import { errorMessage, hubPath } from "../lib/hub-routes.ts";
 
 describe("console sign-in", () => {
@@ -166,5 +166,13 @@ describe("sign-in codes from chat apps", () => {
     for (const raw of [code, `${code}**`, `${code}).`, ` ${code}\n`, `${code}>`, `${code}%2A%2A`]) assert.equal(cleanSignInCode(raw), code, raw);
     assert.equal(cleanSignInCode(undefined), "");
     assert.equal(cleanSignInCode("**abc"), "", "junk in front is not guessed at");
+  });
+});
+
+describe("the console's session cookie", () => {
+  it("has a name of its own, so aso-ui on another port of the same host doesn't sign it out", () => {
+    // Cookies are kept per host, not per port: aso-ui's `aso_session` and this one share a jar.
+    assert.equal(SESSION_COOKIE, "aso_console_session");
+    assert.notEqual(SESSION_COOKIE, "aso_session");
   });
 });
