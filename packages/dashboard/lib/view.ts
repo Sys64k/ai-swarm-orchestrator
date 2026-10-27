@@ -1,6 +1,6 @@
 import type {
   Desks,
-  Models, Price, Provider, ProviderPreset, CheckState, DeployStatus, DiffFile, HubNode, HubUpdate, WorkerKey, Plan, PlannedTask, Project, ReviewChecks, Task, TaskDiff, TaskState, TranscriptEntry } from "./types.ts";
+  Models, Price, Provider, ProviderPreset, CheckState, DeployStatus, DiffFile, HubNode, HubUpdate, WorkerKey, Plan, PlannedTask, Project, ReviewChecks, Task, TaskDiff, TaskState, TrackRecordKey, TrackRecordRow, TranscriptEntry } from "./types.ts";
 
 import { PROVIDER_ID } from "./hub-routes.ts";
 
@@ -971,4 +971,57 @@ export function workerKeyRecord(track: WorkerKey["track"]): string {
 export function workerAccess(node: Pick<HubNode, "workerKey">): string | undefined {
   if (node.workerKey === undefined) return undefined; // an older Hub
   return node.workerKey ? `key "${node.workerKey.name}"` : "the Hub's main token";
+}
+
+/** The groupings the track records page offers, with their labels. */
+export const TRACK_RECORD_GROUPS: ReadonlyArray<{ by: TrackRecordKey; label: string }> = [
+  { by: "model", label: "Models" },
+  { by: "host", label: "Machines" },
+  { by: "desk", label: "Desks" },
+  { by: "role", label: "Roles" },
+  { by: "project", label: "Projects" },
+];
+
+export function trackRecordGroupLabel(by: TrackRecordKey): string {
+  return TRACK_RECORD_GROUPS.find((g) => g.by === by)?.label ?? by;
+}
+
+/** The Hub path for the track records page. */
+export function trackRecordsPath(by: TrackRecordKey, project?: string): string {
+  const q = new URLSearchParams({ by });
+  if (project) q.set("project", project);
+  return `track-records?${q.toString()}`;
+}
+
+/** "label 3 of 4", or nothing when there were none. */
+export function goodOfTotal(label: string, good: number, bad: number): string | undefined {
+  return good + bad ? `${label} ${good} of ${good + bad}` : undefined;
+}
+
+/** The tasks part: "2 tasks finished (1 first try, 1 taken over)", "no task finished yet", or nothing without builds. */
+export function finishedSummary(tasks: TrackRecordRow["tasks"], builds: number): string | undefined {
+  if (!tasks.finished) return builds ? "no task finished yet" : undefined;
+  const how = [tasks.firstTry ? `${tasks.firstTry} first try` : "", tasks.tookOver ? `${tasks.tookOver} taken over` : ""].filter(Boolean).join(", ");
+  return `${plural(tasks.finished, "task")} finished (${how || "after rework"})`;
+}
+
+/**
+ * A track record in a line: "2 tasks finished (1 first try, 1 taken over) · 5 builds · QA passed
+ * 3 of 4 · acceptance met 2 of 2 · 2 out of turns · 1 failed · $0.50, $0.25 a task".
+ */
+export function trackRecordLine(r: TrackRecordRow): string {
+  const b = r.builds;
+  const q = r.qaRuns;
+  const parts = [
+    finishedSummary(r.tasks, b.jobs),
+    b.jobs ? plural(b.jobs, "build") : undefined,
+    goodOfTotal("QA passed", b.qaPassed, b.qaFailed),
+    goodOfTotal("acceptance met", b.accepted, b.unmet),
+    b.outOfTurns ? `${b.outOfTurns} out of turns` : undefined,
+    b.failed ? `${b.failed} failed` : undefined,
+    b.dropped ? `${b.dropped} dropped` : undefined,
+    q.runs ? `${plural(q.runs, "QA run")}${q.passed + q.failed ? ` (${q.passed} of ${q.passed + q.failed} passed)` : ""}` : undefined,
+    r.costUsd || b.jobs ? `${formatUsd(r.costUsd)}${r.costPerFinishedUsd !== undefined ? `, ${formatUsd(r.costPerFinishedUsd)} a task` : ""}` : undefined,
+  ];
+  return parts.filter(Boolean).join(" · ");
 }

@@ -1873,6 +1873,33 @@ and `accepted` / `unmet` (the verdicts on that work, credited to the builder, `t
 every reconnect. Machines on the Hub's own token have no key and no record. `describeRecord`
 (CLI) and `workerKeyRecord` (console) say it in words.
 
+### Job records and the track-records report (`jobs.ts`, `job-report.ts`)
+
+Each task keeps `jobs` (`JobRecord` in shared, at most `JOBS_LIMIT` = 200): one per build and
+per QA run. The bookkeeping is pure functions over that list in `jobs.ts` (`startJob`,
+`endJob`, `markVerified`, `markQa`, `markAcceptance`, `addBuildUsage`); `TaskManager` calls
+them where the per-key outcomes above are counted. Unlike that per-key tally, the report is
+rebuilt from the records, so it covers every machine, desk and model.
+
+| When | What happens to the job |
+|---|---|
+| A worker reports `in_progress` with its desk (`slot`) | `startJob`: a new record with its round, machine, desk and node. The same desk reporting again (a reconnect) doesn't start another; one left open on another desk ends `dropped` |
+| Its agent's conversation starts | `recordJobModel`: the model it runs on |
+| Each of its agent's model calls | `recordAgentUsage`: the job's `calls` and `costUsd`, and the task's (the acceptance check's cost goes only to the task, through `recordLlmUsage`) |
+| `completed` | `pushed`; `verify` turns it into `built` or `unverified` |
+| `failed` | `failedBuildResult`: `modelRefused` (`switchingModel`), `outOfTurns` (the task's `outOfTurns` mark) or `failed` |
+| QA's verdict | the QA run ends `passed` / `qaFailed`, and the last build gets `qa` |
+| The acceptance check | the last build gets `acceptance` |
+| A drop (`requeue` of a started job), a cancel, a task failing | `dropped`, `cancelled`, `failed` |
+
+`trackRecords(tasks, query)` is pure: it groups ended jobs by model, host, desk, role or
+project and counts builds by result (`COUNTED_BUILD_RESULTS`), the verdicts on them, QA runs
+(not by model: tests run without one) and cost. A merged task counts as finished for whoever
+made its last `built` build (`finishedBy`): `firstTry` when that was its only build, `tookOver`
+when an earlier build was someone else's. That is judged over all the task's builds, so
+`since` can't make a reworked task look like a first try. `GET /api/track-records`, `aso track-records` (`trackRecordLines`) and the console's
+*Track records* page (`trackRecordLine`) serve it.
+
 ### A machine's own model (`llm/machine-models.ts`)
 
 A worker started with `--local-model <url>` lists that server's models (`GET /models`) before

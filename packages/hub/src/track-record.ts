@@ -3,7 +3,8 @@ import { JOB_OUTCOMES, type JobOutcome } from "@aso/shared";
 /**
  * A machine's track record: what became of the jobs its worker key's machine took. Counted as
  * things happen (node ids change on every reconnect, so history can't be rebuilt from tasks).
- * It shows how far to trust a machine you don't control; nothing acts on it by itself.
+ * It shows how far to trust a machine you don't control; nothing acts on it by itself. For how
+ * every model, machine and desk has done, rebuilt from the tasks' job records, see `job-report.ts`.
  */
 export { JOB_OUTCOMES, type JobOutcome };
 export type TrackRecord = Partial<Record<JobOutcome, number>>;

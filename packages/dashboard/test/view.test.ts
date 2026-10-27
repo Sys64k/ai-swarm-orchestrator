@@ -3,6 +3,8 @@ import { hubPath } from "../lib/hub-routes.ts";
 import { describe, it } from "node:test";
 import {
   formatUsd,
+  trackRecordLine,
+  trackRecordsPath,
   homeView,
   isLive,
   isQuiet,
@@ -639,5 +641,34 @@ describe("worker machines and their keys", () => {
     assert.equal(workerAccess({ workerKey: { id: "k", name: "avalon" } }), 'key "avalon"');
     assert.equal(workerAccess({ workerKey: null }), "the Hub's main token");
     assert.equal(workerAccess({}), undefined, "an older Hub");
+  });
+});
+
+describe("track records page", () => {
+  const row = {
+    key: "models/gemini-3.8-flash",
+    builds: { jobs: 5, built: 4, unverified: 0, failed: 1, outOfTurns: 2, modelRefused: 0, dropped: 0, cancelled: 0, qaPassed: 3, qaFailed: 1, accepted: 2, unmet: 0 },
+    qaRuns: { runs: 0, passed: 0, failed: 0, errors: 0, dropped: 0 },
+    tasks: { worked: 3, finished: 2, firstTry: 1, tookOver: 1 },
+    costUsd: 0.5,
+    costPerFinishedUsd: 0.25,
+  };
+
+  it("says a record in a line", () => {
+    assert.equal(
+      trackRecordLine(row),
+      "2 tasks finished (1 first try, 1 taken over) · 5 builds · QA passed 3 of 4 · acceptance met 2 of 2 · 2 out of turns · 1 failed · $0.50, $0.25 a task",
+    );
+    const tester = { ...row, key: "canfod", builds: { ...row.builds, jobs: 0, built: 0, failed: 0, outOfTurns: 0, qaPassed: 0, qaFailed: 0, accepted: 0 }, qaRuns: { runs: 4, passed: 3, failed: 1, errors: 0, dropped: 0 }, tasks: { worked: 0, finished: 0, firstTry: 0, tookOver: 0 }, costUsd: 0, costPerFinishedUsd: undefined };
+    assert.equal(trackRecordLine(tester), "4 QA runs (3 of 4 passed)");
+    assert.equal(trackRecordLine({ ...tester, qaRuns: { runs: 1, passed: 0, failed: 0, errors: 1, dropped: 0 } }), "1 QA run", "no verdict, no rate");
+    assert.match(trackRecordLine({ ...row, tasks: { ...row.tasks, finished: 0, firstTry: 0, tookOver: 0 }, costPerFinishedUsd: undefined }), /^no task finished yet · 5 builds .* · \$0\.50$/);
+  });
+
+  it("asks the Hub for the grouping and project chosen, through an allowed route", () => {
+    assert.equal(trackRecordsPath("model"), "track-records?by=model");
+    assert.equal(trackRecordsPath("host", "aso-ui"), "track-records?by=host&project=aso-ui");
+    assert.equal(hubPath("GET", ["track-records"]), "/api/track-records");
+    assert.equal(hubPath("POST", ["track-records"]), undefined);
   });
 });

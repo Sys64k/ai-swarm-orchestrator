@@ -26,6 +26,7 @@ const RULES: ReadonlyArray<{ method: "GET" | "POST"; pattern: RegExp }> = [
   { method: "GET", pattern: /^llm$/ },
   { method: "GET", pattern: /^models$/ },
   { method: "GET", pattern: /^desks$/ },
+  { method: "GET", pattern: /^track-records$/ },
   // Model providers: added with a key (it passes through, and is never returned), and prices.
   { method: "GET", pattern: /^providers$/ },
   { method: "POST", pattern: /^providers$/ },

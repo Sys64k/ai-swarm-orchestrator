@@ -83,6 +83,8 @@ export function Home() {
             <Link href="/machines">Worker machines and their keys</Link>
             <span aria-hidden> · </span>
             <Link href="/providers">Model providers</Link>
+            <span aria-hidden> · </span>
+            <Link href="/track-records">Track records</Link>
           </p>
         </Section>
 

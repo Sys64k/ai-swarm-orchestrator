@@ -14,6 +14,8 @@ import {
   type CrewMemberSchema,
   type ReviewChecks,
   type Acceptance,
+  type JobRecord,
+  type JobResult,
 } from "@aso/shared";
 import { mergeBlock } from "./git/pull-requests.js";
 import type { z } from "zod";
@@ -26,6 +28,7 @@ import type { Screenshots, ScreenshotSet } from "./screenshots.js";
 import { acceptanceCounts, unmetReason, type AcceptanceChecker } from "./llm/acceptance.js";
 import type { WorkerJob } from "./worker-scope.js";
 import type { JobOutcome } from "./track-record.js";
+import { addBuildUsage, endJob, failedBuildResult, markAcceptance, markQa, markVerified, openJob, startJob, type JobKind } from "./jobs.js";
 
 const log = createLogger("tasks");
 
@@ -77,6 +80,8 @@ export interface TaskRecord {
   screenshotTargets?: ScreenshotTarget[];
   /** The agents (machine and desk) that implemented and tested it, oldest first. */
   crew?: CrewMember[];
+  /** Every job on it, oldest first, with what came of it: for track records (`job-report.ts`). */
+  jobs?: JobRecord[];
   /** The pull request a person reviews, with pull requests on. */
   review?: ReviewInfo;
   qaSetup?: string[][];
@@ -218,6 +223,7 @@ export interface TaskManagerOptions {
 }
 
 const HISTORY_LIMIT = 50;
+const now = () => new Date().toISOString();
 const ACTIVE: ReadonlySet<TaskState> = new Set(["assigned", "in_progress", "testing"]);
 
 /** Task queue and pipeline: routes work to workers, verifies pushes, runs QA, merges. */
@@ -284,6 +290,7 @@ export class TaskManager {
     if (task.state === "merging") throw new TaskError(`task ${taskId} is being merged right now`, "conflict");
     this.notApproving(taskId);
     for (const nodeId of [task.nodeId, task.qaNodeId]) if (nodeId) this.registry.release(nodeId, taskId);
+    this.endJobs(task, "cancelled");
     // Its pull request may be open from an earlier round too (a rework underway).
     this.closeReview(task, "The task was cancelled from the ASO console.");
     task.state = "cancelled";
@@ -545,6 +552,13 @@ export class TaskManager {
     );
   }
 
+  /** A model call by the task's building agent: the task's usage, and its build's. */
+  recordAgentUsage(taskId: string, usage: LlmUsage): void {
+    addBuildUsage(this.tasks.get(taskId)?.jobs, usage.costUsd);
+    this.recordLlmUsage(taskId, usage);
+  }
+
+  /** A model call made for the task (by its agent, or the acceptance check). */
   recordLlmUsage(taskId: string, usage: LlmUsage): void {
     const task = this.tasks.get(taskId);
     if (!task) return;
@@ -640,6 +654,7 @@ export class TaskManager {
       case "waiting_dependency":
       case "waiting_llm": {
         const agent = update.slot ? this.joinCrew(task, "implement", nodeId, update.slot) : undefined;
+        if (update.slot) this.startJob(task, "implement", nodeId, update.slot);
         if (task.state !== "in_progress") this.note(task, `started on ${nodeId}${agent ? ` (${agent})` : ""}`);
         if (update.conflicts?.length && !task.conflicts) {
           task.conflicts = update.conflicts;
@@ -651,6 +666,7 @@ export class TaskManager {
       }
       case "completed":
         this.registry.release(nodeId, task.spec.taskId);
+        endJob(task.jobs, "implement", "pushed", now());
         task.conflicts = undefined;
         task.state = "verifying";
         task.commit = update.commit;
@@ -663,6 +679,7 @@ export class TaskManager {
         return undefined;
       case "failed":
         this.registry.release(nodeId, task.spec.taskId);
+        endJob(task.jobs, "implement", failedBuildResult(task), now());
         if (task.switchingModel) {
           task.switchingModel = undefined;
           task.nodeId = undefined;
@@ -696,12 +713,16 @@ export class TaskManager {
         return undefined;
       case "in_progress":
         task.qaStarted = true;
-        if (update.slot) this.joinCrew(task, "test", nodeId, update.slot);
+        if (update.slot) {
+          this.joinCrew(task, "test", nodeId, update.slot);
+          this.startJob(task, "test", nodeId, update.slot);
+        }
         this.touch(task);
         return undefined;
       case "failed":
         // The QA node could not run the tests at all (checkout, missing toolchain...).
         this.registry.release(nodeId, task.spec.taskId);
+        endJob(task.jobs, "test", "error", now());
         task.qaNodeId = undefined;
         this.note(task, `QA node ${nodeId} could not run tests: ${update.detail ?? "no detail"}`);
         if (task.qaAttempts >= this.maxQaAttempts) this.fail(task, `QA could not run after ${task.qaAttempts} attempts`);
@@ -722,6 +743,8 @@ export class TaskManager {
     if (feedback.commit !== task.commit) return `QA result is for ${feedback.commit.slice(0, 8)}, expected ${task.commit!.slice(0, 8)}`;
 
     this.registry.release(nodeId, task.spec.taskId);
+    endJob(task.jobs, "test", feedback.outcome === "pass" ? "passed" : "qaFailed", now());
+    markQa(task.jobs, feedback.outcome === "pass");
     task.qaNodeId = undefined;
     this.onOutcome?.(nodeId, "tested");
     if (task.nodeId) this.onOutcome?.(task.nodeId, feedback.outcome === "pass" ? "qaPassed" : "qaFailed");
@@ -809,6 +832,7 @@ export class TaskManager {
     task.drops++;
     const owner = jobOwner(task);
     if (owner && started) this.onOutcome?.(owner, "dropped");
+    if (started) endJob(task.jobs, task.state === "testing" ? "test" : "implement", "dropped", now());
     if (task.drops >= this.maxDrops) return this.fail(task, `${reason}; gave up after ${task.drops} node losses`);
     if (task.state === "testing") {
       task.qaNodeId = undefined;
@@ -818,6 +842,28 @@ export class TaskManager {
       task.state = "pending";
     }
     this.note(task, `requeued: ${reason}`);
+  }
+
+  /** The model the task's building agent runs on now (its open build's). */
+  recordJobModel(taskId: string, model: string): void {
+    const build = openJob(this.tasks.get(taskId)?.jobs, "implement");
+    if (build && build.model !== model) {
+      build.model = model;
+      this.onChange?.();
+    }
+  }
+
+  /** A job begins on a worker's desk (the Hub's own nodes, like the Architect, do no jobs). */
+  private startJob(task: TaskRecord, kind: JobKind, nodeId: string, slot: number): void {
+    const reg = this.registry.get(nodeId)?.registration;
+    if (reg?.nodeKind !== "worker") return;
+    task.jobs = startJob(task.jobs, kind, { host: reg.hardware.hostname, slot, nodeId }, task.reworkRound + (task.review?.rounds ?? 0), now());
+  }
+
+  /** End whatever job is under way (the task is cancelled, or fails). */
+  private endJobs(task: TaskRecord, result: JobResult): void {
+    endJob(task.jobs, "implement", result, now());
+    endJob(task.jobs, "test", result, now());
   }
 
   /**
@@ -842,6 +888,7 @@ export class TaskManager {
       problem = `verification error: ${(err as Error).message}`;
     }
     if (task.state !== "verifying") return;
+    markVerified(task.jobs, !problem);
     if (problem) return this.rework(task, `push verification failed: ${problem}`);
     // A build counts once its push checks out (the builder is still task.nodeId).
     if (task.nodeId) this.onOutcome?.(task.nodeId, "built");
@@ -879,6 +926,7 @@ export class TaskManager {
     if (task.state !== "verifying" || task.commit !== commit || task.acceptance?.result !== "checking") return;
     if (verdict.usage) this.recordLlmUsage(task.spec.taskId, verdict.usage);
     const at = new Date().toISOString();
+    markAcceptance(task.jobs, verdict.result);
     if (verdict.result === "undecided") {
       task.acceptance = { result: "undecided", commit, at, reason: verdict.reason, ...(verdict.model ? { model: verdict.model } : {}) };
       this.note(task, `acceptance check undecided (${verdict.reason}); going on`);
@@ -1077,6 +1125,7 @@ export class TaskManager {
   }
 
   private fail(task: TaskRecord, reason: string): void {
+    this.endJobs(task, "failed");
     task.state = "failed";
     task.detail = reason;
     this.note(task, `failed: ${reason}`);

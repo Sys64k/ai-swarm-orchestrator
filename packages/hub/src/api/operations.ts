@@ -14,6 +14,7 @@ import {
   PriceSchema,
   PricesSchema,
   DesksSchema,
+  TrackRecordsSchema,
   ModelsSchema,
   DiscoveryProofSchema,
   DeployNextSchema,
@@ -111,6 +112,7 @@ export const ANSWER_SCHEMAS = {
   DiscoveryProof: DiscoveryProofSchema,
   Models: ModelsSchema,
   Desks: DesksSchema,
+  TrackRecords: TrackRecordsSchema,
   Provider: ProviderViewSchema,
   ProviderRemoved: ProviderRemovedSchema,
   Price: PriceSchema,
@@ -215,6 +217,16 @@ const PLANS: ApiOperation[] = [
 
 const TASKS: ApiOperation[] = [
   { method: "get", path: "/api/tasks", tag: "Tasks", summary: "All tasks", query: projectQuery, responses: { 200: ok(["Task"]) } },
+  {
+    method: "get", path: "/api/track-records", tag: "Tasks", summary: "How models, machines, desks, roles or projects have done with their jobs",
+    query: {
+      by: "Group by model (default), host, desk, role or project",
+      project: "Only this project's tasks",
+      role: "Only tasks of this role",
+      since: "Only jobs started at or after this time (ISO 8601)",
+    },
+    responses: { 200: ok("TrackRecords"), 400: err("A bad grouping or time") },
+  },
   { method: "get", path: "/api/tasks/{id}", tag: "Tasks", summary: "One task", responses: { 200: ok("Task"), ...notFound("task") } },
   {
     method: "post", path: "/api/tasks", tag: "Tasks", summary: "Queue a task directly (without a plan)", body: "CreateTask",

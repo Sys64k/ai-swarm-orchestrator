@@ -80,6 +80,46 @@ export const CrewMemberSchema = z
   })
   .describe("An agent that worked on a task: one per implementation round or QA run on a new desk");
 
+/** How a build can end (`pushed`: its work is still being checked), and how a QA run can; a job of either can also end `failed`, `dropped` or `cancelled`. */
+export const BUILD_RESULTS = ["pushed", "built", "unverified", "failed", "outOfTurns", "modelRefused", "dropped", "cancelled"] as const;
+export const QA_RUN_RESULTS = ["passed", "qaFailed", "error"] as const;
+export const JOB_RESULTS = [...BUILD_RESULTS, ...QA_RUN_RESULTS] as const;
+export type JobResult = (typeof JOB_RESULTS)[number];
+/** The ended builds' results a track record counts (every build result but `pushed`). */
+export const COUNTED_BUILD_RESULTS = ["built", "unverified", "failed", "outOfTurns", "modelRefused", "dropped", "cancelled"] as const satisfies ReadonlyArray<JobResult>;
+export const JOB_RESULT_MEANING: Record<JobResult, string> = {
+  pushed: "A build that pushed its work; it is being checked",
+  built: "A build whose pushed work checked out",
+  unverified: "A build whose push failed the Hub's checks",
+  failed: "A job whose agent gave up, or whose task failed during it",
+  outOfTurns: "A build whose agent used all its turns (its work was kept for the next round)",
+  modelRefused: "A build whose model's API refused the request (another model took over)",
+  dropped: "A job whose machine went offline before it ended",
+  cancelled: "A job ended because its task was cancelled",
+  passed: "A QA run whose tests passed",
+  qaFailed: "A QA run whose tests failed",
+  error: "A QA run that couldn't run the tests at all",
+};
+
+export const JobRecordSchema = z
+  .object({
+    job: z.enum(["implement", "test"]),
+    round: z.number().int().describe("The task's rework round the job ran in (0: the first try)"),
+    host: z.string().describe("The worker machine's hostname"),
+    slot: z.number().int().describe("The job slot (desk) on it, from 1"),
+    nodeId: z.string().describe("The worker's node id at the time"),
+    model: z.string().optional().describe("The model its agent ran on (builds only)"),
+    startedAt: Timestamp,
+    endedAt: Timestamp.optional().describe("Absent while it runs"),
+    result: z.enum(JOB_RESULTS).optional().describe("How it ended"),
+    qa: z.enum(["passed", "failed"]).optional().describe("A build's work in QA"),
+    acceptance: z.enum(["met", "unmet", "undecided"]).optional().describe("A build's work in the acceptance check"),
+    calls: z.number().int().describe("Model calls its agent made"),
+    costUsd: z.number().describe("Their estimated cost"),
+  })
+  .describe("One job on a task: a build (implementation or rework round) or a QA run, with what came of it");
+export type JobRecord = z.infer<typeof JobRecordSchema>;
+
 export const ApiErrorSchema = z.object({ error: z.string() }).describe("Why the request failed");
 
 // ---------------------------------------------------------------------------
@@ -478,6 +518,7 @@ export const TaskSchema = z.object({
     .describe("The views the developer agent asked QA to screenshot at its last finish (passed to the screenshots script)"),
   conflicts: z.array(z.string()).optional().describe("Files left with merge conflict markers for the agent to resolve this round"),
   crew: z.array(CrewMemberSchema).optional().describe("The agents that implemented and tested it, oldest first"),
+  jobs: z.array(JobRecordSchema).optional().describe("Every job on it, oldest first: kept since track records began, for them"),
   review: ReviewSchema.optional(),
   llm: UsageSchema,
   filesTouched: z.array(z.string()),
@@ -662,3 +703,63 @@ export const DesksSchema = z.object({
 });
 export type Desks = z.infer<typeof DesksSchema>;
 export const SignedInSchema = z.object({ ok: z.literal(true) });
+
+export const TRACK_RECORD_KEYS = ["model", "host", "desk", "role", "project"] as const;
+export type TrackRecordKey = (typeof TRACK_RECORD_KEYS)[number];
+
+export const TrackRecordQuerySchema = z.object({
+  by: z.enum(TRACK_RECORD_KEYS).default("model").describe("Group by the model, the machine, the desk (machine #slot), the task's role, or its project"),
+  project: z.string().optional().describe("Only this project's tasks"),
+  role: z.string().optional().describe("Only tasks of this role"),
+  since: z
+    .string()
+    .refine((v) => !Number.isNaN(Date.parse(v)), "a date or time, e.g. 2026-10-01 or 2026-10-01T12:00:00Z")
+    .optional()
+    .describe("Only jobs started at or after this date or time"),
+});
+export type TrackRecordQuery = z.infer<typeof TrackRecordQuerySchema>;
+
+export const TrackRecordRowSchema = z
+  .object({
+    key: z.string().describe("The model, machine, desk, role or project"),
+    builds: z
+      .object({
+        jobs: z.number().int().describe("Builds that ended"),
+        built: z.number().int().describe(JOB_RESULT_MEANING.built),
+        unverified: z.number().int().describe(JOB_RESULT_MEANING.unverified),
+        failed: z.number().int().describe(JOB_RESULT_MEANING.failed),
+        outOfTurns: z.number().int().describe(JOB_RESULT_MEANING.outOfTurns),
+        modelRefused: z.number().int().describe(JOB_RESULT_MEANING.modelRefused),
+        dropped: z.number().int().describe(JOB_RESULT_MEANING.dropped),
+        cancelled: z.number().int().describe(JOB_RESULT_MEANING.cancelled),
+        qaPassed: z.number().int().describe("Builds whose work passed QA"),
+        qaFailed: z.number().int().describe("Builds whose work failed QA"),
+        accepted: z.number().int().describe("Builds whose work met every acceptance criterion"),
+        unmet: z.number().int().describe("Builds whose work had criteria unmet"),
+      })
+      .describe("Its builds and what came of them"),
+    qaRuns: z
+      .object({ runs: z.number().int(), passed: z.number().int(), failed: z.number().int(), errors: z.number().int(), dropped: z.number().int() })
+      .describe("Its QA runs on others' work (not counted by model: tests run without one)"),
+    tasks: z
+      .object({
+        worked: z.number().int().describe("Tasks it built on"),
+        finished: z.number().int().describe("Merged tasks whose last build was its"),
+        firstTry: z.number().int().describe("Of those, merged after a single build"),
+        tookOver: z.number().int().describe("Of those, tasks someone else built on before it"),
+      })
+      .describe("The tasks it worked on"),
+    costUsd: z.number().describe("Estimated model cost of its builds"),
+    costPerFinishedUsd: z.number().optional().describe("costUsd divided by tasks finished"),
+  })
+  .describe("One model's, machine's, desk's, role's or project's track record");
+export type TrackRecordRow = z.infer<typeof TrackRecordRowSchema>;
+
+export const TrackRecordsSchema = z
+  .object({
+    by: z.enum(TRACK_RECORD_KEYS),
+    since: z.string().nullable().describe("When the oldest job counted started (jobs are recorded from when track records began)"),
+    rows: z.array(TrackRecordRowSchema).describe("Most tasks finished first"),
+  })
+  .describe("Track records: how models, machines, desks, roles or projects have done with their jobs");
+export type TrackRecords = z.infer<typeof TrackRecordsSchema>;

@@ -233,6 +233,8 @@ worker-keys` and the console's machines page show it, e.g. `12 builds · QA pass
 acceptance met 8 of 9 · 1 failed`. It's counted as jobs end, from when the Hub started keeping
 it; it informs you, and changes nothing by itself. It reflects the models that worked on that
 machine's jobs too, since the machine runs the tools and the Hub's models do the thinking.
+For every machine (keys or not), each model and each desk, see
+[track records](models.md#track-records-how-each-model-has-done).
 ### Keep a worker running (systemd)
 
 On Linux, install the worker as a systemd user service instead of starting it by hand. It
