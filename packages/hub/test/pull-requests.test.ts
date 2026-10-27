@@ -403,6 +403,53 @@ describe("pull requests on GitHub", () => {
       qa.ws.close();
     }));
 
+  /** Take `id` to review, send it back, and have the rework's agent give up: failed, with its pull request open. */
+  async function failWithOpenPr(ctx: HubContext, dev: TestClient, qa: TestClient, id: string): Promise<number> {
+    await postTask(ctx.port, task(id));
+    await implementAndPass(ctx, dev, qa, id, { [`${id}.txt`]: "1\n" });
+    const pr = (await reviewed(ctx, id)).review!.pr!.number;
+    const changes = await fetch(`http://127.0.0.1:${ctx.port}/api/tasks/${id}/request-changes`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+      body: JSON.stringify({ message: "please redo" }),
+    });
+    assert.equal(changes.status, 200);
+    // The rework goes to whichever machine is free.
+    await waitFor(() => ctx.hub.tasks.get(id)?.state === "assigned");
+    const nodeId = ctx.hub.tasks.get(id)!.nodeId!;
+    const owner = nodeId === "dev" ? dev : qa;
+    assert.equal((await owner.next()).type, "TASK_ASSIGNMENT");
+    owner.send(createMessage("STATUS_UPDATE", nodeId, { state: "failed", taskId: id, detail: "gave up" }));
+    await waitFor(() => ctx.hub.tasks.get(id)?.state === "failed");
+    assert.equal(github.pulls.get(pr)!.state, "open", "still open after the failure");
+    return pr;
+  }
+
+  it("closes a failed task's pull request when a newer task supersedes it", () =>
+    withGitHub(async (ctx) => {
+      const dev = await worker(ctx.port, "dev");
+      const qa = await worker(ctx.port, "qa");
+      const pr = await failWithOpenPr(ctx, dev, qa, "one");
+      ctx.hub.projects.list()[0].tasks.supersede("one", "three");
+      await waitFor(() => github.pulls.get(pr)!.state === "closed", 5000, "PR closed when superseded");
+      assert.match(github.pulls.get(pr)!.comments.at(-1)!, /Superseded by three, which does this task's job/);
+      dev.ws.close();
+      qa.ws.close();
+    }));
+
+  it("closes a failed task's pull request when it's retried, since the retry opens its own", () =>
+    withGitHub(async (ctx) => {
+      const dev = await worker(ctx.port, "dev");
+      const qa = await worker(ctx.port, "qa");
+      const pr = await failWithOpenPr(ctx, dev, qa, "one");
+      const res = await fetch(`http://127.0.0.1:${ctx.port}/api/tasks/one/retry`, { method: "POST", headers: { authorization: `Bearer ${TOKEN}` } });
+      assert.equal(res.status, 200);
+      await waitFor(() => github.pulls.get(pr)!.state === "closed", 5000, "PR closed on retry");
+      assert.match(github.pulls.get(pr)!.comments.at(-1)!, /being retried; its next attempt opens a new pull request/);
+      dev.ws.close();
+      qa.ws.close();
+    }));
+
   it("reworks a pull request that conflicts with main, after bringing in GitHub's main", () =>
     withGitHub(async (ctx) => {
       const dev = await worker(ctx.port, "dev");

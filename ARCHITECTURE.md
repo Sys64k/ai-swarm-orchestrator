@@ -1644,9 +1644,12 @@ different from it:
 The task id is `sync-hub-api-<hash of project id and description>`, so each project gets one
 task per version of the description, and a cancelled one is not queued again. Queuing a new one
 supersedes the project's older sync tasks (`TaskManager.supersede`): an unfinished one is
-cancelled, and any one not merged gets `supersededBy`, so `retry` refuses it (409) and the
+cancelled, a failed one's still-open pull request is closed, and any one not merged gets
+`supersededBy`, so `retry` refuses it (409) and the
 console shows what replaced it instead of a Retry button. An older sync would only bring back
-an older description. Failures are
+an older description. Generally, a task's pull request is closed when the task is cancelled
+(also during a rework), retried after failing (the retry opens a new one) or superseded, so
+none is left open behind it. Failures are
 logged, never thrown; `close()` waits for the run, so it never outlives the Hub.
 
 ### Deploys and the Hub's update outside aso-ui
