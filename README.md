@@ -22,7 +22,14 @@ Git. LLM access goes only through the Hub, so workers never hold API credentials
 ```
 
 <!-- swarm-stats:start -->
-**Built by its own swarm.** The swarm's track record appears here once it has finished its first tasks.
+**Built by its own swarm.** Since 27 Oct 2026, the swarm has merged **5 tasks**, **20%** on the first try (2 finished by a stronger model taking over), at about **$1.29 per task** in model costs.
+
+| Model | Tasks finished | First try | QA passed | Acceptance met | Plans approved | Checks it made: met | Cost per task |
+|---|---|---|---|---|---|---|---|
+| `gemini-3.8-flash` | 3 | 33% | 5 of 5 | 3 of 5 | – | – | $1.43 |
+| `claude-opus-5-5` | 2 | 0% | 3 of 3 | 3 of 3 | – | 3 of 5 | $0.92 |
+
+<sub>From the Hub's public track record, updated daily (last: 27 Oct 2026). See [Track records](docs/models.md#track-records-how-each-model-has-done).</sub>
 <!-- swarm-stats:end -->
 
 ## What it does
