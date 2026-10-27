@@ -60,6 +60,7 @@ describe("syncing a project's copy of the Hub API description", () => {
         assert.equal(task.diffBase, git(ctx.repoDir, "rev-parse", branch), "its acceptance check starts after the Hub's own commit");
         assert.equal(task.autoMerge, true, "its pull request may merge without a person once everything passes");
         assert.match(task.spec.acceptanceCriteria[0], /isn't changed in the diff \(the Hub's own first commit on this branch put the new copy there, and the diff starts after it\)/);
+        assert.ok(!task.spec.acceptanceCriteria.some((c) => /typecheck|lint|tests pass/.test(c)), "nothing the diff can't show: QA and CI check that it passes");
 
         // The diff the acceptance check reads: an agent's work on top, without the Hub's copy.
         const work = tempDir();

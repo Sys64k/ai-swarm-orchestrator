@@ -95,7 +95,10 @@ export function syncTaskSpec(taskId: string, version: string, changes: ApiChange
     acceptanceCriteria: [
       `${API_COPY_PATH} isn't changed in the diff (the Hub's own first commit on this branch put the new copy there, and the diff starts after it)`,
       `Files generated from ${API_COPY_PATH} are regenerated from it`,
-      "The project's typecheck, lint and tests pass",
+      // Only what the diff can show: the acceptance check reads the diff, so "typecheck and lint
+      // pass" would stay unclear and keep the sync from merging itself. QA runs the tests, and
+      // auto-merge waits for the project's CI (typecheck, lint, the rest).
+      "Nothing beyond what the API change requires is changed: no new features, no unrelated edits",
     ],
     files: [API_COPY_PATH],
     dependsOn: [],

@@ -347,7 +347,10 @@ version whose API differs from that copy, it queues a task in the project:
   or changed), and to regenerate what the project derives from the copy and fix what no longer
   compiles or passes, such as fixtures that miss new required fields. Features on new endpoints
   are left for a plan.
-- **It goes through QA and the acceptance check like any task, and usually merges itself:**
+- **It goes through QA and the acceptance check like any task, and usually merges itself.**
+  Its criteria ask only what the diff shows (the copy untouched, the generated files
+  regenerated, nothing else changed); that it compiles and passes is QA's and CI's to say.
+  **Merging itself:**
   its pull request is merged without a person once the acceptance check found **every**
   criterion met (none unclear) and the project's CI **passes** on the commit QA tested. Anything
   less (an unclear criterion, CI failing or missing, a conflict, changes you asked for) waits for
