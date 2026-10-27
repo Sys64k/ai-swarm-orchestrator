@@ -1192,14 +1192,6 @@ export function trialLength(sharePercent: number, needed: number): string {
 }
 const TRIAL_BUDGET_USD = { min: 0.5, max: 1000 };
 
-/** A trial in a sentence: "openai/gpt-6.1-terra takes 10% of the tasks: 3 of 10 settled so far, $0.80 of $5 spent." */
-export function trialSummary(role: ChallengerRole, t: Trial): string {
-  const work = role === "desks" ? "tasks" : "acceptance checks";
-  const unit = role === "desks" ? "settled" : "met verdicts";
-  const head = t.ended ? `${t.model} took ${Math.round(t.share * 100)}% of the ${work} until it had ${t.ended === "enough data" ? "enough data" : "spent its budget"}` : `${t.model} takes ${Math.round(t.share * 100)}% of the ${work}`;
-  return `${head}: ${t.samples} of ${t.needed} ${unit} so far, ${formatUsd(t.spentUsd)} of ${formatUsd(t.budgetUsd)} spent.`;
-}
-
 /** What `POST /api/models/challengers` takes to start a trial, or why it can't start. */
 export function trialBody(role: ChallengerRole, model: string, sharePercent: string, budgetUsd: string): { body: { role: ChallengerRole; model: string; share: number; budgetUsd: number } } | { error: string } {
   if (!model) return { error: "Choose a model to try." };
@@ -1210,4 +1202,19 @@ export function trialBody(role: ChallengerRole, model: string, sharePercent: str
     return { error: `The budget must be from $${TRIAL_BUDGET_USD.min.toFixed(2)} to $${TRIAL_BUDGET_USD.max}.` };
   }
   return { body: { role, model, share: share / 100, budgetUsd: budget } };
+}
+
+/** A pool member in a line: "openai/gpt-6.1-terra: 30%, 3 of 10 samples, $4.20 of $20.00". */
+export function poolMemberLine(t: Trial): string {
+  return `${t.model}: ${Math.round(t.share * 100)}%, ${t.samples} of ${t.needed} samples, ${formatUsd(t.spentUsd)} of ${formatUsd(t.budgetUsd)}${t.ended ? `, ${t.ended}` : ""}`;
+}
+
+/** The candidates typed in (comma-separated) as `POST /api/tuning` takes them; "" clears the queue. */
+export function candidatesBody(role: ChallengerRole, typed: string): { role: ChallengerRole; candidates: string[] } {
+  return { role, candidates: typed.split(",").map((m) => m.trim()).filter(Boolean) };
+}
+
+/** The latest `n` tuning changes, newest first. */
+export function recentChanges<T>(log: readonly T[], n: number): T[] {
+  return log.slice(-n).reverse();
 }

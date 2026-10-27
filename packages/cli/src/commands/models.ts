@@ -60,13 +60,24 @@ export function trialLines(d: Pick<Desks, "challengers">): string[] {
 }
 
 /** `aso challenger <desks|reviewer> <model|none>`: put a model on trial for a share of the work, or end the trial. */
-export async function challengerCommand(role: string, model: string, opts: { hub: string; share?: number; budget?: number }): Promise<void> {
+export async function challengerCommand(role: string, model: string, opts: { hub: string; share?: number; budget?: number; end?: boolean }): Promise<void> {
   const known = CHALLENGER_ROLES.find((r) => r === role);
   if (!known) throw new Error(`a trial is for the ${CHALLENGER_ROLES.join(" or the ")}, not "${role}"`);
-  const body = { role: known, model, ...(opts.share !== undefined ? { share: opts.share / 100 } : {}), ...(opts.budget !== undefined ? { budgetUsd: opts.budget } : {}) };
+  const body = {
+    role: known,
+    model,
+    ...(opts.share !== undefined ? { share: opts.share / 100 } : {}),
+    ...(opts.budget !== undefined ? { budgetUsd: opts.budget } : {}),
+    ...(opts.end ? { end: true } : {}),
+  };
   const desks = await api<Desks>(hubHttpBase(opts.hub), "/api/models/challengers", { method: "POST", body: JSON.stringify(body) });
   const t = desks.challengers?.[known];
   console.log(t ? trialLine(known, t) : `No model on trial for the ${known}.`);
+}
+
+/** Models typed comma-separated ("a, b,"), as a list. */
+export function parseModelList(typed: string): string[] {
+  return typed.split(",").map((m) => m.trim()).filter(Boolean);
 }
 
 /** `aso escalation [models]`: show where failing tasks move, or change the ladder and the tries before it. */
@@ -77,7 +88,7 @@ export async function escalationCommand(models: string | undefined, opts: { hub:
     return;
   }
   const body = {
-    ...(models !== undefined ? { ladder: models === "default" ? "default" : models.split(",").map((m) => m.trim()).filter(Boolean) } : {}),
+    ...(models !== undefined ? { ladder: models === "default" ? "default" : parseModelList(models) } : {}),
     ...(opts.juniorTries !== undefined ? { juniorTries: opts.juniorTries } : {}),
   };
   const desks = await api<Desks>(base, "/api/models/escalation", { method: "POST", body: JSON.stringify(body) });

@@ -12,7 +12,9 @@ import {
   suggestionNote,
   trialBody,
   trialLength,
-  trialSummary,
+  poolMemberLine,
+  candidatesBody,
+  recentChanges,
   suggestionRequests,
   suggestionTitle,
   roleModelChoices,
@@ -820,12 +822,14 @@ describe("model suggestions", () => {
 describe("trials", () => {
   const trial = { model: "openai/gpt-6.1-terra", share: 0.1, budgetUsd: 5, since: "x", samples: 3, needed: 10, spentUsd: 0.8 };
 
-  it("says how a trial stands", () => {
-    assert.equal(trialSummary("desks", trial), "openai/gpt-6.1-terra takes 10% of the tasks: 3 of 10 settled so far, $0.80 of $5.00 spent.");
-    assert.equal(
-      trialSummary("reviewer", { ...trial, samples: 10, ended: "enough data" }),
-      "openai/gpt-6.1-terra took 10% of the acceptance checks until it had enough data: 10 of 10 met verdicts so far, $0.80 of $5.00 spent.",
-    );
+  it("says how a pool member stands, and reads the queue typed in", () => {
+    assert.equal(poolMemberLine(trial), "openai/gpt-6.1-terra: 10%, 3 of 10 samples, $0.80 of $5.00");
+    assert.equal(poolMemberLine({ ...trial, samples: 10, ended: "enough data" }), "openai/gpt-6.1-terra: 10%, 10 of 10 samples, $0.80 of $5.00, enough data");
+    assert.deepEqual(candidatesBody("desks", " openai/gpt-6.1-terra, anthropic/claude-sonnet-5-5 ,"), { role: "desks", candidates: ["openai/gpt-6.1-terra", "anthropic/claude-sonnet-5-5"] });
+    assert.deepEqual(candidatesBody("reviewer", ""), { role: "reviewer", candidates: [] }, "empty clears the queue");
+    assert.equal(hubPath("GET", ["tuning"]), "/api/tuning");
+    assert.deepEqual(recentChanges([1, 2, 3, 4], 2), [4, 3], "newest first");
+    assert.equal(hubPath("POST", ["tuning"]), "/api/tuning");
   });
 
   it("builds the request to start one, and says why it can't", () => {

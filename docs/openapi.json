@@ -3126,7 +3126,7 @@
             "description": "What was changed while the Hub runs (absent: the Hub's start settings)"
           },
           "challengers": {
-            "description": "Models on trial in a role, taking a share of its work (aso challenger)",
+            "description": "The first model on trial in each role (GET /api/tuning shows all of them)",
             "type": "object",
             "properties": {
               "desks": {
@@ -3839,6 +3839,234 @@
           "since",
           "suggestions",
           "notes"
+        ],
+        "additionalProperties": false
+      },
+      "TuningView": {
+        "type": "object",
+        "properties": {
+          "roles": {
+            "type": "object",
+            "properties": {
+              "desks": {
+                "type": "object",
+                "properties": {
+                  "base": {
+                    "description": "The role's own model: it takes the work the members don't",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "baseShare": {
+                    "type": "number",
+                    "description": "The share of the work the base takes"
+                  },
+                  "members": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "model": {
+                          "type": "string"
+                        },
+                        "share": {
+                          "type": "number"
+                        },
+                        "budgetUsd": {
+                          "type": "number"
+                        },
+                        "since": {
+                          "type": "string",
+                          "description": "When the trial began"
+                        },
+                        "samples": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991,
+                          "description": "Settled tasks it started (desks) or met verdicts it gave (reviewer) since then"
+                        },
+                        "needed": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991,
+                          "description": "How many suggestions need to compare it"
+                        },
+                        "spentUsd": {
+                          "type": "number"
+                        },
+                        "ended": {
+                          "description": "Why it takes no more tasks",
+                          "type": "string",
+                          "enum": [
+                            "enough data",
+                            "budget spent"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "model",
+                        "share",
+                        "budgetUsd",
+                        "since",
+                        "samples",
+                        "needed",
+                        "spentUsd"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "description": "Models with a share of the work, and how each stands"
+                  },
+                  "auto": {
+                    "type": "boolean",
+                    "description": "Whether the Hub tries the candidates and moves the shares by itself"
+                  },
+                  "candidates": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Models queued to try, in order"
+                  }
+                },
+                "required": [
+                  "base",
+                  "baseShare",
+                  "members",
+                  "auto",
+                  "candidates"
+                ],
+                "additionalProperties": false
+              },
+              "reviewer": {
+                "type": "object",
+                "properties": {
+                  "base": {
+                    "description": "The role's own model: it takes the work the members don't",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "baseShare": {
+                    "type": "number",
+                    "description": "The share of the work the base takes"
+                  },
+                  "members": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "model": {
+                          "type": "string"
+                        },
+                        "share": {
+                          "type": "number"
+                        },
+                        "budgetUsd": {
+                          "type": "number"
+                        },
+                        "since": {
+                          "type": "string",
+                          "description": "When the trial began"
+                        },
+                        "samples": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991,
+                          "description": "Settled tasks it started (desks) or met verdicts it gave (reviewer) since then"
+                        },
+                        "needed": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991,
+                          "description": "How many suggestions need to compare it"
+                        },
+                        "spentUsd": {
+                          "type": "number"
+                        },
+                        "ended": {
+                          "description": "Why it takes no more tasks",
+                          "type": "string",
+                          "enum": [
+                            "enough data",
+                            "budget spent"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "model",
+                        "share",
+                        "budgetUsd",
+                        "since",
+                        "samples",
+                        "needed",
+                        "spentUsd"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "description": "Models with a share of the work, and how each stands"
+                  },
+                  "auto": {
+                    "type": "boolean",
+                    "description": "Whether the Hub tries the candidates and moves the shares by itself"
+                  },
+                  "candidates": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Models queued to try, in order"
+                  }
+                },
+                "required": [
+                  "base",
+                  "baseShare",
+                  "members",
+                  "auto",
+                  "candidates"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "desks",
+              "reviewer"
+            ],
+            "additionalProperties": false
+          },
+          "log": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "at": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "desks",
+                    "reviewer"
+                  ]
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "at",
+                "role",
+                "text"
+              ],
+              "additionalProperties": false
+            },
+            "description": "What auto-tuning changed, oldest first"
+          }
+        },
+        "required": [
+          "roles",
+          "log"
         ],
         "additionalProperties": false
       },
@@ -4682,11 +4910,46 @@
             "type": "number",
             "minimum": 0.5,
             "maximum": 1000
+          },
+          "end": {
+            "description": "End this model's trial (model none ends every one in the role)",
+            "type": "boolean",
+            "const": true
           }
         },
         "required": [
           "role",
           "model"
+        ],
+        "additionalProperties": false
+      },
+      "Tuning": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "desks",
+              "reviewer"
+            ]
+          },
+          "auto": {
+            "description": "Let the Hub try the queued candidates and move the shares by itself",
+            "type": "boolean"
+          },
+          "candidates": {
+            "description": "Models to try, in order (from GET /api/models); [] clears the queue",
+            "maxItems": 5,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        },
+        "required": [
+          "role"
         ],
         "additionalProperties": false
       },
@@ -7402,6 +7665,72 @@
           },
           "400": {
             "description": "Not a model the Hub can use for it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          }
+        }
+      }
+    },
+    "/api/tuning": {
+      "get": {
+        "operationId": "getTuning",
+        "tags": [
+          "Workers"
+        ],
+        "summary": "Each role's model pool (its own model, the members and their shares), auto-tuning, and what it changed",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TuningView"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postTuning",
+        "tags": [
+          "Workers"
+        ],
+        "summary": "Turn a role's auto-tuning on or off, or set the models it tries next",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Tuning"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TuningView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not a model the Hub can try, or an invalid body",
             "content": {
               "application/json": {
                 "schema": {

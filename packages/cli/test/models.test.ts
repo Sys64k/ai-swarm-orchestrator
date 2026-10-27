@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { deskLines, escalationLines, modelLines, ownModelLines, trialLines } from "../dist/commands/models.js";
+import { deskLines, escalationLines, modelLines, ownModelLines, parseModelList, trialLines } from "../dist/commands/models.js";
 
 describe("aso models and aso desks", () => {
   it("lists the models by provider, each by the spec a desk is put on", () => {
@@ -84,5 +84,10 @@ describe("aso models and aso desks", () => {
       "On trial for the reviewer: openai/gpt-6.1-sol, 10% of the work, 10 of 10 met verdicts, $0.80 of $5 (ended: enough data)",
     ]);
     assert.deepEqual(trialLines({}), [], "an older Hub, or no trials");
+  });
+
+  it("reads a comma-separated list of models", () => {
+    assert.deepEqual(parseModelList(" openai/gpt-6.1-terra, anthropic/claude-sonnet-5-5 ,"), ["openai/gpt-6.1-terra", "anthropic/claude-sonnet-5-5"]);
+    assert.deepEqual(parseModelList(""), []);
   });
 });
