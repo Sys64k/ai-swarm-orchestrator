@@ -312,8 +312,14 @@ version whose API differs from that copy, it queues a task in the project:
   or changed), and to regenerate what the project derives from the copy and fix what no longer
   compiles or passes, such as fixtures that miss new required fields. Features on new endpoints
   are left for a plan.
-- **It goes through QA and review like any task**, so the update reaches the project as a pull
-  request to merge.
+- **It goes through QA and the acceptance check like any task, and usually merges itself:**
+  its pull request is merged without a person once the acceptance check found **every**
+  criterion met (none unclear) and the project's CI **passes** on the commit QA tested. Anything
+  less (an unclear criterion, CI failing or missing, a conflict, changes you asked for) waits for
+  your review as usual. The task's history says when it merged by itself.
+  `--no-auto-merge-syncs` (`ASO_AUTO_MERGE_SYNCS=0`) leaves every one to you.
+- **A newer sync replaces an older one:** an unfinished older sync is cancelled, its pull
+  request closed, and it can't be retried (the console shows it as superseded).
 - **Once per project and version of the API:** a task you cancel isn't queued again, and a copy
   already synced on GitHub (by hand, say) is noticed after catching up.
 - Only a `docs/openapi.json` titled "ASO Hub API" counts; other API descriptions are left alone.

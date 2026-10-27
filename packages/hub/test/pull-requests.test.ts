@@ -3,7 +3,7 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, describe, it } from "node:test";
-import { changesRequested, checkState, GitHubError, mergeBlock, parseDiff, parseGitHubRemote, parseGitHubRepo, pullRequestBody, reviewFeedback, startHub, summarizeChecks, type TaskRecord } from "@aso/hub";
+import { autoMergeBlock, changesRequested, checkState, GitHubError, mergeBlock, parseDiff, parseGitHubRemote, parseGitHubRepo, pullRequestBody, reviewFeedback, startHub, summarizeChecks, type TaskRecord } from "@aso/hub";
 import { createMessage } from "@aso/shared";
 import { git, gitAsync, makeTargetRepo, postTask, pushTaskBranch, tempDir, TOKEN, waitFor, withHub, worker, writeFiles, type HubContext, type TestClient } from "./helpers.ts";
 
@@ -449,6 +449,66 @@ describe("pull requests on GitHub", () => {
       dev.ws.close();
       qa.ws.close();
     }));
+
+  it("says why an auto-merge task still needs a person", () => {
+    const met = { result: "met" as const, commit: "c1", at: "t", criteria: [{ criterion: "a", verdict: "met" as const, reason: "r" }] };
+    const checks = (over: Record<string, unknown> = {}) => ({ pr: { number: 1, url: "u" }, headSha: "c1", mergeable: true, overall: "passing", checks: [], ...over }) as never;
+    const task = { autoMerge: true, commit: "c1", acceptance: met };
+    assert.equal(autoMergeBlock(task, checks()), undefined);
+    assert.equal(autoMergeBlock({ ...task, autoMerge: undefined }, checks()), "it isn't an auto-merge task");
+    assert.equal(autoMergeBlock({ ...task, acceptance: undefined }, checks()), "not every acceptance criterion is met", "no acceptance check: a person decides");
+    assert.equal(autoMergeBlock({ ...task, acceptance: { ...met, criteria: [] } }, checks()), "not every acceptance criterion is met");
+    assert.equal(autoMergeBlock(task, checks({ headSha: "c2" })), "its pull request has a commit QA didn't test");
+    assert.equal(autoMergeBlock(task, checks({ mergeable: false })), "it conflicts with main");
+    assert.equal(autoMergeBlock(task, checks({ overall: "none" })), "its CI checks are none", "no CI: a person decides");
+    assert.equal(autoMergeBlock(task, checks({ overall: "failing" })), "its CI checks are failing");
+  });
+
+  it("merges an auto-merge task (an API sync) without a person only once every criterion is met and CI passes", async () => {
+    let verdict: "met" | "unclear" = "unclear";
+    const acceptance = {
+      check: async (t: { spec: { acceptanceCriteria: string[] } }) => ({
+        result: "met" as const,
+        criteria: t.spec.acceptanceCriteria.map((criterion) => ({ criterion, verdict, reason: "r" })),
+        summary: "",
+        model: "claude-opus-5-5",
+      }),
+    };
+    await withGitHub(
+      async (ctx) => {
+        const dev = await worker(ctx.port, "dev");
+        const qa = await worker(ctx.port, "qa");
+        const run = async (id: string) => {
+          await postTask(ctx.port, { ...task(id), acceptanceCriteria: ["the copy is synced", "tests pass"] });
+          ctx.hub.tasks.get(id)!.autoMerge = true; // as the Hub marks its API syncs
+          await implementAndPass(ctx, dev, qa, id, { [`${id}.txt`]: "1\n" });
+          return reviewed(ctx, id);
+        };
+
+        // One criterion unclear: it waits for a person, even with CI passing.
+        await run("unclear");
+        addCheck("unclear", "test", "success");
+        await ctx.hub.projects.checkReviews("project");
+        assert.equal(ctx.hub.tasks.get("unclear")!.state, "awaiting_review");
+
+        verdict = "met";
+        await run("synced");
+        addCheck("synced", "test", null); // CI still running: it waits
+        await ctx.hub.projects.checkReviews("project");
+        assert.equal(ctx.hub.tasks.get("synced")!.state, "awaiting_review");
+        addCheck("synced", "lint", "success");
+        github.checkRuns.set(git(github.originDir, "rev-parse", "refs/heads/task/synced"), [{ name: "test", status: "completed", conclusion: "success", html_url: "x" }]);
+        await ctx.hub.projects.checkReviews("project");
+        await waitFor(() => ctx.hub.tasks.get("synced")?.state === "merged", 5000, "merged without a person").catch((e) => {
+          throw new Error(`${e.message}: ${JSON.stringify(ctx.hub.tasks.get("synced")!.history.slice(-4).map((h) => h.event))} acceptance=${JSON.stringify(ctx.hub.tasks.get("synced")!.acceptance?.criteria?.map((c) => c.verdict))}`);
+        });
+        assert.ok(ctx.hub.tasks.get("synced")!.history.some((h) => /merging without a person: an API sync with every acceptance criterion met and CI passing/.test(h.event)));
+        dev.ws.close();
+        qa.ws.close();
+      },
+      { acceptanceCheck: acceptance },
+    );
+  });
 
   it("reworks a pull request that conflicts with main, after bringing in GitHub's main", () =>
     withGitHub(async (ctx) => {

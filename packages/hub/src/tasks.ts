@@ -86,6 +86,8 @@ export interface TaskRecord {
   budgetBaseUsd?: number;
   /** Times a person retried this task. */
   retries?: number;
+  /** Its pull request may be merged without a person once it qualifies (see autoMergeReady): set on API syncs. */
+  autoMerge?: boolean;
   /** A newer task that does this one's job (a newer sync of the API copy): this one is never run again. */
   supersededBy?: string;
   /** A commit the Hub itself made on the branch first (a sync task's new API copy): the acceptance check judges only what came after it. */
@@ -423,7 +425,7 @@ export class TaskManager {
   }
 
   /** Validate and queue a task. `input` is untrusted (API body / Architect output). */
-  submit(input: unknown, origin: { planId?: string; idHint?: string; diffBase?: string } = {}): TaskRecord {
+  submit(input: unknown, origin: { planId?: string; idHint?: string; diffBase?: string; autoMerge?: boolean } = {}): TaskRecord {
     const parsed = TaskSpecInputSchema.safeParse(input);
     if (!parsed.success) {
       throw new TaskError(parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "), "invalid");
@@ -449,6 +451,7 @@ export class TaskManager {
       agentLog: [],
       planId: origin.planId,
       ...(origin.diffBase ? { diffBase: origin.diffBase } : {}),
+      ...(origin.autoMerge ? { autoMerge: true } : {}),
       createdAt: now,
       updatedAt: now,
       history: [],

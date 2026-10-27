@@ -29,7 +29,7 @@ export { PlanError, PlanManager, type PlanRecord, type PlanState } from "./plans
 export { GitSync, sanitizeUrl, type SyncStatus } from "./git/sync.js";
 export { API_DOC_VERSION, API_OPERATIONS, openApiDocument, operationId, type ApiOperation } from "./api/openapi.js";
 export { GitHubApi, GitHubError, parseGitHubRemote, parseGitHubRepo, type CheckRun, type CommitStatus, type PullRef, type RepoSlug } from "./git/github.js";
-export { changesRequested, checkState, acceptanceNote, pullRequestBody, PullRequests, mergeBlock, reviewFeedback, summarizeChecks, type PullRequestStatus } from "./git/pull-requests.js";
+export { autoMergeBlock, changesRequested, checkState, acceptanceNote, pullRequestBody, PullRequests, mergeBlock, reviewFeedback, summarizeChecks, type PullRequestStatus } from "./git/pull-requests.js";
 export { MAX_FILE_PATCH, MAX_TOTAL_PATCH, parseDiff } from "./git/diff.js";
 export { StateStore, type Snapshot } from "./state-store.js";
 export { Transcripts, type TranscriptEntry, type TranscriptInput, type TranscriptSubject } from "./transcripts.js";

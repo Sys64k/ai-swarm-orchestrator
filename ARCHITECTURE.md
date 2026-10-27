@@ -1647,7 +1647,11 @@ supersedes the project's older sync tasks (`TaskManager.supersede`): an unfinish
 cancelled, a failed one's still-open pull request is closed, and any one not merged gets
 `supersededBy`, so `retry` refuses it (409) and the
 console shows what replaced it instead of a Retry button. An older sync would only bring back
-an older description. Generally, a task's pull request is closed when the task is cancelled
+an older description. Sync tasks are queued with `autoMerge` (unless `autoMergeSyncs: false`): in the review pass
+(`PullRequests.check`), one with nothing else to act on is merged through the normal
+`TaskManager.approve` once `autoMergeBlock` finds nothing: every acceptance criterion `met`
+(none unclear), CI `passing` on the commit QA tested, no conflict; the history notes it.
+Generally, a task's pull request is closed when the task is cancelled
 (also during a rework), retried after failing (the retry opens a new one) or superseded, so
 none is left open behind it. Failures are
 logged, never thrown; `close()` waits for the run, so it never outlives the Hub.

@@ -158,6 +158,7 @@ export class PullRequests implements ReviewGate {
         try {
           const outcome = await this.outcome(task, task.review.pr);
           if (outcome) tasks.applyReview(task.spec.taskId, outcome);
+          else if (task.autoMerge) await this.autoMerge(tasks, task);
         } catch (err) {
           tasks.reviewCheckFailed(task.spec.taskId, (err as Error).message);
         }
@@ -165,6 +166,16 @@ export class PullRequests implements ReviewGate {
     } finally {
       this.checking = false;
     }
+  }
+
+  /**
+   * Merge an auto-merge task (an API sync) without a person once it qualifies (autoMergeBlock);
+   * until then it waits, like any pull request. A failed merge is tried again at the next check.
+   */
+  private async autoMerge(tasks: TaskManager, task: TaskRecord): Promise<void> {
+    if (autoMergeBlock(task, await this.checks(task))) return;
+    tasks.recordEvent(task.spec.taskId, "merging without a person: an API sync with every acceptance criterion met and CI passing");
+    await tasks.approve(task.spec.taskId).catch((err: Error) => log.warn(`could not merge ${task.spec.taskId} automatically: ${err.message}`));
   }
 
   /** What happened to the pull request since the last check, if anything to act on. */
@@ -234,6 +245,21 @@ export function summarizeChecks(runs: CheckRun[] | Error, statuses: CommitStatus
  * be the commit QA passed and it must not conflict; unless `force`, its checks must pass (or
  * there are none). The console's approveAction mirrors this.
  */
+/**
+ * Why an auto-merge task's pull request still needs a person (undefined: it can be merged now):
+ * every acceptance criterion met (none unclear), CI passing on the commit QA tested, no conflict.
+ * Changes a reviewer asked for are handled before this is asked.
+ */
+export function autoMergeBlock(task: Pick<TaskRecord, "autoMerge" | "acceptance" | "commit">, checks: ReviewChecks): string | undefined {
+  if (!task.autoMerge) return "it isn't an auto-merge task";
+  const a = task.acceptance;
+  if (a?.result !== "met" || !a.criteria?.length || a.criteria.some((c) => c.verdict !== "met")) return "not every acceptance criterion is met";
+  if (checks.headSha !== task.commit) return "its pull request has a commit QA didn't test";
+  if (checks.mergeable === false) return "it conflicts with main";
+  if (checks.overall !== "passing") return `its CI checks are ${checks.overall}`;
+  return undefined;
+}
+
 export function mergeBlock(checks: ReviewChecks, testedCommit: string | undefined, force = false): string | undefined {
   const n = checks.pr.number;
   if (checks.headSha !== testedCommit) return `pull request #${n} has a commit QA did not test; wait for the Hub to update it`;

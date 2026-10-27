@@ -32,6 +32,8 @@ export interface StartHubOptions {
   gatewayUrl?: string;
   /** Tidy Docker after updates and deploys (`--no-docker-cleanup` turns it off). */
   dockerCleanup: boolean;
+  /** Merge API sync pull requests without a person when everything passes (`--no-auto-merge-syncs` turns it off). */
+  autoMergeSyncs: boolean;
   docker: boolean;
   testCommand: string;
   qa: boolean;
@@ -74,6 +76,7 @@ export async function startHubCommand(opts: StartHubOptions): Promise<void> {
     projectsRootDisplay: process.env.ASO_PROJECTS_ROOT_DISPLAY || undefined,
     port: opts.port,
     host: opts.host,
+    autoMergeSyncs: opts.autoMergeSyncs,
     ...(opts.gatewayPort ? { gateway: { port: opts.gatewayPort, host: opts.gatewayHost, ...(opts.gatewayUrl ? { url: opts.gatewayUrl } : {}) } } : {}),
     token: auth.token,
     sync: { enabled: opts.push && process.env.ASO_PUSH !== "0", token: process.env.ASO_GIT_TOKEN || undefined },
@@ -147,6 +150,7 @@ async function startHubInDocker(root: string, opts: StartHubOptions, token: stri
       // The container listens on 7423 when the gateway is on; compose publishes it on this machine only.
       ASO_GATEWAY_PORT: opts.gatewayPort ? String(opts.gatewayPort) : "",
       ASO_GATEWAY_URL: opts.gatewayUrl ?? "",
+      ASO_AUTO_MERGE_SYNCS: opts.autoMergeSyncs ? "1" : "0",
       ASO_DASHBOARD_PORT: String(opts.dashboardPort),
       ASO_TEST_COMMAND: parseTestCommand(opts.testCommand).join(" "),
       ASO_QA: opts.qa ? "1" : "0",

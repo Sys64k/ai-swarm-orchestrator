@@ -135,7 +135,12 @@ async function stillOutdated(project: Project, doc: OpenApi, catchUp?: (project:
  * that regenerates and fixes what depends on it. Once per project and version of the description:
  * both are in the task id, so a task that was cancelled is not queued again. Never throws.
  */
-export async function syncApiCopies(projects: readonly Project[], doc: OpenApi & object, catchUp?: (project: Project) => Promise<void>): Promise<void> {
+export async function syncApiCopies(
+  projects: readonly Project[],
+  doc: OpenApi & object,
+  catchUp?: (project: Project) => Promise<void>,
+  opts: { autoMerge?: boolean } = {},
+): Promise<void> {
   const contents = apiFileContents(doc);
   const hash = apiHash(doc);
   const version = doc.info?.version ?? "new";
@@ -152,7 +157,7 @@ export async function syncApiCopies(projects: readonly Project[], doc: OpenApi &
       const seeded = await project.repo.seedTaskBranch(taskId, { [API_COPY_PATH]: contents }, `chore: sync the Hub API description (${version})`);
       try {
         // The acceptance check judges the agent's work after the Hub's own commit of the copy.
-        project.tasks.submit(syncTaskSpec(taskId, version, apiChanges(theirs, doc)), { diffBase: seeded });
+        project.tasks.submit(syncTaskSpec(taskId, version, apiChanges(theirs, doc)), { diffBase: seeded, ...(opts.autoMerge ? { autoMerge: true } : {}) });
         // Older syncs of this project's copy would bring an older description: this one replaces them.
         for (const older of project.tasks.list()) {
           if (older.spec.taskId !== taskId && older.spec.taskId.startsWith(SYNC_TASK_PREFIX)) project.tasks.supersede(older.spec.taskId, taskId);
