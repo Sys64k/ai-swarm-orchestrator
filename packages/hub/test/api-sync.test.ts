@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { API_DOC_VERSION, apiChanges, apiFileContents, apiHash, openApiDocument, syncApiCopies, syncTaskId, syncTaskSpec } from "@aso/hub";
-import { git, tempDir, waitFor, withHub, writeFiles } from "./helpers.ts";
+import { git, tempDir, TOKEN, waitFor, withHub, writeFiles } from "./helpers.ts";
 
 delete process.env.ANTHROPIC_API_KEY; // tests must never reach the real API
 
@@ -79,6 +79,29 @@ describe("syncing a project's copy of the Hub API description", () => {
 
         await syncApiCopies(ctx.hub.projects.list(), current());
         assert.equal(ctx.hub.tasks.list().filter((t) => t.spec.taskId.startsWith("sync-hub-api-")).length, 1, "not queued twice");
+      },
+      { files: { "docs/openapi.json": apiFileContents(olderDescription()) } },
+    ));
+
+  it("replaces older syncs of a project with a newer one, which nobody can retry", () =>
+    withHub(
+      async (ctx) => {
+        const first = await waitFor(() => syncTask(ctx.hub.tasks.list()), 10_000, "a sync task");
+        // The Hub's API changes again before the first sync is done.
+        const newer = { ...current(), info: { ...current().info, description: "a newer version" } };
+        await syncApiCopies(ctx.hub.projects.list(), newer as never);
+        const syncs = ctx.hub.tasks.list().filter((t) => t.spec.taskId.startsWith("sync-hub-api-"));
+        assert.equal(syncs.length, 2);
+        const second = syncs.find((t) => t.spec.taskId !== first.spec.taskId)!;
+        const old = ctx.hub.tasks.get(first.spec.taskId)!;
+        assert.equal(old.state, "cancelled", "the older one stops");
+        assert.equal(old.supersededBy, second.spec.taskId);
+        assert.ok(old.history.some((h) => h.event === `superseded by ${second.spec.taskId}, which does its job`));
+        assert.equal(second.state, "pending", "the newer one goes on");
+
+        const retried = await fetch(`http://127.0.0.1:${ctx.port}/api/tasks/${first.spec.taskId}/retry`, { method: "POST", headers: { authorization: `Bearer ${TOKEN}` } });
+        assert.equal(retried.status, 409);
+        assert.match(((await retried.json()) as { error: string }).error, /superseded by sync-hub-api-.*nothing to retry/);
       },
       { files: { "docs/openapi.json": apiFileContents(olderDescription()) } },
     ));

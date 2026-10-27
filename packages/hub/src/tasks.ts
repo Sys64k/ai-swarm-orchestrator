@@ -86,6 +86,8 @@ export interface TaskRecord {
   budgetBaseUsd?: number;
   /** Times a person retried this task. */
   retries?: number;
+  /** A newer task that does this one's job (a newer sync of the API copy): this one is never run again. */
+  supersededBy?: string;
   /** A commit the Hub itself made on the branch first (a sync task's new API copy): the acceptance check judges only what came after it. */
   diffBase?: string;
   /** Models whose API refused this task's requests (canonical specs); its later rounds use others. */
@@ -294,6 +296,21 @@ export class TaskManager {
   }
 
   /**
+   * A newer task does this one's job: cancel it if it is still going, and mark it, finished or
+   * not, so it isn't retried. Merged tasks are left alone.
+   */
+  supersede(taskId: string, by: string): void {
+    const task = this.tasks.get(taskId);
+    if (!task || task.state === "merged" || task.supersededBy) return;
+    if (task.state !== "failed" && task.state !== "cancelled" && task.state !== "merging") {
+      this.cancel(taskId);
+    }
+    task.supersededBy = by;
+    this.note(task, `superseded by ${by}, which does its job`);
+    this.onChange?.();
+  }
+
+  /**
    * Queue a failed or cancelled task again with fresh limits (rework rounds, node drops,
    * budget). Its branch keeps the previous attempt, and the agent is told why it failed.
    */
@@ -302,6 +319,7 @@ export class TaskManager {
     if (task.state !== "failed" && task.state !== "cancelled") {
       throw new TaskError(`task ${taskId} is ${task.state}; only failed or cancelled tasks can be retried`, "conflict");
     }
+    if (task.supersededBy) throw new TaskError(`task ${taskId} was superseded by ${task.supersededBy}, which does its job; there's nothing to retry`, "conflict");
     const why = task.state === "failed" ? `the previous attempt failed: ${task.detail ?? "no detail"}` : "the previous attempt was cancelled";
     task.retries = (task.retries ?? 0) + 1;
     task.budgetBaseUsd = task.llm.costUsd;

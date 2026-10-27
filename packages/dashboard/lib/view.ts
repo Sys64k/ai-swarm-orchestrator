@@ -70,9 +70,10 @@ export function isLive(state: TaskState): boolean {
 }
 
 /** What a person can do with the task right now (mirrors the Hub's cancel/retry rules). */
-export function taskActions(task: Pick<Task, "state">): { retry: boolean; cancel: boolean } {
+export function taskActions(task: Pick<Task, "state" | "supersededBy">): { retry: boolean; cancel: boolean } {
   return {
-    retry: task.state === "failed" || task.state === "cancelled",
+    // A superseded task's job is done by a newer one: nothing to retry.
+    retry: (task.state === "failed" || task.state === "cancelled") && !task.supersededBy,
     cancel: isLive(task.state) && task.state !== "merging",
   };
 }

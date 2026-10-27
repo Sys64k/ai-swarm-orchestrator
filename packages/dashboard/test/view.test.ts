@@ -88,6 +88,7 @@ describe("pull request reviews", () => {
     assert.deepEqual(v.running.map((t) => t.spec.taskId), ["w"], "not listed as running too");
     assert.deepEqual(taskBadge(task("r", "awaiting_review")), { label: "Review", tone: "waiting" });
     assert.deepEqual(taskActions(task("r", "awaiting_review")), { retry: false, cancel: true });
+    assert.deepEqual(taskActions({ state: "failed", supersededBy: "sync-hub-api-new" }), { retry: false, cancel: false }, "a superseded task has nothing to retry");
   });
 
   it("words each stage of the pull request", () => {

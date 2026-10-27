@@ -35,6 +35,8 @@ export interface HistoryEntry {
 export interface Task {
   /** The project (folder in the Hub's projects root) the task belongs to. */
   project: string;
+  /** A newer task that does this one's job; this one can't be retried. */
+  supersededBy?: string;
   spec: {
     taskId: string;
     role: string;
