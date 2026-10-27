@@ -86,6 +86,8 @@ export interface TaskRecord {
   budgetBaseUsd?: number;
   /** Times a person retried this task. */
   retries?: number;
+  /** A commit the Hub itself made on the branch first (a sync task's new API copy): the acceptance check judges only what came after it. */
+  diffBase?: string;
   /** Models whose API refused this task's requests (canonical specs); its later rounds use others. */
   refusedModels?: string[];
   /** Set when the current attempt's model was refused and another can take over: its failure requeues the task. */
@@ -396,7 +398,7 @@ export class TaskManager {
   }
 
   /** Validate and queue a task. `input` is untrusted (API body / Architect output). */
-  submit(input: unknown, origin: { planId?: string; idHint?: string } = {}): TaskRecord {
+  submit(input: unknown, origin: { planId?: string; idHint?: string; diffBase?: string } = {}): TaskRecord {
     const parsed = TaskSpecInputSchema.safeParse(input);
     if (!parsed.success) {
       throw new TaskError(parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "), "invalid");
@@ -421,6 +423,7 @@ export class TaskManager {
       filesTouched: [],
       agentLog: [],
       planId: origin.planId,
+      ...(origin.diffBase ? { diffBase: origin.diffBase } : {}),
       createdAt: now,
       updatedAt: now,
       history: [],
@@ -820,7 +823,7 @@ export class TaskManager {
   /** Run the acceptance check; unmet criteria send the work back, anything else lets it go on. */
   private async checkAcceptance(task: TaskRecord): Promise<void> {
     const commit = task.commit!;
-    const diff = await this.repo.diff(commit).catch(() => undefined);
+    const diff = await this.repo.diff(commit, task.diffBase).catch(() => undefined);
     const verdict = await this.acceptance!.check(task, diff);
     // Cancelled, or a newer commit, while the model thought: this verdict is stale.
     if (task.state !== "verifying" || task.commit !== commit || task.acceptance?.result !== "checking") return;

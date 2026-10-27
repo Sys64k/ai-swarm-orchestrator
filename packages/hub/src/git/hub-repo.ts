@@ -375,11 +375,18 @@ export class HubRepository {
     return base.trim() !== "" && base.trim() === commit.trim();
   }
 
-  /** What `commit` changes against the main it branched from (their merge base); undefined if the Hub lacks it. */
-  async diff(commit: string): Promise<TaskDiff | undefined> {
+  /**
+   * What `commit` changes against the main it branched from (their merge base), or against `from`
+   * when given and an ancestor of it (a commit the Hub itself made on the branch); undefined if
+   * the Hub lacks it.
+   */
+  async diff(commit: string, from?: string): Promise<TaskDiff | undefined> {
     const head = await this.resolve(commit);
     if (!head) return undefined;
-    const base = (await this.git.raw(["merge-base", `refs/heads/${this.mainBranch}`, head]).catch(() => "")).trim();
+    const base =
+      from && (await this.isAncestor(from, head))
+        ? from
+        : (await this.git.raw(["merge-base", `refs/heads/${this.mainBranch}`, head]).catch(() => "")).trim();
     if (!base) return undefined;
     const diff = ["-c", "core.quotePath=false", "diff", "--no-renames", "--no-color", "--no-ext-diff"];
     const [numstat, patch] = await Promise.all([this.git.raw([...diff, "--numstat", "-z", base, head]), this.git.raw([...diff, base, head])]);

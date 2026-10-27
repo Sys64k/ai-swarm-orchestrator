@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { API_DOC_VERSION, apiChanges, apiFileContents, apiHash, openApiDocument, syncApiCopies, syncTaskId, syncTaskSpec } from "@aso/hub";
-import { git, waitFor, withHub } from "./helpers.ts";
+import { git, tempDir, waitFor, withHub, writeFiles } from "./helpers.ts";
 
 delete process.env.ANTHROPIC_API_KEY; // tests must never reach the real API
 
@@ -57,6 +57,24 @@ describe("syncing a project's copy of the Hub API description", () => {
         assert.equal(git(ctx.repoDir, "rev-parse", `${branch}^`), mainBefore, "one commit on top of main");
         assert.equal(git(ctx.repoDir, "log", "-1", "--format=%an|%s", branch), `ASO Hub|chore: sync the Hub API description (${API_DOC_VERSION})`);
         assert.equal(git(ctx.repoDir, "rev-parse", "main"), mainBefore, "main untouched");
+        assert.equal(task.diffBase, git(ctx.repoDir, "rev-parse", branch), "its acceptance check starts after the Hub's own commit");
+        assert.match(task.spec.acceptanceCriteria[0], /isn't changed in the diff \(the Hub's own first commit on this branch put the new copy there, and the diff starts after it\)/);
+
+        // The diff the acceptance check reads: an agent's work on top, without the Hub's copy.
+        const work = tempDir();
+        git(work, "clone", "--quiet", ctx.repoDir, ".");
+        git(work, "checkout", "--quiet", branch);
+        writeFiles(work, { "src/generated.ts": "export {};\n" });
+        git(work, "add", "-A");
+        git(work, "-c", "user.name=a", "-c", "user.email=a@x", "commit", "--quiet", "-m", "regenerate");
+        git(work, "push", "--quiet", "origin", branch);
+        const head = git(ctx.repoDir, "rev-parse", branch);
+        const project = ctx.hub.projects.list()[0];
+        const fromSeed = await project.repo.diff(head, task.diffBase);
+        assert.deepEqual(fromSeed?.files.map((f) => f.path), ["src/generated.ts"], "only the agent's work");
+        const fromMain = await project.repo.diff(head);
+        assert.deepEqual(fromMain?.files.map((f) => f.path).sort(), ["docs/openapi.json", "src/generated.ts"], "the pull request still shows both");
+        assert.equal((await project.repo.diff(head, "0".repeat(40)))?.base, mainBefore, "a base that isn't on the branch falls back to main");
         assert.equal(git(ctx.repoDir, "status", "--porcelain"), "", "the checkout untouched");
 
         await syncApiCopies(ctx.hub.projects.list(), current());

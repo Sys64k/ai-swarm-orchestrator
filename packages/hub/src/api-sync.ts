@@ -90,7 +90,7 @@ export function syncTaskSpec(taskId: string, version: string, changes: ApiChange
       `Keep ${API_COPY_PATH} exactly as it is on this branch.`,
     ].join("\n"),
     acceptanceCriteria: [
-      `${API_COPY_PATH} is unchanged from this branch's first commit`,
+      `${API_COPY_PATH} isn't changed in the diff (the Hub's own first commit on this branch put the new copy there, and the diff starts after it)`,
       `Files generated from ${API_COPY_PATH} are regenerated from it`,
       "The project's typecheck, lint and tests pass",
     ],
@@ -146,9 +146,10 @@ export async function syncApiCopies(projects: readonly Project[], doc: OpenApi &
       }
       const theirs = await stillOutdated(project, doc, catchUp);
       if (!theirs) continue;
-      await project.repo.seedTaskBranch(taskId, { [API_COPY_PATH]: contents }, `chore: sync the Hub API description (${version})`);
+      const seeded = await project.repo.seedTaskBranch(taskId, { [API_COPY_PATH]: contents }, `chore: sync the Hub API description (${version})`);
       try {
-        project.tasks.submit(syncTaskSpec(taskId, version, apiChanges(theirs, doc)));
+        // The acceptance check judges the agent's work after the Hub's own commit of the copy.
+        project.tasks.submit(syncTaskSpec(taskId, version, apiChanges(theirs, doc)), { diffBase: seeded });
       } catch (err) {
         await project.repo.deleteTaskBranch(taskId);
         throw err;

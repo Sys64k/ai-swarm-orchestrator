@@ -1174,6 +1174,10 @@
             "minimum": -9007199254740991,
             "maximum": 9007199254740991
           },
+          "diffBase": {
+            "description": "A commit the Hub made on the branch first (a sync task's API copy): the acceptance check judges what came after it",
+            "type": "string"
+          },
           "refusedModels": {
             "description": "Models whose API refused this task's requests; its later rounds use others",
             "type": "array",

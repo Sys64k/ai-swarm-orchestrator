@@ -437,6 +437,7 @@ export const TaskSchema = z.object({
   reworkRound: z.number().int(),
   rework: ReworkSchema.optional(),
   retries: z.number().int().optional(),
+  diffBase: z.string().optional().describe("A commit the Hub made on the branch first (a sync task's API copy): the acceptance check judges what came after it"),
   refusedModels: z.array(z.string()).optional().describe("Models whose API refused this task's requests; its later rounds use others"),
   switchingModel: z.boolean().optional().describe("The current attempt's model was refused: its failure requeues the task on another model"),
   budgetBaseUsd: z.number().optional().describe("Spend before the latest retry; the budget counts from here"),
