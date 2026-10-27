@@ -1097,8 +1097,20 @@ export function finishedSummary(tasks: TrackRecordRow["tasks"], builds: number):
 }
 
 /**
+ * The tasks that started here, all in: "3 tasks started here, 2 finished: $0.75 a finished task,
+ * escalations and failures included", or nothing.
+ */
+export function startedSummary(s: TrackRecordRow["started"]): string | undefined {
+  if (!s?.settled) return undefined;
+  const counts = `${plural(s.settled, "task")} started here, ${s.finished} finished`;
+  // None finished: no cost per finished task, so what was spent.
+  if (s.costPerFinishedUsd === undefined) return `${counts}, ${formatUsd(s.costUsd)} spent`;
+  return `${counts}: ${formatUsd(s.costPerFinishedUsd)} a finished task, escalations and failures included`;
+}
+
+/**
  * A track record in a line: "2 tasks finished (1 first try, 1 taken over) · 5 builds · QA passed
- * 3 of 4 · acceptance met 2 of 2 · 2 out of turns · 1 failed · $0.50, $0.25 a task".
+ * 3 of 4 · … · $0.50 on its builds · 3 tasks started here, 2 finished: $0.75 a finished task, …".
  */
 export function trackRecordLine(r: TrackRecordRow): string {
   const b = r.builds;
@@ -1112,7 +1124,8 @@ export function trackRecordLine(r: TrackRecordRow): string {
     b.failed ? `${b.failed} failed` : undefined,
     b.dropped ? `${b.dropped} dropped` : undefined,
     q.runs ? `${plural(q.runs, "QA run")}${q.passed + q.failed ? ` (${q.passed} of ${q.passed + q.failed} passed)` : ""}` : undefined,
-    r.costUsd || b.jobs ? `${formatUsd(r.costUsd)}${r.costPerFinishedUsd !== undefined ? `, ${formatUsd(r.costPerFinishedUsd)} a task` : ""}` : undefined,
+    r.costUsd || b.jobs ? `${formatUsd(r.costUsd)} on its builds` : undefined,
+    startedSummary(r.started),
     plansSummary(r.plans),
     reviewsSummary(r.reviews),
   ];

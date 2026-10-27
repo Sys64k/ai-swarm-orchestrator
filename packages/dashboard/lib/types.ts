@@ -338,7 +338,10 @@ export interface TrackRecordRow {
   qaRuns: { runs: number; passed: number; failed: number; errors: number; dropped: number };
   tasks: { worked: number; finished: number; firstTry: number; tookOver: number };
   costUsd: number;
+  /** Its own builds' cost per task it finished. */
   costPerFinishedUsd?: number;
+  /** The settled tasks whose first build was its, with everything they cost (absent from older Hubs). */
+  started?: { settled: number; finished: number; costUsd: number; costPerFinishedUsd?: number };
   /** Plans made with it, as the Architect's model (by model and project only). */
   plans: { planned: number; proposed: number; approved: number; rejected: number; failed: number; withQuestions: number; costUsd: number };
   /** Acceptance checks it made, as the reviewer's model (by model and project only). */

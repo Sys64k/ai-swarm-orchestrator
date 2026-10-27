@@ -31,10 +31,11 @@ function table(header: string[], rows: string[][]): string[] {
 /** Builds, the tasks finished and QA runs: a row per key that built or tested anything. */
 function workLines(r: TrackRecords): string[] {
   const withQa = r.by !== "model";
-  const rows = r.rows.filter((x) => x.builds.jobs || x.qaRuns.runs || x.tasks.finished);
+  // An older Hub sends no `started`.
+  const rows = r.rows.filter((x) => x.builds.jobs || x.qaRuns.runs || x.tasks.finished || x.started?.settled);
   if (!rows.length) return [];
   return table(
-    [r.by.toUpperCase(), "FINISHED", "1ST TRY", "TOOK OVER", "BUILDS", "QA PASSED", "ACCEPTED", "OUT OF TURNS", "FAILED", ...(withQa ? ["QA RUNS PASSED"] : []), "COST", "PER TASK"],
+    [r.by.toUpperCase(), "FINISHED", "1ST TRY", "TOOK OVER", "BUILDS", "QA PASSED", "ACCEPTED", "OUT OF TURNS", "FAILED", ...(withQa ? ["QA RUNS PASSED"] : []), "COST", "STARTED", "PER TASK"],
     rows.map((x) => [
       x.key,
       String(x.tasks.finished),
@@ -47,7 +48,9 @@ function workLines(r: TrackRecords): string[] {
       String(x.builds.failed),
       ...(withQa ? [ofTotal(x.qaRuns.passed, x.qaRuns.failed)] : []),
       usd(x.costUsd),
-      usd(x.costPerFinishedUsd),
+      // Finished out of the settled tasks; the rest failed.
+      x.started ? ofTotal(x.started.finished, x.started.settled - x.started.finished) : "-",
+      usd(x.started?.costPerFinishedUsd),
     ]),
   );
 }
@@ -88,7 +91,8 @@ export function trackRecordLines(r: TrackRecords): string[] {
       "",
       "FINISHED: merged tasks it made the last good build of; 1ST TRY: with no build before it; TOOK OVER: after another's builds.",
       "QA PASSED, ACCEPTED: the verdicts on its builds' work. QA RUNS PASSED: its own QA runs that reached a verdict.",
-      "COST: its builds' model cost; PER TASK: that per task finished.",
+      "COST: its own builds' model cost. STARTED: tasks whose first build was its, finished out of all that ended.",
+      "PER TASK: what such a finished task cost, all in (every model it escalated to, checks, its plan's share, failures).",
     );
   }
   if (plans.length) {

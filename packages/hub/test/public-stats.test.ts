@@ -23,7 +23,9 @@ describe("public stats", () => {
     const all = publicStats(records, ["models", "costs"], AT);
     assert.deepEqual(all.costs, { totalUsd: 1.75, perTaskUsd: 0.88 }, "builds, plans and checks together");
     const opus = all.models!.find((m) => m.model === "opus")!;
-    assert.deepEqual([opus.finished, opus.tookOver, opus.plansApproved, opus.checks, opus.checksMet, opus.costUsd, opus.costPerTaskUsd], [1, 1, 1, 1, 1, 1.35, 0.9]);
+    assert.deepEqual([opus.finished, opus.tookOver, opus.plansApproved, opus.checks, opus.checksMet, opus.costUsd, opus.costPerTaskUsd], [1, 1, 1, 1, 1, 1.35, undefined], "Opus started no task, so no all-in cost per task");
+    const gemini = all.models!.find((m) => m.model === "gemini")!;
+    assert.equal(gemini.costPerTaskUsd, 0.68, "both tasks started on Gemini: all their builds and checks, Opus's takeover too, per finished task");
     const noCosts = publicStats(records, ["models"], AT);
     assert.ok(noCosts.costs === undefined && noCosts.models!.every((m) => m.costUsd === undefined && m.costPerTaskUsd === undefined));
   });

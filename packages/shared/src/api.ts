@@ -789,7 +789,17 @@ export const TrackRecordRowSchema = z
       })
       .describe("The tasks it worked on"),
     costUsd: z.number().describe("Estimated model cost of its builds"),
-    costPerFinishedUsd: z.number().optional().describe("costUsd divided by tasks finished"),
+    costPerFinishedUsd: z.number().optional().describe("costUsd divided by tasks finished: its own builds only (see started for a task's whole cost)"),
+    started: z
+      .object({
+        settled: z.number().int().describe("Merged or failed tasks whose first build was its (cancelled ones aren't counted)"),
+        finished: z.number().int().describe("Of those, merged"),
+        costUsd: z
+          .number()
+          .describe("Everything those tasks cost: every build on any model (escalations too), their acceptance checks, and an equal share of their plan"),
+        costPerFinishedUsd: z.number().optional().describe("costUsd divided by finished: what a finished task costs when it starts here, failures included"),
+      })
+      .describe("The tasks that started here, with their whole cost: for choosing a desk's model by cost (absent from Hubs before it)"),
     plans: z
       .object({
         planned: z.number().int().describe("Plans the Architect worked on with it"),
@@ -882,7 +892,7 @@ export const PublicStatsSchema = z
           checks: z.number().int().describe("Acceptance checks it made as the reviewer"),
           checksMet: z.number().int(),
           costUsd: z.number().optional().describe("Its builds, plans and checks (only when the Hub shares costs)"),
-          costPerTaskUsd: z.number().optional().describe("Its builds' cost per task it finished (only when the Hub shares costs)"),
+          costPerTaskUsd: z.number().optional().describe("What a finished task costs when it starts on this model, all in: every build on any model, acceptance checks, its share of its plan, and failed tasks (only when the Hub shares costs)"),
         }),
       )
       .optional()

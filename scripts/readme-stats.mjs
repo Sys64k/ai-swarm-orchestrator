@@ -51,7 +51,7 @@ export function renderStats(stats) {
   const models = (stats.models ?? []).filter((m) => m.builds || m.plansProposed || m.checks);
   if (models.length) {
     const withCost = models.some((m) => m.costPerTaskUsd !== undefined || m.costUsd !== undefined);
-    const header = ["Model", "Tasks finished", "First try", "QA passed", "Acceptance met", "Plans approved", "Checks it made: met", ...(withCost ? ["Cost per task"] : [])];
+    const header = ["Model", "Tasks finished", "First try", "QA passed", "Acceptance met", "Plans approved", "Checks it made: met", ...(withCost ? ["Cost per task started on it"] : [])];
     lines.push("", `| ${header.join(" | ")} |`, `|${header.map(() => "---").join("|")}|`);
     for (const m of models) {
       const cells = [
@@ -66,6 +66,7 @@ export function renderStats(stats) {
       ];
       lines.push(`| ${cells.join(" | ")} |`);
     }
+    if (withCost) lines.push("", "<sub>Cost per task started on it: all in, from a task's first build to its end (every model it escalated to, its acceptance checks, a share of its plan), and failed tasks too.</sub>");
   }
   lines.push("", `<sub>From the Hub's public track record, updated daily (last: ${day(stats.at)}). See [Track records](docs/models.md#track-records-how-each-model-has-done).</sub>`);
   return lines.join("\n");

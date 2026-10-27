@@ -13,10 +13,13 @@ export interface ReportTask {
   state: TaskState;
   spec: { role: string };
   jobs?: JobRecord[];
+  /** The plan it came from, whose cost its tasks share. */
+  planId?: string;
 }
 
 /** What the report needs of a plan. */
 export interface ReportPlan {
+  planId?: string;
   project: string;
   state: PlanState;
   model?: string;
@@ -41,6 +44,7 @@ function emptyRow(key: string): TrackRecordRow {
     qaRuns: { runs: 0, passed: 0, failed: 0, errors: 0, dropped: 0 },
     tasks: { worked: 0, finished: 0, firstTry: 0, tookOver: 0 },
     costUsd: 0,
+    started: { settled: 0, finished: 0, costUsd: 0 },
     plans: { planned: 0, proposed: 0, approved: 0, rejected: 0, failed: 0, withQuestions: 0, costUsd: 0 },
     reviews: { checks: 0, met: 0, unmet: 0, undecided: 0, costUsd: 0 },
   };
@@ -137,6 +141,11 @@ function plansInScope(plans: readonly ReportPlan[], query: TrackRecordQuery): Re
   return plans.filter((p) => (!query.project || p.project === query.project) && startedSince({ startedAt: p.createdAt }, query.since));
 }
 
+/** A task's builds that have ended, oldest first. */
+function endedBuilds(task: ReportTask): JobRecord[] {
+  return (task.jobs ?? []).filter((j) => j.job === "implement" && ended(j));
+}
+
 /**
  * Who finished a merged task: whoever made its last build that checked out. Judged over all its
  * builds, so a time filter can't turn a reworked task into a first try. `firstTry`: that was its
@@ -144,11 +153,52 @@ function plansInScope(plans: readonly ReportPlan[], query: TrackRecordQuery): Re
  */
 function finishedBy(task: ReportTask, by: TrackRecordQuery["by"]): { key: string; build: JobRecord; firstTry: boolean; tookOver: boolean } | undefined {
   if (task.state !== "merged") return undefined;
-  const builds = (task.jobs ?? []).filter((j) => j.job === "implement" && ended(j));
+  const builds = endedBuilds(task);
   const build = [...builds].reverse().find((j) => j.result === "built");
   const key = build && keyOf(build, task, by);
   if (!build || key === undefined) return undefined;
   return { key, build, firstTry: builds.length === 1, tookOver: builds.some((j) => j !== build && keyOf(j, task, by) !== key) };
+}
+
+/** Whether a task's cost is final: merged or failed. Cancelled isn't counted: a person stopped it, not the model. */
+function settled(task: ReportTask): boolean {
+  return task.state === "merged" || task.state === "failed";
+}
+
+/**
+ * Each plan's cost per task it led to: shared equally among all its tasks (whatever a query
+ * filters), so a plan's cost is counted once over them.
+ */
+function planShares(tasks: readonly ReportTask[], plans: readonly ReportPlan[]): (task: ReportTask) => number {
+  const counts = new Map<string, number>();
+  for (const t of tasks) if (t.planId) counts.set(t.planId, (counts.get(t.planId) ?? 0) + 1);
+  const shares = new Map<string, number>();
+  for (const p of plans) {
+    const n = p.planId ? counts.get(p.planId) : undefined;
+    if (p.planId && n) shares.set(p.planId, p.llm.costUsd / n);
+  }
+  return (task) => (task.planId ? (shares.get(task.planId) ?? 0) : 0);
+}
+
+/**
+ * Where a settled task started, and all it cost: its first build's key (a task's own role or
+ * project for those groupings), and every build on any model, their acceptance checks and its
+ * share of its plan. Undefined: not settled, never built, or first built before `since`.
+ */
+function startedBy(task: ReportTask, by: TrackRecordQuery["by"], since: string | undefined, planShare: number): { key: string; costUsd: number } | undefined {
+  if (!settled(task)) return undefined;
+  const builds = endedBuilds(task);
+  const first = builds[0];
+  const key = first && keyOf(first, task, by);
+  if (!first || key === undefined || !startedSince(first, since)) return undefined;
+  return { key, costUsd: builds.reduce((sum, j) => sum + j.costUsd + (j.acceptanceCostUsd ?? 0), planShare) };
+}
+
+function countStarted(row: TrackRecordRow, task: ReportTask, costUsd: number): void {
+  const s = row.started;
+  s.settled++;
+  if (task.state === "merged") s.finished++;
+  s.costUsd += costUsd;
 }
 
 /**
@@ -162,10 +212,13 @@ export function trackRecords(tasks: readonly ReportTask[], plans: readonly Repor
   const rowOf = (key: string) => rows.get(key) ?? rows.set(key, emptyRow(key)).get(key)!;
   const workedOn = (key: string) => worked.get(key) ?? worked.set(key, new Set()).get(key)!;
   let since: string | undefined;
+  const planShareOf = planShares(tasks, plans);
 
   for (const task of tasks) {
     if (query.project && task.project !== query.project) continue;
     if (query.role && task.spec.role !== query.role) continue;
+    const started = startedBy(task, query.by, query.since, planShareOf(task));
+    if (started) countStarted(rowOf(started.key), task, started.costUsd);
     for (const job of (task.jobs ?? []).filter((j) => ended(j) && startedSince(j, query.since))) {
       const key = keyOf(job, task, query.by);
       if (key === undefined) continue;
@@ -196,6 +249,11 @@ export function trackRecords(tasks: readonly ReportTask[], plans: readonly Repor
   const out = [...rows.values()].map((r) => ({
     ...r,
     costUsd: roundUsd(r.costUsd),
+    started: {
+      ...r.started,
+      costUsd: roundUsd(r.started.costUsd),
+      ...(r.started.finished ? { costPerFinishedUsd: roundUsd(r.started.costUsd / r.started.finished) } : {}),
+    },
     plans: { ...r.plans, costUsd: roundUsd(r.plans.costUsd) },
     reviews: { ...r.reviews, costUsd: roundUsd(r.reviews.costUsd) },
     ...(r.tasks.finished ? { costPerFinishedUsd: roundUsd(r.costUsd / r.tasks.finished) } : {}),
