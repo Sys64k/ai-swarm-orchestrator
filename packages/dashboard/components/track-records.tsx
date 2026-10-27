@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { usePoll } from "./use-poll.ts";
 import { Banner, Section, TopBar } from "./ui.tsx";
+import { ModelSuggestions } from "./model-suggestions.tsx";
 import type { Project, TrackRecordKey, TrackRecords } from "../lib/types.ts";
 import { TRACK_RECORD_GROUPS, trackRecordGroupLabel, trackRecordLine, trackRecordsPath } from "../lib/view.ts";
 
@@ -44,6 +45,7 @@ export function TrackRecordsPage() {
             ))}
           </select>
         </label>
+        <ModelSuggestions />
         {records.error && <Banner tone="bad">{records.error}</Banner>}
         <Section title={trackRecordGroupLabel(by)} count={records.data?.rows.length}>
           {records.data?.rows.length === 0 && <p className="muted">No jobs recorded yet.</p>}

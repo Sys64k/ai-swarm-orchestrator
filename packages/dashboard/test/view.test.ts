@@ -9,6 +9,9 @@ import {
   escalationSummary,
   nextLadderStep,
   startedSummary,
+  suggestionNote,
+  suggestionRequests,
+  suggestionTitle,
   roleModelChoices,
   roleModelOf,
   plansSummary,
@@ -780,5 +783,33 @@ describe("where failing tasks move (escalation)", () => {
     assert.equal(nextLadderStep(choices, ["anthropic/claude-opus-5-5", "openai/gpt-6.1-sol"]), undefined, "every model is on it");
     const many = ["a", "b", "c", "d", "e", "f"].map((m) => ({ value: m, label: m }));
     assert.equal(nextLadderStep(many, ["a", "b", "c", "d", "e"]), undefined, "full");
+  });
+});
+
+describe("model suggestions", () => {
+  const evidence = (model: string) => ({ model, samples: 20, quality: 0.9, unitCostUsd: 1 });
+  const desks = {
+    role: "desks" as const,
+    kind: "cheaper" as const,
+    current: evidence("claude-opus-5-5"),
+    suggested: evidence("models/gemini-3.8-flash"),
+    spec: "gemini/models/gemini-3.8-flash",
+    apply: ["avalon", "canfod"].map((target) => ({ kind: "desk" as const, target, model: "gemini/models/gemini-3.8-flash" })),
+    reason: "cheaper",
+  };
+
+  it("names a suggestion and a note by role", () => {
+    assert.equal(suggestionTitle(desks), "Desks: models/gemini-3.8-flash instead of claude-opus-5-5");
+    assert.equal(suggestionNote({ role: "reviewer", text: "gpt-6.1-sol: 3 of 10 met verdicts needed to compare it." }), "Reviewer: gpt-6.1-sol: 3 of 10 met verdicts needed to compare it.");
+  });
+
+  it("applies desks machine by machine and a role by name, through allowed routes", () => {
+    assert.deepEqual(suggestionRequests(desks), [
+      { path: "desks", body: { target: "avalon", model: "gemini/models/gemini-3.8-flash" } },
+      { path: "desks", body: { target: "canfod", model: "gemini/models/gemini-3.8-flash" } },
+    ]);
+    assert.deepEqual(suggestionRequests({ ...desks, role: "reviewer", apply: [{ kind: "role", target: "reviewer", model: "openai/gpt-6.1-sol" }] }), [{ path: "models/roles", body: { role: "reviewer", model: "openai/gpt-6.1-sol" } }]);
+    assert.deepEqual(suggestionRequests({ ...desks, spec: undefined, apply: [] }), [], "no provider offers it now");
+    assert.equal(hubPath("GET", ["model-suggestions"]), "/api/model-suggestions");
   });
 });

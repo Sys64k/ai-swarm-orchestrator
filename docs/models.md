@@ -323,6 +323,28 @@ reviewer's met held up.
 - Jobs are recorded from when the Hub started recording them; older tasks don't count. The
   core console shows the same under *Track records*, and `GET /api/track-records` serves it.
 
+#### Suggestions: the cheapest mix that holds up
+
+`aso tune` (and *Suggestions* on the console's *Track records* page, `GET /api/model-suggestions`)
+compares, for each role, the model it's on now with every model that has enough data, over the
+last 30 days (`--since` for another period):
+
+| Role | Enough data | Cost compared | Quality compared |
+|---|---|---|---|
+| Desks | 10 settled tasks started on it | all in, per finished task (*started*, above) | finished of those settled |
+| Reviewer | 10 met verdicts | per check | met verdicts that held up (not [overturned](#when-a-reviewers-met-proves-wrong)) |
+| Architect | 5 proposed plans | per plan | proposed plans approved |
+
+- **Cheaper:** at least 15% cheaper, and at most a little worse (desks and Architect 10 points,
+  the reviewer 5). The cheapest such model is suggested.
+- **Better:** clearly better (twice that margin), even if it costs more.
+- **Otherwise it says what's missing,** e.g. *"models/gemini-3.8-flash: 5 of 10 settled tasks
+  needed to compare it"*, or that the model in use is the best with enough data.
+- **Nothing changes by itself.** `aso tune` prints the `aso desk` commands that apply a
+  suggestion (for desks, each connected machine); the console has a *Switch* button. A model no
+  provider offers now can't be applied.
+- **It needs data on more than one model** to compare: a model nobody has tried has none.
+
 #### Sharing them publicly (a README)
 
 `aso start-hub --public-stats models,costs` makes the Hub answer `GET /api/public-stats` for

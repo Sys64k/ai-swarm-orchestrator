@@ -17,6 +17,7 @@ import {
   RoleModelBodySchema,
   EscalationBodySchema,
   TrackRecordsSchema,
+  ModelSuggestionsSchema,
   PublicStatsSchema,
   ModelsSchema,
   DiscoveryProofSchema,
@@ -118,6 +119,7 @@ export const ANSWER_SCHEMAS = {
   Models: ModelsSchema,
   Desks: DesksSchema,
   TrackRecords: TrackRecordsSchema,
+  ModelSuggestions: ModelSuggestionsSchema,
   PublicStats: PublicStatsSchema,
   Provider: ProviderViewSchema,
   ProviderRemoved: ProviderRemovedSchema,
@@ -237,6 +239,11 @@ const TASKS: ApiOperation[] = [
       since: "Only jobs started at or after this time (ISO 8601)",
     },
     responses: { 200: ok("TrackRecords"), 400: err("A bad grouping or time") },
+  },
+  {
+    method: "get", path: "/api/model-suggestions", tag: "Tasks", summary: "Which model each role (desks, reviewer, Architect) would do as well on for less, or clearly better on, from the track records",
+    query: { since: "Compare jobs started at or after this time (ISO 8601; default: the last 30 days)" },
+    responses: { 200: ok("ModelSuggestions"), 400: err("A bad time") },
   },
   { method: "get", path: "/api/tasks/{id}", tag: "Tasks", summary: "One task", responses: { 200: ok("Task"), ...notFound("task") } },
   {

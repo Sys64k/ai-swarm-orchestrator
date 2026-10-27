@@ -759,6 +759,48 @@ export const SignedInSchema = z.object({ ok: z.literal(true) });
 export const TRACK_RECORD_KEYS = ["model", "host", "desk", "role", "project"] as const;
 export type TrackRecordKey = (typeof TRACK_RECORD_KEYS)[number];
 
+/** The roles model suggestions compare: the desks' builders, the reviewer (acceptance check), the Architect. */
+export const SUGGESTION_ROLES = ["desks", "reviewer", "architect"] as const;
+export type SuggestionRole = (typeof SUGGESTION_ROLES)[number];
+export const SUGGESTION_ROLE_LABEL: Record<SuggestionRole, string> = { desks: "Desks", reviewer: "Reviewer", architect: "Architect" };
+
+/** How a model has done in a role, as suggestions compare it. */
+export const SuggestionEvidenceSchema = z.object({
+  model: z.string().describe("The model's name, as track records show it"),
+  samples: z.number().int().describe("Settled tasks it started (desks), met verdicts (reviewer) or proposed plans (Architect)"),
+  quality: z.number().describe("0 to 1: tasks finished of those settled; met verdicts that held up; proposed plans approved"),
+  unitCostUsd: z.number().describe("All-in cost per finished task (desks), per check (reviewer) or per plan (Architect)"),
+});
+export type SuggestionEvidence = z.infer<typeof SuggestionEvidenceSchema>;
+
+export const ModelSuggestionSchema = z.object({
+  role: z.enum(SUGGESTION_ROLES),
+  kind: z.enum(["cheaper", "better"]).describe("cheaper: as good, for less; better: clearly better, maybe for more"),
+  current: SuggestionEvidenceSchema,
+  suggested: SuggestionEvidenceSchema,
+  spec: z.string().optional().describe("How to choose the suggested model (<provider>/<model>); absent when no provider offers it now"),
+  apply: z
+    .array(z.object({ kind: z.enum(["desk", "role"]), target: z.string(), model: z.string() }))
+    .describe("What applies it, as `aso desk <target> <model>` does: each connected machine (desk) or the role; empty when no provider offers the model now"),
+  reason: z.string().describe("The comparison in a sentence"),
+});
+export type ModelSuggestion = z.infer<typeof ModelSuggestionSchema>;
+
+export const ModelSuggestionsQuerySchema = z.object({
+  since: z
+    .string()
+    .refine((v) => !Number.isNaN(Date.parse(v)), "a date or time, e.g. 2026-10-01 or 2026-10-01T12:00:00Z")
+    .optional()
+    .describe("Compare jobs started at or after this (default: the last 30 days)"),
+});
+
+export const ModelSuggestionsSchema = z.object({
+  since: z.string().describe("The start of the period compared"),
+  suggestions: z.array(ModelSuggestionSchema),
+  notes: z.array(z.object({ role: z.enum(SUGGESTION_ROLES), text: z.string() })).describe("Why a role has no suggestion: what's missing"),
+});
+export type ModelSuggestions = z.infer<typeof ModelSuggestionsSchema>;
+
 export const TrackRecordQuerySchema = z.object({
   by: z.enum(TRACK_RECORD_KEYS).default("model").describe("Group by the model, the machine, the desk (machine #slot), the task's role, or its project"),
   project: z.string().optional().describe("Only this project's tasks"),
