@@ -3,6 +3,11 @@ import { hubPath } from "../lib/hub-routes.ts";
 import { describe, it } from "node:test";
 import {
   formatUsd,
+  escalationBody,
+  escalationChoices,
+  escalationDraft,
+  escalationSummary,
+  nextLadderStep,
   roleModelChoices,
   roleModelOf,
   plansSummary,
@@ -717,5 +722,56 @@ describe("the Architect's and the reviewer's model", () => {
     assert.equal(roleModelOf({ roles: {} }, "architect"), "default");
     assert.equal(roleModelOf(undefined, "architect"), "default", "an older Hub");
     assert.equal(hubPath("POST", ["models", "roles"]), "/api/models/roles");
+  });
+});
+
+describe("where failing tasks move (escalation)", () => {
+  const models = {
+    architect: "claude-opus-5-5",
+    defaultAgent: "claude-haiku-5-5",
+    available: [
+      { model: "claude-opus-5-5", spec: "anthropic/claude-opus-5-5", provider: "anthropic" as const, providerId: "anthropic", providerLabel: "Anthropic" },
+      { model: "gpt-6.1-sol", spec: "openai/gpt-6.1-sol", provider: "openai-compatible" as const, providerId: "openai", providerLabel: "OpenAI" },
+    ],
+  };
+
+  it("offers each provider's models, and a ladder model that isn't listed", () => {
+    assert.deepEqual(escalationChoices(models).map((c) => c.value), ["anthropic/claude-opus-5-5", "openai/gpt-6.1-sol"]);
+    const withOld = escalationChoices(models, { escalation: { ladder: ["claude-sonnet-5-5"], juniorTries: 2 } });
+    assert.deepEqual(withOld.at(-1), { value: "anthropic/claude-sonnet-5-5", label: "anthropic/claude-sonnet-5-5 (not listed)", group: "Not listed" });
+  });
+
+  it("says where failing tasks move, and whether that changed while the Hub runs", () => {
+    assert.equal(escalationSummary({ escalation: { ladder: ["claude-opus-5-5"], juniorTries: 2 }, escalationSet: {} }), "After 2 tries on a desk's model, a task moves to anthropic/claude-opus-5-5.");
+    assert.equal(
+      escalationSummary({ escalation: { ladder: ["openai/gpt-6.1-sol", "anthropic/claude-opus-5-5"], juniorTries: 1 }, escalationSet: { ladder: ["openai/gpt-6.1-sol", "anthropic/claude-opus-5-5"] } }),
+      "After 1 try on a desk's model, a task moves to openai/gpt-6.1-sol, then anthropic/claude-opus-5-5. Changed while the Hub runs.",
+    );
+    assert.equal(escalationSummary({ escalation: null }), "Off: every round stays on the desk's model.");
+    assert.equal(escalationSummary({}), undefined, "an older Hub doesn't say");
+    assert.equal(escalationSummary(undefined), undefined, "not loaded yet");
+  });
+
+  it("starts the editor from what's in force", () => {
+    assert.deepEqual(escalationDraft({ escalation: { ladder: ["claude-opus-5-5"], juniorTries: 3 } }), { ladder: ["anthropic/claude-opus-5-5"], juniorTries: "3" });
+    assert.deepEqual(escalationDraft({ escalation: null }), { ladder: [], juniorTries: "2" }, "off: an empty ladder");
+  });
+
+  it("builds the body, and says why one can't be saved", () => {
+    assert.deepEqual(escalationBody(["openai/gpt-6.1-sol"], "0"), { body: { ladder: ["openai/gpt-6.1-sol"], juniorTries: 0 } });
+    assert.match((escalationBody([], "2") as { error: string }).error, /at least one model/);
+    assert.match((escalationBody(["a/b", "a/b"], "2") as { error: string }).error, /only once/);
+    assert.match((escalationBody(["a", "b", "c", "d", "e", "f"], "2") as { error: string }).error, /at most 5/);
+    for (const tries of ["", "-1", "1.5", "101", "two"]) assert.match((escalationBody(["a/b"], tries) as { error: string }).error, /whole number from 0 to 100/, tries);
+    assert.equal(hubPath("POST", ["models", "escalation"]), "/api/models/escalation");
+  });
+
+  it("starts a new step on a model not on the ladder yet, and offers none when it's full or nothing is left", () => {
+    const choices = escalationChoices(models);
+    assert.equal(nextLadderStep(choices, []), "anthropic/claude-opus-5-5");
+    assert.equal(nextLadderStep(choices, ["anthropic/claude-opus-5-5"]), "openai/gpt-6.1-sol");
+    assert.equal(nextLadderStep(choices, ["anthropic/claude-opus-5-5", "openai/gpt-6.1-sol"]), undefined, "every model is on it");
+    const many = ["a", "b", "c", "d", "e", "f"].map((m) => ({ value: m, label: m }));
+    assert.equal(nextLadderStep(many, ["a", "b", "c", "d", "e"]), undefined, "full");
   });
 });

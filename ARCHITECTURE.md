@@ -1217,6 +1217,15 @@ skipping refused models. The choice is pinned on the conversation like a desk mo
 through `DeskModels.route(spec)` (any spec, not only desks'), and named in the history with its
 reason. Ladder models the Hub can't build an adapter for are dropped at start, with a warning.
 
+The policy is asked for at each round (`ConversationManager`'s `escalation` option is a getter),
+so it can change while the Hub runs: `DeskModels.setEscalation` keeps a ladder and/or
+`juniorTries` in `models.json` (`escalation`, beside the desks and roles), and
+`effectiveEscalation` lays them over the start policy from `buildEscalationPolicy`. Like a desk's
+model, each new ladder model's adapter is built before saving, so one the Hub can't use is
+refused and nothing changes. `POST /api/models/escalation` sets it (`default` resets either
+part); `GET /api/desks` shows the policy in force (`escalation`, null when off) and
+`escalationSet`.
+
 An agent that reaches the turn limit (`--max-turns`): the conversation calls
 `TaskManager.recordOutOfTurns`, which sets `outOfTurns`; the worker saves the unfinished work on
 the branch and reports `failed`, which then becomes a rework round (`rework`, so it counts toward

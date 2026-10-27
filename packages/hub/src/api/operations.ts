@@ -15,6 +15,7 @@ import {
   PricesSchema,
   DesksSchema,
   RoleModelBodySchema,
+  EscalationBodySchema,
   TrackRecordsSchema,
   PublicStatsSchema,
   ModelsSchema,
@@ -77,6 +78,7 @@ export const REQUEST_SCHEMAS = {
   DiscoveryProofBody: DiscoveryProofBodySchema,
   DeskAssignment: DeskAssignmentBodySchema,
   RoleModel: RoleModelBodySchema,
+  Escalation: EscalationBodySchema,
   ProviderAdd: ProviderAddBodySchema,
   PriceSet: PriceSetBodySchema,
   PriceRemove: PriceRemoveBodySchema,
@@ -315,6 +317,10 @@ const WORKERS: ApiOperation[] = [
   {
     method: "post", path: "/api/models/roles", tag: "Workers", summary: "Put the Architect or the reviewer (the acceptance check) on a model, or back on the default", body: "RoleModel",
     responses: { 200: ok("Desks"), 400: err("Not a model the Hub can use for it") },
+  },
+  {
+    method: "post", path: "/api/models/escalation", tag: "Workers", summary: "Change where failing tasks move: the ladder of stronger models, the tries on a desk's model before it, or either back to the Hub's start setting", body: "Escalation",
+    responses: { 200: ok("Desks"), 400: err("Not a model the Hub can use for it, or an invalid body") },
   },
   { method: "get", path: "/api/desks", tag: "Workers", summary: "Which desks use a model of their own, and each such model's calls at once and load", responses: { 200: ok("Desks") } },
   {

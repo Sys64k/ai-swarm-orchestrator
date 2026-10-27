@@ -3,7 +3,7 @@ import http from "node:http";
 import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
-import { DeskModels, desksOf, modelConcurrency, type LlmAdapter } from "@aso/hub";
+import { DEFAULT_JUNIOR_TRIES, DeskModels, desksOf, modelConcurrency, type LlmAdapter } from "@aso/hub";
 import { createMessage, type AgentMessage, type AvailableModel } from "@aso/shared";
 import { postTask, pushTaskBranch, reply, ScriptedModel, tempDir, text, TOKEN, waitFor, withHub, worker } from "./helpers.ts";
 
@@ -71,6 +71,53 @@ describe("desk models", () => {
     }, 4, isLocal);
     await assert.rejects(fresh.assignRole("architect", "x/y"));
     assert.equal(fresh.roleRoute("architect", true), undefined);
+  });
+
+  it("changes the escalation ladder and the junior tries over the Hub's start settings, and keeps them", async () => {
+    const dir = tempDir();
+    const start = { ladder: ["anthropic/claude-opus-5-5"], juniorTries: 2 };
+    const models = await open(dir);
+    assert.deepEqual(models.escalationPolicy(start), start, "nothing changed: the start settings");
+    assert.deepEqual(models.view("opus", null, start).escalation, start);
+
+    await models.setEscalation({ ladder: ["openai/gpt-6.1-sol", "anthropic/claude-opus-5-5"] });
+    assert.deepEqual(models.escalationPolicy(start), { ladder: ["openai/gpt-6.1-sol", "anthropic/claude-opus-5-5"], juniorTries: 2 }, "the start's junior tries stay");
+    await models.setEscalation({ juniorTries: 3 });
+    const reopened = await open(dir);
+    assert.deepEqual(reopened.escalationChoice(), { ladder: ["openai/gpt-6.1-sol", "anthropic/claude-opus-5-5"], juniorTries: 3 }, "kept across restarts");
+    assert.ok(reopened.view("opus", null, start).models.some((m) => m.model === "openai/gpt-6.1-sol"), "a ladder model's load shows");
+
+    await reopened.setEscalation({ ladder: null });
+    assert.deepEqual(reopened.escalationPolicy(start), { ladder: ["anthropic/claude-opus-5-5"], juniorTries: 3 }, "the ladder back on the start's");
+    await reopened.setEscalation({ juniorTries: null });
+    assert.deepEqual(reopened.escalationChoice(), {}, "both back");
+    assert.doesNotMatch(readFileSync(path.join(dir, "models.json"), "utf8"), /gpt-6/, "a model nothing uses is forgotten");
+  });
+
+  it("turns escalation on when the Hub started without it, and leaves it off otherwise", async () => {
+    const models = await open();
+    assert.equal(models.escalationPolicy(undefined), undefined);
+    await models.setEscalation({ juniorTries: 1 });
+    assert.equal(models.escalationPolicy(undefined), undefined, "tries alone don't make a ladder");
+    assert.equal(models.view("opus", null).escalation, null, "off");
+    await models.setEscalation({ ladder: ["openai/gpt-6.1-sol"] });
+    assert.deepEqual(models.escalationPolicy(undefined), { ladder: ["openai/gpt-6.1-sol"], juniorTries: 1 });
+    await models.setEscalation({ juniorTries: null });
+    assert.deepEqual(models.escalationPolicy(undefined), { ladder: ["openai/gpt-6.1-sol"], juniorTries: DEFAULT_JUNIOR_TRIES });
+  });
+
+  it("refuses a ladder it can't use, and changes nothing then", async () => {
+    let broken = false;
+    const models = await DeskModels.open(undefined, (spec) => {
+      if (broken && spec === "x/missing") throw new Error("no such provider");
+      return fakeAdapter(spec);
+    }, 4, isLocal);
+    await models.setEscalation({ ladder: ["anthropic/claude-sonnet-5-5"], juniorTries: 2 });
+    broken = true;
+    await assert.rejects(models.setEscalation({ ladder: ["anthropic/claude-opus-5-5", "x/missing"], juniorTries: 4 }), /no such provider/);
+    await assert.rejects(models.setEscalation({ ladder: ["machine/llama"] }), /machine\/llama can't take escalated tasks/);
+    await assert.rejects(models.setEscalation({ ladder: ["a/b", "a/b"] }), /only once/);
+    assert.deepEqual(models.escalationChoice(), { ladder: ["anthropic/claude-sonnet-5-5"], juniorTries: 2 }, "unchanged");
   });
 
   it("gives a local model one call at once unless told otherwise; Claude gets the Hub's limit", async () => {

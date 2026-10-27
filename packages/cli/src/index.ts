@@ -13,6 +13,7 @@ import {
   PROVIDER_PRESETS,
   DEFAULT_HUB_PORT,
   DEFAULT_PROJECTS_DIR,
+  MAX_JUNIOR_TRIES,
   MAX_WORKER_SLOTS,
   TRACK_RECORD_KEYS,
 } from "@aso/shared";
@@ -39,7 +40,7 @@ import {
 } from "./commands/service.js";
 import { startWorkerCommand } from "./commands/start-worker.js";
 import { findHubCommand } from "./commands/find-hub.js";
-import { deskCommand, desksCommand, modelsCommand } from "./commands/models.js";
+import { deskCommand, desksCommand, escalationCommand, modelsCommand } from "./commands/models.js";
 import { trackRecordsCommand } from "./commands/track-records.js";
 import { addProviderCommand, providersCommand, removeProviderCommand } from "./commands/providers.js";
 import { pricesCommand, removePriceCommand, setPriceCommand } from "./commands/prices.js";
@@ -98,8 +99,13 @@ function parseWssUrl(value: string): string {
 /** A whole number, 0 or more (e.g. rounds). */
 function parseCount(value: string): number {
   const n = Number(value);
-  if (!Number.isInteger(n) || n < 0 || n > 100) throw new InvalidArgumentError("expected a whole number from 0 to 100");
+  if (!Number.isInteger(n) || n < 0 || n > MAX_JUNIOR_TRIES) throw new InvalidArgumentError(`expected a whole number from 0 to ${MAX_JUNIOR_TRIES}`);
   return n;
+}
+
+/** `--junior-tries` of `aso escalation`: a count, or `default`. */
+function parseTriesOrDefault(value: string): number | "default" {
+  return value === "default" ? value : parseCount(value);
 }
 
 function parseUsd(value: string): number {
@@ -459,6 +465,12 @@ program
   .option("--vision", "a local model that accepts images")
   .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
   .action(deskCommand);
+program
+  .command("escalation [models]")
+  .description("Show where failing tasks move, or change it while the Hub runs: stronger models from `aso models` (comma-separated, weakest first), or `default` for the Hub's --escalate-to")
+  .option("--junior-tries <n>", "tries on a desk's model before a task escalates, counting the first attempt (0: straight to the ladder), or `default`", parseTriesOrDefault)
+  .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
+  .action(escalationCommand);
 
 program
   .command("find-hub")
