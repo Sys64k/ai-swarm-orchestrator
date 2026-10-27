@@ -8,6 +8,7 @@ import {
   escalationDraft,
   escalationSummary,
   nextLadderStep,
+  startedSummary,
   roleModelChoices,
   roleModelOf,
   plansSummary,
@@ -660,6 +661,7 @@ describe("track records page", () => {
     tasks: { worked: 3, finished: 2, firstTry: 1, tookOver: 1 },
     costUsd: 0.5,
     costPerFinishedUsd: 0.25,
+    started: { settled: 3, finished: 2, costUsd: 1.5, costPerFinishedUsd: 0.75 },
     plans: { planned: 0, proposed: 0, approved: 0, rejected: 0, failed: 0, withQuestions: 0, costUsd: 0 },
     reviews: { checks: 0, met: 0, unmet: 0, undecided: 0, costUsd: 0 },
   };
@@ -667,12 +669,15 @@ describe("track records page", () => {
   it("says a record in a line", () => {
     assert.equal(
       trackRecordLine(row),
-      "2 tasks finished (1 first try, 1 taken over) · 5 builds · QA passed 3 of 4 · acceptance met 2 of 2 · 2 out of turns · 1 failed · $0.50, $0.25 a task",
+      "2 tasks finished (1 first try, 1 taken over) · 5 builds · QA passed 3 of 4 · acceptance met 2 of 2 · 2 out of turns · 1 failed · $0.50 on its builds · 3 tasks started here, 2 finished: $0.75 a finished task, escalations and failures included",
     );
-    const tester = { ...row, key: "canfod", builds: { ...row.builds, jobs: 0, built: 0, failed: 0, outOfTurns: 0, qaPassed: 0, qaFailed: 0, accepted: 0 }, qaRuns: { runs: 4, passed: 3, failed: 1, errors: 0, dropped: 0 }, tasks: { worked: 0, finished: 0, firstTry: 0, tookOver: 0 }, costUsd: 0, costPerFinishedUsd: undefined };
+    assert.equal(startedSummary({ settled: 1, finished: 0, costUsd: 0.1 }), "1 task started here, 0 finished, $0.10 spent", "none finished: what was spent");
+    assert.equal(startedSummary({ settled: 0, finished: 0, costUsd: 0 }), undefined);
+    assert.equal(startedSummary(undefined), undefined, "an older Hub");
+    const tester = { ...row, key: "canfod", builds: { ...row.builds, jobs: 0, built: 0, failed: 0, outOfTurns: 0, qaPassed: 0, qaFailed: 0, accepted: 0 }, qaRuns: { runs: 4, passed: 3, failed: 1, errors: 0, dropped: 0 }, tasks: { worked: 0, finished: 0, firstTry: 0, tookOver: 0 }, costUsd: 0, costPerFinishedUsd: undefined, started: undefined };
     assert.equal(trackRecordLine(tester), "4 QA runs (3 of 4 passed)");
     assert.equal(trackRecordLine({ ...tester, qaRuns: { runs: 1, passed: 0, failed: 0, errors: 1, dropped: 0 } }), "1 QA run", "no verdict, no rate");
-    assert.match(trackRecordLine({ ...row, tasks: { ...row.tasks, finished: 0, firstTry: 0, tookOver: 0 }, costPerFinishedUsd: undefined }), /^no task finished yet · 5 builds .* · \$0\.50$/);
+    assert.match(trackRecordLine({ ...row, tasks: { ...row.tasks, finished: 0, firstTry: 0, tookOver: 0 }, costPerFinishedUsd: undefined, started: undefined }), /^no task finished yet · 5 builds .* · \$0\.50 on its builds$/);
   });
 
   it("adds the plans a model made as the Architect, and its acceptance checks as the reviewer", () => {
@@ -683,6 +688,7 @@ describe("track records page", () => {
       tasks: { worked: 0, finished: 0, firstTry: 0, tookOver: 0 },
       costUsd: 0,
       costPerFinishedUsd: undefined,
+      started: undefined,
       plans: { planned: 3, proposed: 3, approved: 2, rejected: 1, failed: 0, withQuestions: 2, costUsd: 1.6 },
       reviews: { checks: 9, met: 7, unmet: 1, undecided: 1, costUsd: 0.45 },
     };

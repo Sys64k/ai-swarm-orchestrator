@@ -9,6 +9,7 @@ const row = (key: string, extra: { finished?: number; qaPassed?: number; qaFaile
   tasks: { worked: 3, finished: extra.finished ?? 2, firstTry: 1, tookOver: 0 },
   costUsd: extra.cost ?? 0.5,
   ...(extra.finished === 0 ? {} : { costPerFinishedUsd: (extra.cost ?? 0.5) / (extra.finished ?? 2) }),
+  started: extra.finished === 0 ? { settled: 0, finished: 0, costUsd: 0 } : { settled: 3, finished: 2, costUsd: 1.5, costPerFinishedUsd: 0.75 },
   plans: { planned: 0, proposed: 0, approved: 0, rejected: 0, failed: 0, withQuestions: 0, costUsd: 0 },
   reviews: { checks: 0, met: 0, unmet: 0, undecided: 0, costUsd: 0 },
 });
@@ -23,10 +24,12 @@ describe("aso track-records", () => {
     const lines = trackRecordLines({ by: "model", since: "2026-10-27T12:00:00.000Z", rows: [row("models/gemini-3.8-flash"), row("claude-opus-5-5", { finished: 0, qaPassed: 0, qaFailed: 0 })] });
     assert.equal(lines[0], "Track records by model, from jobs since 2026-10-27T12:00:00.000Z:");
     const [header, gemini, opus] = lines.slice(2, 5);
-    assert.match(header, /^MODEL\s+FINISHED\s+1ST TRY\s+TOOK OVER\s+BUILDS\s+QA PASSED\s+ACCEPTED\s+OUT OF TURNS\s+FAILED\s+COST\s+PER TASK$/);
+    assert.match(header, /^MODEL\s+FINISHED\s+1ST TRY\s+TOOK OVER\s+BUILDS\s+QA PASSED\s+ACCEPTED\s+OUT OF TURNS\s+FAILED\s+COST\s+STARTED\s+PER TASK$/);
     assert.ok(!header.includes("QA RUNS"), "models don't run QA");
-    assert.match(gemini, /^models\/gemini-3\.8-flash\s+2\s+1\s+0\s+5\s+3\/4\s+2\/2\s+2\s+1\s+\$0\.50\s+\$0\.25$/);
-    assert.match(opus, /^claude-opus-5-5\s+0 .*\s-\s.*\$0\.50\s+-$/, "no QA verdicts and no task finished: dashes");
+    assert.match(gemini, /^models\/gemini-3\.8-flash\s+2\s+1\s+0\s+5\s+3\/4\s+2\/2\s+2\s+1\s+\$0\.50\s+2\/3\s+\$0\.75$/, "per task: all in, by where tasks started");
+    assert.match(opus, /^claude-opus-5-5\s+0 .*\s-\s.*\$0\.50\s+-\s+-$/, "no QA verdicts and no task started: dashes");
+    const older = trackRecordLines({ by: "model", since: null, rows: [{ ...row("gemini"), started: undefined } as never] });
+    assert.match(older[3], /\$0\.50\s+-\s+-$/, "an older Hub sends no started: dashes");
     assert.equal(header.indexOf("FINISHED"), gemini.indexOf("2"), "columns line up");
   });
 

@@ -1914,7 +1914,12 @@ project and counts builds by result (`COUNTED_BUILD_RESULTS`), the verdicts on t
 (not by model: tests run without one) and cost. A merged task counts as finished for whoever
 made its last `built` build (`finishedBy`): `firstTry` when that was its only build, `tookOver`
 when an earlier build was someone else's. That is judged over all the task's builds, so
-`since` can't make a reworked task look like a first try. `publicStats` (`public-stats.ts`) reduces
+`since` can't make a reworked task look like a first try. A settled task (merged or failed; not
+cancelled) also counts under `started` for the key of its first build (`startedBy`, or its own
+role or project), with its whole cost: every build's `costUsd` and `acceptanceCostUsd`, plus its
+plan's `llm.costUsd` shared equally among all tasks with that `planId` (`planShares`, over every
+task given, so a filter doesn't change a share). `since` applies to the first build. That
+`started.costPerFinishedUsd` is what public stats share as a model's cost per task. `publicStats` (`public-stats.ts`) reduces
 the by-model report to what `--public-stats` shares (totals; `models`, `costs`), served at
 `GET /api/public-stats` without a token on both ports (`PUBLIC_API_PATHS`, the gateway's public
 set), cached a minute; `scripts/readme-stats.mjs` renders it into the README daily

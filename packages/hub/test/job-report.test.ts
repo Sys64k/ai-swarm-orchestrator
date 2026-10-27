@@ -133,3 +133,56 @@ describe("track records of plans and acceptance checks", () => {
     assert.equal(trackRecords(reviewed, plans, { by: "model", project: "blog" }).rows.find((r) => r.key === "opus")!.plans.planned, 1);
   });
 });
+
+describe("what a task costs, all in, by where it started", () => {
+  const tasks = [
+    // Gemini, first try; from plan p1.
+    task([build("gemini", "built", { acceptance: "met", acceptanceCostUsd: 0.02 })], { planId: "p1" }),
+    // Gemini runs out of turns twice; Opus finishes. Also from p1, in another project.
+    task(
+      [
+        build("gemini", "outOfTurns"),
+        build("gemini", "outOfTurns", { round: 1 }),
+        build("opus", "built", { round: 2, acceptance: "met", acceptanceCostUsd: 0.05, costUsd: 0.9 }),
+      ],
+      { planId: "p1", project: "blog", spec: { role: "backend" } },
+    ),
+    // Haiku fails it for good: its cost counts, with no task to show for it.
+    task([build("haiku", "failed")], { state: "failed" }),
+    // Cancelled by a person, and still being checked: neither counts.
+    task([build("gemini", "built")], { state: "cancelled" }),
+    task([build("gemini", "pushed")], { state: "verifying" }),
+  ];
+  const plans: ReportPlan[] = [
+    { planId: "p1", project: "shop", state: "approved", model: "opus", llm: { costUsd: 0.3 }, createdAt: at() },
+    // Rejected: led to no task, so no task carries its cost.
+    { planId: "p2", project: "shop", state: "rejected", model: "opus", llm: { costUsd: 0.2 }, createdAt: at() },
+  ];
+
+  it("charges every build on any model, the acceptance checks and a share of the plan to the model a task started on", () => {
+    const rows = trackRecords(tasks, plans, { by: "model" }).rows;
+    const gemini = rows.find((r) => r.key === "gemini")!;
+    // (0.1 + 0.02 + 0.15) + (0.1 + 0.1 + 0.9 + 0.05 + 0.15)
+    assert.deepEqual(gemini.started, { settled: 2, finished: 2, costUsd: 1.57, costPerFinishedUsd: 0.785 });
+    assert.equal(gemini.costPerFinishedUsd, 0.4, "its own builds (the cancelled task's too) per task it finished itself: Opus's takeover is left out there");
+    assert.deepEqual(rows.find((r) => r.key === "opus")!.started, { settled: 0, finished: 0, costUsd: 0 }, "it only took over");
+    assert.deepEqual(rows.find((r) => r.key === "haiku")!.started, { settled: 1, finished: 0, costUsd: 0.1 }, "a failed task costs, and finishes nothing");
+  });
+
+  it("groups by the task's own role and project, and by the machine and desk of its first build", () => {
+    assert.deepEqual(
+      trackRecords(tasks, plans, { by: "project" }).rows.map((r) => [r.key, r.started.settled, r.started.costUsd]),
+      [["shop", 2, 0.37], ["blog", 1, 1.3]],
+    );
+    assert.deepEqual(trackRecords(tasks, plans, { by: "host" }).rows[0].started, { settled: 3, finished: 2, costUsd: 1.67, costPerFinishedUsd: 0.835 });
+    assert.equal(trackRecords(tasks, plans, { by: "model", role: "frontend" }).rows.find((r) => r.key === "gemini")!.started.costUsd, 0.27, "the plan's share stays a share when other tasks are filtered out");
+  });
+
+  it("counts a task from when its first build started", () => {
+    const late = trackRecords(tasks, plans, { by: "model", since: tasks[1].jobs![2].startedAt });
+    assert.equal(late.rows.find((r) => r.key === "gemini")!.started.settled, 0, "Opus's build is after --since, but both of Gemini's tasks started before");
+    assert.equal(late.rows.find((r) => r.key === "haiku")!.started.settled, 1, "Haiku's started after");
+    const parsed = TrackRecordRowSchema.safeParse(trackRecords(tasks, plans, { by: "model" }).rows[0]);
+    assert.ok(parsed.success, JSON.stringify(parsed.error?.issues));
+  });
+});

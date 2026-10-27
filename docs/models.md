@@ -274,9 +274,9 @@ aso track-records --by desk --project aso-ui --since 2026-11-01
 It prints, for example:
 
 ```
-MODEL                    FINISHED  1ST TRY  TOOK OVER  BUILDS  QA PASSED  ACCEPTED  OUT OF TURNS  FAILED  COST    PER TASK
-models/gemini-3.8-flash  14        9        0          25      14/17      12/13     6             1       $3.10   $0.22
-claude-opus-5-5          3         0        3          3       3/3        3/3       0             0       $2.70   $0.90
+MODEL                    FINISHED  1ST TRY  TOOK OVER  BUILDS  QA PASSED  ACCEPTED  OUT OF TURNS  FAILED  COST   STARTED  PER TASK
+models/gemini-3.8-flash  14        9        0          25      14/17      12/13     6             1       $3.10  17/18    $0.41
+claude-opus-5-5          3         0        3          3       3/3        3/3       0             0       $2.70  -        -
 ```
 
 - **Finished:** merged tasks whose last build that checked out was this model's (machine's, …).
@@ -284,7 +284,15 @@ claude-opus-5-5          3         0        3          3       3/3        3/3   
   the task before; with escalation, that's the stronger model rescuing it.
 - **QA passed, accepted:** the verdicts on its builds' work, as good out of all.
 - **Out of turns, failed:** builds whose agent ran out of turns or gave up.
-- **Cost, per task:** its builds' estimated model cost, and that divided by the tasks it finished.
+- **Cost:** its own builds' estimated model cost.
+- **Started, per task: what a task really costs.** The tasks whose first build was this model's
+  (machine's, …), finished out of those that ended, and what a finished one cost **all in**:
+  every build on any model (so a stronger model's takeover counts against the model the task
+  started on), the acceptance checks, an equal share of the plan it came from, and the cost of
+  the tasks that failed. This is the number to compare when choosing a desk's model: a cheap
+  model that keeps escalating to Opus is expensive here. Cancelled tasks don't count (a person
+  stopped them); a model that only takes over starts nothing, so it shows `-`. The API also keeps
+  `costPerFinishedUsd`, its own builds per task it finished.
 - **Plans and acceptance checks** (by model and by project), in a second table: the plans each
   model made as the Architect (proposed, approved, rejected, how many asked questions first, and
   their cost), and the acceptance checks it made as the reviewer (met, unmet, undecided, cost).
@@ -300,7 +308,8 @@ anyone, on its own port and on the worker gateway (so through Tailscale Funnel t
 - **Always:** tasks merged, how many on the first try or taken over, plans proposed and
   approved.
 - **`models`:** the same per model, with QA and acceptance rates and the acceptance checks it
-  made; **`costs`:** model costs in total, per task, and per model. `totals` shares neither.
+  made; **`costs`:** model costs in total, per task, and per model (each model's cost per task is
+  the all-in one, for tasks that started on it). `totals` shares neither.
 - **Never** machines, desks, people, projects or task titles. A machine's own model is only
   "a machine's own model". `--public-stats-projects aso-ui` counts only those projects' work.
 - **It does show when:** the oldest job counted and the time of the answer, so how active the

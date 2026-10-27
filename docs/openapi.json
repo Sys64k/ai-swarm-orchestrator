@@ -3386,8 +3386,40 @@
                   "description": "Estimated model cost of its builds"
                 },
                 "costPerFinishedUsd": {
-                  "description": "costUsd divided by tasks finished",
+                  "description": "costUsd divided by tasks finished: its own builds only (see started for a task's whole cost)",
                   "type": "number"
+                },
+                "started": {
+                  "type": "object",
+                  "properties": {
+                    "settled": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "Merged or failed tasks whose first build was its (cancelled ones aren't counted)"
+                    },
+                    "finished": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "Of those, merged"
+                    },
+                    "costUsd": {
+                      "type": "number",
+                      "description": "Everything those tasks cost: every build on any model (escalations too), their acceptance checks, and an equal share of their plan"
+                    },
+                    "costPerFinishedUsd": {
+                      "description": "costUsd divided by finished: what a finished task costs when it starts here, failures included",
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "settled",
+                    "finished",
+                    "costUsd"
+                  ],
+                  "additionalProperties": false,
+                  "description": "The tasks that started here, with their whole cost: for choosing a desk's model by cost (absent from Hubs before it)"
                 },
                 "plans": {
                   "type": "object",
@@ -3488,6 +3520,7 @@
                 "qaRuns",
                 "tasks",
                 "costUsd",
+                "started",
                 "plans",
                 "reviews"
               ],
@@ -3661,7 +3694,7 @@
                   "type": "number"
                 },
                 "costPerTaskUsd": {
-                  "description": "Its builds' cost per task it finished (only when the Hub shares costs)",
+                  "description": "What a finished task costs when it starts on this model, all in: every build on any model, acceptance checks, its share of its plan, and failed tasks (only when the Hub shares costs)",
                   "type": "number"
                 }
               },
