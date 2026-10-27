@@ -37,6 +37,15 @@ describe("public stats", () => {
     assert.equal(publicStats(local, ["models"], AT).models![0].model, "a machine's own model");
   });
 
+  it("counts plans only from when jobs were first recorded, so costs per task cover one period", () => {
+    const old = { ...plans[0], createdAt: "2026-10-16T09:00:00.000Z", llm: { costUsd: 30 } };
+    const recent = { ...plans[0], createdAt: "2026-10-27T12:05:00.000Z" };
+    const stats = publicStatsFor(tasks, [recent, old], { parts: ["costs"] }, AT);
+    assert.deepEqual(stats.plans, { proposed: 1, approved: 1 }, "the plan from before job records isn't counted");
+    assert.deepEqual(stats.costs, { totalUsd: 1.75, perTaskUsd: 0.88 });
+    assert.deepEqual(publicStatsFor([], [old], { parts: [] }, AT).plans, { proposed: 0, approved: 0 }, "no jobs yet: no plans either");
+  });
+
   it("counts only the projects it shares", () => {
     const other: ReportTask = { project: "blog", state: "merged", spec: { role: "r" }, jobs: [build("gemini")] };
     assert.equal(publicStatsFor([...tasks, other], plans, { parts: [], projects: ["blog"] }, AT).tasks.finished, 1);

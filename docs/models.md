@@ -262,6 +262,8 @@ anyone, on its own port and on the worker gateway (so through Tailscale Funnel t
   "a machine's own model". `--public-stats-projects aso-ui` counts only those projects' work.
 - **It does show when:** the oldest job counted and the time of the answer, so how active the
   swarm has been can be read from it.
+- **One period for everything:** from the oldest recorded job. Plans made before job records
+  began aren't counted, so the cost per task doesn't include plans whose tasks it doesn't count.
 
 This repository's README shows them: `.github/workflows/swarm-stats.yml` runs
 `scripts/readme-stats.mjs` once a day, which reads the address in the repository variable
