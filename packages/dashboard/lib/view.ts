@@ -35,7 +35,9 @@ const TASK_LABEL: Record<TaskState, string> = {
   cancelled: "Cancelled",
 };
 
-export function taskBadge(task: Pick<Task, "state" | "detachedAt" | "waitingReason">): { label: string; tone: Tone } {
+export function taskBadge(task: Pick<Task, "state" | "detachedAt" | "waitingReason" | "supersededBy">): { label: string; tone: Tone } {
+  // A newer task does its job: not a failure anyone needs to act on.
+  if (task.supersededBy && (task.state === "failed" || task.state === "cancelled")) return { label: "Superseded", tone: "muted" };
   if (task.detachedAt !== undefined) return { label: "Worker offline", tone: "waiting" };
   if (task.state === "pending" && task.waitingReason?.startsWith("blocked")) return { label: "Blocked", tone: "bad" };
   if (task.state === "pending" && task.waitingReason?.startsWith("waiting for")) return { label: "Waiting", tone: "muted" };
@@ -118,7 +120,7 @@ export function homeView(tasks: readonly Task[], plans: readonly Plan[]): HomeVi
       return review ? [{ kind: "task" as const, id: t.spec.taskId, project: t.project, title: t.spec.title, reason: review.text, href: `/tasks/${t.spec.taskId}`, badge: { label: "Review?", tone: "waiting" as Tone } }] : [];
     }),
     ...tasks
-      .filter((t) => t.state === "failed")
+      .filter((t) => t.state === "failed" && !t.supersededBy)
       .map((t) => ({ kind: "task" as const, id: t.spec.taskId, project: t.project, title: t.spec.title, reason: t.detail ?? "Failed", href: `/tasks/${t.spec.taskId}`, badge: { label: "Failed", tone: "bad" as Tone } })),
     ...plans
       .filter((p) => p.state === "failed")

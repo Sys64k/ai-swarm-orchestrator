@@ -280,12 +280,8 @@ export class TaskManager {
     if (task.state === "merging") throw new TaskError(`task ${taskId} is being merged right now`, "conflict");
     this.notApproving(taskId);
     for (const nodeId of [task.nodeId, task.qaNodeId]) if (nodeId) this.registry.release(nodeId, taskId);
-    if (task.state === "awaiting_review" && task.review?.pr && this.reviewGate) {
-      const pr = task.review.pr;
-      this.reviewGate.close(task, "The task was cancelled from the ASO console.").catch((err: Error) =>
-        log.warn(`could not close pull request #${pr.number} of ${taskId}: ${err.message}`),
-      );
-    }
+    // Its pull request may be open from an earlier round too (a rework underway).
+    this.closeReview(task, "The task was cancelled from the ASO console.");
     task.state = "cancelled";
     task.detachedAt = undefined;
     task.qaNodeId = undefined;
@@ -293,6 +289,13 @@ export class TaskManager {
     this.note(task, "cancelled by a person");
     this.kick();
     return task;
+  }
+
+  /** Close the task's pull request on GitHub, if it has one (in the background; a failure is logged). */
+  private closeReview(task: TaskRecord, why: string): void {
+    const pr = task.review?.pr;
+    if (!pr || !this.reviewGate) return;
+    this.reviewGate.close(task, why).catch((err: Error) => log.warn(`could not close pull request #${pr.number} of ${task.spec.taskId}: ${err.message}`));
   }
 
   /**
@@ -304,6 +307,8 @@ export class TaskManager {
     if (!task || task.state === "merged" || task.supersededBy) return;
     if (task.state !== "failed" && task.state !== "cancelled" && task.state !== "merging") {
       this.cancel(taskId);
+    } else if (task.state === "failed") {
+      this.closeReview(task, `Superseded by ${by}, which does this task's job.`);
     }
     task.supersededBy = by;
     this.note(task, `superseded by ${by}, which does its job`);
@@ -334,7 +339,9 @@ export class TaskManager {
     task.commit = undefined;
     task.detail = undefined;
     task.summary = undefined;
-    task.review = undefined; // a cancelled task's pull request was closed; the next one is new
+    // A failed task's pull request may still be open: close it, since the next attempt opens its own.
+    if (task.state === "failed") this.closeReview(task, "The task is being retried; its next attempt opens a new pull request.");
+    task.review = undefined;
     task.conflicts = undefined;
     task.rework = { round: 1, reason: `Retried by a person; ${why}. Your branch may already contain that attempt.` };
     task.state = "pending";
