@@ -280,7 +280,8 @@ describe("desks on their own models (Hub)", () => {
           const set = await call(ctx.port, "/api/models/challengers", { role: "desks", model: "local-model", share: 0.5, budgetUsd: 2 });
           assert.equal(set.status, 200, JSON.stringify(set.body));
           assert.deepEqual((({ since, ...t }) => t)(set.body.challengers.desks), { model: "local/local-model", share: 0.5, budgetUsd: 2, samples: 0, needed: 10, spentUsd: 0 });
-          await call(ctx.port, "/api/models/challengers", { role: "reviewer", model: "local-model", share: 0.5 });
+          const reviewerTrial = await call(ctx.port, "/api/models/challengers", { role: "reviewer", model: "local-model", share: 0.5 });
+          assert.equal(reviewerTrial.body.challengers.reviewer.budgetUsd, 5, "the reviewer's default budget");
 
           const dev = await worker(ctx.port, "dev");
           const qa = await worker(ctx.port, "qa");
@@ -315,6 +316,8 @@ describe("desks on their own models (Hub)", () => {
           assert.equal(ctx.hub.tasks.get(reviewerTakes)!.challenger, undefined, "not on the desks trial");
 
           const ended = await call(ctx.port, "/api/models/challengers", { role: "desks", model: "none" });
+          assert.equal((await call(ctx.port, "/api/models/challengers", { role: "desks", model: "local-model" })).body.challengers.desks.budgetUsd, 20, "the desks' default budget");
+          await call(ctx.port, "/api/models/challengers", { role: "desks", model: "none" });
           assert.equal(ended.body.challengers.desks, undefined);
           assert.ok(ended.body.challengers.reviewer, "the other trial goes on");
           dev.ws.close();

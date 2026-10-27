@@ -1184,7 +1184,12 @@ export function suggestionRequests(s: ModelSuggestion): Array<{ path: string; bo
 /** Mirror MAX_CHALLENGER_SHARE and DEFAULT_CHALLENGER_SHARE (as percentages), DEFAULT_CHALLENGER_BUDGET_USD and ChallengerBodySchema's budget bounds in @aso/shared. */
 export const MAX_TRIAL_SHARE_PERCENT = 50;
 export const DEFAULT_TRIAL_SHARE_PERCENT = 10;
-export const DEFAULT_TRIAL_BUDGET_USD = 5;
+export const DEFAULT_TRIAL_BUDGET_USD: Record<ChallengerRole, number> = { desks: 20, reviewer: 5 };
+
+/** How many tasks pass, on average, before a trial taking `sharePercent` has the `needed` samples: "about 100 tasks". */
+export function trialLength(sharePercent: number, needed: number): string {
+  return `about ${Math.ceil(needed / (sharePercent / 100))} tasks`;
+}
 const TRIAL_BUDGET_USD = { min: 0.5, max: 1000 };
 
 /** A trial in a sentence: "openai/gpt-6.1-terra takes 10% of the tasks: 3 of 10 settled so far, $0.80 of $5 spent." */

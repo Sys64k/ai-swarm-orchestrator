@@ -5,7 +5,7 @@ import { hubPost } from "./hub-client.ts";
 import { ActionButton, Section } from "./ui.tsx";
 import { ModelPicker } from "./model-picker.tsx";
 import type { ChallengerRole, Desks, Models } from "../lib/types.ts";
-import { DEFAULT_TRIAL_BUDGET_USD, DEFAULT_TRIAL_SHARE_PERCENT, escalationChoices, MAX_TRIAL_SHARE_PERCENT, trialBody, trialSummary } from "../lib/view.ts";
+import { DEFAULT_TRIAL_BUDGET_USD, DEFAULT_TRIAL_SHARE_PERCENT, escalationChoices, MAX_TRIAL_SHARE_PERCENT, trialBody, trialLength, trialSummary } from "../lib/view.ts";
 
 const ROLES: Array<{ role: ChallengerRole; label: string }> = [
   { role: "desks", label: "Desks (tasks start on it)" },
@@ -33,7 +33,7 @@ function TrialRow({ role, label, models, desks, onChanged }: { role: ChallengerR
   const choices = escalationChoices(models);
   const [model, setModel] = useState(choices[0]?.value ?? "");
   const [share, setShare] = useState(String(DEFAULT_TRIAL_SHARE_PERCENT));
-  const [budget, setBudget] = useState(String(DEFAULT_TRIAL_BUDGET_USD));
+  const [budget, setBudget] = useState(String(DEFAULT_TRIAL_BUDGET_USD[role]));
   const post = async (body: unknown) => {
     const r = await hubPost("models/challengers", body);
     if (!r.ok) return r.error;
@@ -65,7 +65,9 @@ function TrialRow({ role, label, models, desks, onChanged }: { role: ChallengerR
         }}
       />
       <label className="model-picker">
-        <span className="muted small">Share of the work (%)</span>
+        <span className="muted small">
+          Share of the work (%){Number(share) > 0 ? `: it needs 10 ${role === "desks" ? "tasks" : "met verdicts"}, so ${trialLength(Number(share), 10)} pass` : ""}
+        </span>
         <input className="input" type="number" min={1} max={MAX_TRIAL_SHARE_PERCENT} value={share} onChange={(e) => setShare(e.target.value)} />
       </label>
       <label className="model-picker">

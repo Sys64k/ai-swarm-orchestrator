@@ -905,7 +905,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   app.post("/api/models/challengers", async (c) => {
     const req = await parsed(c, ChallengerBodySchema);
     if (!req.ok) return c.json({ error: req.error }, 400);
-    const { role, model, share = DEFAULT_CHALLENGER_SHARE, budgetUsd = DEFAULT_CHALLENGER_BUDGET_USD } = req.data;
+    const { role, model, share = DEFAULT_CHALLENGER_SHARE, budgetUsd = DEFAULT_CHALLENGER_BUDGET_USD[role] } = req.data;
     let spec: string | null = null;
     if (model !== "none") {
       const resolved = await resolveSpecOrMachine(model);

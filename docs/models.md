@@ -352,7 +352,7 @@ A model on trial takes a share of a role's work, within a budget, until suggesti
 it:
 
 ```bash
-aso challenger desks openai/gpt-6.1-terra             # 10% of new tasks start on it, up to $5
+aso challenger desks openai/gpt-6.1-terra --share 30   # 30% of new tasks start on it, up to $20
 aso challenger reviewer anthropic/claude-sonnet-5-5 --share 20 --budget 10
 aso challenger desks none                              # end the trial
 ```
@@ -364,6 +364,10 @@ aso challenger desks none                              # end the trial
   the usual reviewer takes over.
 - **Which work:** decided by a hash of the task id (salted by role, so the two trials take
   different tasks): the same task always gets the same answer.
+- **Share and budget:** the share defaults to 10%, and the budget to $20 for the desks (it pays
+  for whole tasks, about $1–2 each all in) and $5 for the reviewer (only checks). A trial needs 10
+  samples, so at 10% about 100 tasks pass before it can be compared: a small swarm wants a larger
+  share (up to 50%).
 - **It ends by itself** once it has the data suggestions need (10 settled tasks it started, or
   10 met verdicts it gave) or has spent its budget; `aso desks` shows how it stands.
 - **Checked like a role's model:** it must take tools, and can't be a machine's own model. Give

@@ -4678,7 +4678,7 @@
             "maximum": 0.5
           },
           "budgetUsd": {
-            "description": "What the trial may spend in all (default 5)",
+            "description": "What the trial may spend in all (default 20 for the desks, 5 for the reviewer)",
             "type": "number",
             "minimum": 0.5,
             "maximum": 1000

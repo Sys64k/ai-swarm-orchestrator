@@ -11,6 +11,7 @@ import {
   startedSummary,
   suggestionNote,
   trialBody,
+  trialLength,
   trialSummary,
   suggestionRequests,
   suggestionTitle,
@@ -833,5 +834,7 @@ describe("trials", () => {
     for (const share of ["0", "51", "2.5", ""]) assert.match((trialBody("desks", "m", share, "5") as { error: string }).error, /whole percentage from 1 to 50/, share);
     assert.match((trialBody("desks", "m", "10", "0.1") as { error: string }).error, /\$0\.50 to \$1000/);
     assert.equal(hubPath("POST", ["models", "challengers"]), "/api/models/challengers");
+    assert.equal(trialLength(10, 10), "about 100 tasks");
+    assert.equal(trialLength(30, 10), "about 34 tasks");
   });
 });

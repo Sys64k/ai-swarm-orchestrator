@@ -198,7 +198,8 @@ weakest first) and `--junior-tries <n|default>` change it while the Hub runs; se
 ## `aso challenger`
 
 `aso challenger <desks|reviewer> <model|none>` puts a model on trial for a share of a role's work
-(`--share <percent>`, default 10, at most 50; `--budget <usd>`, default 5) until `aso tune` can
+(`--share <percent>`, default 10, at most 50; `--budget <usd>`, default 20 for the desks and 5 for
+the reviewer) until `aso tune` can
 compare it, or ends the trial. See [Trials](models.md#trials-getting-data-on-another-model).
 
 ## `aso tune`

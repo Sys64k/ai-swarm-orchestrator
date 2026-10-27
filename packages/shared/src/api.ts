@@ -282,14 +282,17 @@ export type ChallengerRole = (typeof CHALLENGER_ROLES)[number];
 /** The share of tasks a challenger takes unless told otherwise, and the most it may take. */
 export const DEFAULT_CHALLENGER_SHARE = 0.1;
 export const MAX_CHALLENGER_SHARE = 0.5;
-/** What a trial may spend unless told otherwise (USD). */
-export const DEFAULT_CHALLENGER_BUDGET_USD = 5;
+/**
+ * What a trial may spend unless told otherwise (USD): enough for the samples it needs. A desks
+ * trial pays for whole tasks (about $1–2 each, all in, for 10), the reviewer's only for checks.
+ */
+export const DEFAULT_CHALLENGER_BUDGET_USD: Record<ChallengerRole, number> = { desks: 20, reviewer: 5 };
 
 export const ChallengerBodySchema = z.strictObject({
   role: z.enum(CHALLENGER_ROLES).describe("desks: tasks start on it; reviewer: it makes their acceptance checks"),
   model: z.string().min(1).max(200).describe("A model from GET /api/models (<provider>/<model>), or none to end the trial"),
   share: z.number().min(0.01).max(MAX_CHALLENGER_SHARE).optional().describe("The share of tasks it takes (default 0.1)"),
-  budgetUsd: z.number().min(0.5).max(1000).optional().describe("What the trial may spend in all (default 5)"),
+  budgetUsd: z.number().min(0.5).max(1000).optional().describe("What the trial may spend in all (default 20 for the desks, 5 for the reviewer)"),
 });
 
 /** A trial, as `GET /api/desks` shows it. */

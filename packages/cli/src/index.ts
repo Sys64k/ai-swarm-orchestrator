@@ -461,8 +461,8 @@ program
 program
   .command("challenger <role> <model>")
   .description("Try a model for the desks or the reviewer on a share of the work, within a budget, until `aso tune` can compare it; `none` ends the trial")
-  .option("--share <percent>", "the share of tasks it takes (default 10, at most 50)", parsePositiveInt)
-  .option("--budget <usd>", "what the trial may spend in all (default 5)", parseUsd)
+  .option("--share <percent>", "the share of tasks it takes (default 10, at most 50); it needs 10 tasks, so at 10% about 100 tasks pass: a small swarm wants more", parsePositiveInt)
+  .option("--budget <usd>", "what the trial may spend in all (default 20 for the desks, 5 for the reviewer)", parseUsd)
   .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
   .action(challengerCommand);
 program
