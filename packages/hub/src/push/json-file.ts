@@ -22,6 +22,11 @@ export class JsonFileWriter {
     return this.save(data).catch((err: Error) => log.warn(`could not save ${this.file}: ${err.message}`));
   }
 
+  /** Resolves once every write asked for so far is done. */
+  async idle(): Promise<void> {
+    await this.saving;
+  }
+
   /** Like `write`, but rejects when this write fails (later writes still run). */
   save(data: unknown): Promise<void> {
     const json = JSON.stringify(data, null, 2);

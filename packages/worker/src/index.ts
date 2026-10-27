@@ -31,6 +31,7 @@ export {
   defaultSandboxImage,
   dockerRunArgs,
   hostRunner,
+  removeContainer,
   type CommandRunner,
   type DockerRunSpec,
   type DockerSandboxOptions,

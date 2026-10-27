@@ -115,6 +115,11 @@ export class WorkerWatch {
     return out;
   }
 
+  /** Resolves once the machines' state is on disk (a disconnect saves it as the Hub closes). */
+  async flush(): Promise<void> {
+    await this.writer?.idle();
+  }
+
   private save(): Promise<unknown> {
     const data: Record<string, SavedMachine> = {};
     for (const [host, m] of this.machines) data[host] = { lastSeenAt: new Date(m.lastSeenAt).toISOString(), ...(m.alerted ? { alerted: true } : {}) };
