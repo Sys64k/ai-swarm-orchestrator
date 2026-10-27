@@ -17,6 +17,8 @@ import {
   RoleModelBodySchema,
   EscalationBodySchema,
   ChallengerBodySchema,
+  TuningBodySchema,
+  TuningViewSchema,
   TrackRecordsSchema,
   ModelSuggestionsSchema,
   PublicStatsSchema,
@@ -82,6 +84,7 @@ export const REQUEST_SCHEMAS = {
   RoleModel: RoleModelBodySchema,
   Escalation: EscalationBodySchema,
   Challenger: ChallengerBodySchema,
+  Tuning: TuningBodySchema,
   ProviderAdd: ProviderAddBodySchema,
   PriceSet: PriceSetBodySchema,
   PriceRemove: PriceRemoveBodySchema,
@@ -122,6 +125,7 @@ export const ANSWER_SCHEMAS = {
   Desks: DesksSchema,
   TrackRecords: TrackRecordsSchema,
   ModelSuggestions: ModelSuggestionsSchema,
+  TuningView: TuningViewSchema,
   PublicStats: PublicStatsSchema,
   Provider: ProviderViewSchema,
   ProviderRemoved: ProviderRemovedSchema,
@@ -326,6 +330,11 @@ const WORKERS: ApiOperation[] = [
   {
     method: "post", path: "/api/models/roles", tag: "Workers", summary: "Put the Architect or the reviewer (the acceptance check) on a model, or back on the default", body: "RoleModel",
     responses: { 200: ok("Desks"), 400: err("Not a model the Hub can use for it") },
+  },
+  { method: "get", path: "/api/tuning", tag: "Workers", summary: "Each role's model pool (its own model, the members and their shares), auto-tuning, and what it changed", responses: { 200: ok("TuningView") } },
+  {
+    method: "post", path: "/api/tuning", tag: "Workers", summary: "Turn a role's auto-tuning on or off, or set the models it tries next", body: "Tuning",
+    responses: { 200: ok("TuningView"), 400: err("Not a model the Hub can try, or an invalid body") },
   },
   {
     method: "post", path: "/api/models/challengers", tag: "Workers", summary: "Put a model on trial for the desks or the reviewer: it takes a share of the work within a budget, until suggestions can compare it; model none ends it", body: "Challenger",

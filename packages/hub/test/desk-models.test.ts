@@ -131,18 +131,39 @@ describe("desk models", () => {
     assert.equal(models.roleModel("reviewer"), "openai/gpt-6.1-terra", "a model that takes tools goes on");
   });
 
-  it("keeps a trial across restarts, refuses one it can't run, and ends it", async () => {
+  it("keeps a pool's members across restarts, refuses one it can't run, and ends one or all", async () => {
     const dir = tempDir();
     const models = await open(dir);
-    await models.setChallenger("reviewer", "openai/gpt-6.1-sol", { share: 0.2, budgetUsd: 3 }, new Date("2026-10-27T12:00:00.000Z"));
-    assert.deepEqual((await open(dir)).challenger("reviewer"), { spec: "openai/gpt-6.1-sol", share: 0.2, budgetUsd: 3, since: "2026-10-27T12:00:00.000Z" });
-    await assert.rejects(models.setChallenger("desks", "machine/llama", { share: 0.1, budgetUsd: 5 }), /machine's own model/);
+    const share = (n: number) => ({ share: n, budgetUsd: 3, maxShare: 0.9 });
+    await models.setChallenger("reviewer", "openai/gpt-6.1-sol", share(0.2), new Date("2026-10-27T12:00:00.000Z"));
+    await models.setChallenger("reviewer", "anthropic/claude-sonnet-5-5", share(0.3));
+    assert.deepEqual((await open(dir)).members("reviewer")[0], { spec: "openai/gpt-6.1-sol", share: 0.2, budgetUsd: 3, since: "2026-10-27T12:00:00.000Z" });
+    await models.setChallenger("reviewer", "openai/gpt-6.1-sol", share(0.4));
+    assert.deepEqual(models.members("reviewer").map((m) => [m.spec, m.share, m.since]), [["openai/gpt-6.1-sol", 0.4, "2026-10-27T12:00:00.000Z"], ["anthropic/claude-sonnet-5-5", 0.3, models.members("reviewer")[1].since]], "a member's share changes, its start stays");
+    await assert.rejects(models.setChallenger("reviewer", "openai/gpt-6.1-terra", share(0.3)), /would take 100% of the work; at most 90%/);
+    await assert.rejects(models.setChallenger("desks", "machine/llama", share(0.1)), /machine's own model/);
     const noTools = await DeskModels.open(undefined, (spec) => ({ name: "f", model: spec, complete: async () => { throw new Error("no tools here"); } }), 4, isLocal, checkToolUse);
-    await assert.rejects(noTools.setChallenger("desks", "x/y", { share: 0.1, budgetUsd: 5 }), /can't take the Hub's requests with tools/);
-    assert.equal(noTools.challenger("desks"), undefined);
-    await models.setChallenger("reviewer", null, { share: 0.1, budgetUsd: 5 });
-    assert.equal((await open(dir)).challenger("reviewer"), undefined);
-    assert.doesNotMatch(readFileSync(path.join(dir, "models.json"), "utf8"), /gpt-6/, "a model nothing uses is forgotten");
+    await assert.rejects(noTools.setChallenger("desks", "x/y", share(0.1)), /can't take the Hub's requests with tools/);
+    assert.deepEqual(noTools.members("desks"), []);
+    await models.endChallenger("reviewer", "openai/gpt-6.1-sol");
+    assert.deepEqual((await open(dir)).members("reviewer").map((m) => m.spec), ["anthropic/claude-sonnet-5-5"]);
+    await models.endChallenger("reviewer", null);
+    assert.deepEqual((await open(dir)).members("reviewer"), []);
+    assert.doesNotMatch(readFileSync(path.join(dir, "models.json"), "utf8"), /gpt-6|sonnet/, "a model nothing uses is forgotten");
+  });
+
+  it("reads a trial saved before pools as the role's one member, and keeps tuning and its log", async () => {
+    const dir = tempDir();
+    const trial = { spec: "openai/gpt-6.1-terra", share: 0.3, budgetUsd: 20, since: "2026-10-27T22:20:00.000Z" };
+    writeFileSync(path.join(dir, "models.json"), JSON.stringify({ challengers: { desks: trial } }));
+    const models = await open(dir);
+    assert.deepEqual(models.members("desks"), [trial]);
+    assert.deepEqual(models.tuning("desks"), { auto: false, candidates: [], lastSamples: 0 }, "off by default");
+    await models.setTuning("desks", { auto: true, candidates: ["anthropic/claude-sonnet-5-5"] });
+    await models.addTuningLog([{ at: "2026-10-28T00:00:00.000Z", role: "desks", text: "auto-tuning on" }]);
+    const reopened = await open(dir);
+    assert.deepEqual(reopened.tuning("desks"), { auto: true, candidates: ["anthropic/claude-sonnet-5-5"], lastSamples: 0 });
+    assert.deepEqual(reopened.tuningEntries().map((e) => e.text), ["auto-tuning on"]);
   });
 
   it("gives a local model one call at once unless told otherwise; Claude gets the Hub's limit", async () => {
@@ -324,6 +345,37 @@ describe("desks on their own models (Hub)", () => {
           qa.ws.close();
         },
         { llm: { adapter: new ScriptedModel(() => reply([text("from --model")], "end_turn"), "claude-opus-5-5"), agentAdapter: defaultModel } },
+      );
+    } finally {
+      if (saved === undefined) delete process.env.ASO_LLM_BASE_URL;
+      else process.env.ASO_LLM_BASE_URL = saved;
+      await provider.close();
+    }
+  });
+
+  it("shows each role's pool and turns auto-tuning on with a queue of candidates", async () => {
+    const provider = await fakeProvider();
+    const saved = process.env.ASO_LLM_BASE_URL;
+    process.env.ASO_LLM_BASE_URL = provider.url;
+    try {
+      await withHub(
+        async (ctx) => {
+          const empty = (await call(ctx.port, "/api/tuning")).body;
+          assert.deepEqual(empty.roles.reviewer, { base: "claude-opus-5-5", baseShare: 1, members: [], auto: false, candidates: [] });
+          assert.deepEqual(empty.log, []);
+
+          await call(ctx.port, "/api/models/challengers", { role: "reviewer", model: "local-model", share: 0.25 });
+          const on = await call(ctx.port, "/api/tuning", { role: "reviewer", auto: true, candidates: ["local-model"] });
+          assert.equal(on.status, 200, JSON.stringify(on.body));
+          assert.deepEqual([on.body.roles.reviewer.auto, on.body.roles.reviewer.candidates, on.body.roles.reviewer.baseShare], [true, ["local/local-model"], 0.75]);
+          assert.match(on.body.log.at(-1).text, /auto-tuning on; candidates: local\/local-model/);
+          for (const body of [{ role: "reviewer" }, { role: "reviewer", candidates: ["machine/llama"] }, { role: "reviewer", candidates: ["no-such-model"] }, { role: "boss", auto: true }]) {
+            assert.equal((await call(ctx.port, "/api/tuning", body)).status, 400, JSON.stringify(body));
+          }
+          const ended = await call(ctx.port, "/api/models/challengers", { role: "reviewer", model: "local-model", end: true });
+          assert.equal(ended.body.challengers.reviewer, undefined, "that member's trial ended");
+        },
+        { llm: { adapter: new ScriptedModel(() => reply([text("from --model")], "end_turn"), "claude-opus-5-5") } },
       );
     } finally {
       if (saved === undefined) delete process.env.ASO_LLM_BASE_URL;

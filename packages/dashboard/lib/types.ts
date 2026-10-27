@@ -398,3 +398,17 @@ export interface Trial {
   spentUsd: number;
   ended?: "enough data" | "budget spent";
 }
+
+/** A role's model pool (`GET /api/tuning`). */
+export interface RolePool {
+  base: string | null;
+  baseShare: number;
+  members: Trial[];
+  auto: boolean;
+  candidates: string[];
+}
+
+export interface TuningView {
+  roles: Record<ChallengerRole, RolePool>;
+  log: Array<{ at: string; role: ChallengerRole; text: string }>;
+}

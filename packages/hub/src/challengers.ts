@@ -33,14 +33,19 @@ export function isFresh(task: { challenger?: string; reworkRound: number; jobs?:
   return !task.challenger && task.reworkRound === 0 && !task.jobs?.some((j) => j.job === "implement" && j.endedAt);
 }
 
-/** Whether the work with this `key` falls in a `share` (0 to 1): a stable FNV-1a hash of the key. */
-export function picked(key: string, share: number): boolean {
+/** A key's place from 0 to 1: a stable FNV-1a hash of it. */
+export function hashUnit(key: string): number {
   let h = 0x811c9dc5;
   for (let i = 0; i < key.length; i++) {
     h ^= key.charCodeAt(i);
     h = Math.imul(h, 0x01000193) >>> 0;
   }
-  return h / 0x1_0000_0000 < share;
+  return h / 0x1_0000_0000;
+}
+
+/** Whether the work with this `key` falls in a `share` (0 to 1). */
+export function picked(key: string, share: number): boolean {
+  return hashUnit(key) < share;
 }
 
 /**

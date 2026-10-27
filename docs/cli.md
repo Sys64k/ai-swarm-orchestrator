@@ -200,7 +200,17 @@ weakest first) and `--junior-tries <n|default>` change it while the Hub runs; se
 `aso challenger <desks|reviewer> <model|none>` puts a model on trial for a share of a role's work
 (`--share <percent>`, default 10, at most 50; `--budget <usd>`, default 20 for the desks and 5 for
 the reviewer) until `aso tune` can
-compare it, or ends the trial. See [Trials](models.md#trials-getting-data-on-another-model).
+compare it; `--end` ends that model's trial and `none` every one in the role. A role can have several
+models on trial (together at most 90% of its work). See [Trials](models.md#trials-getting-data-on-another-model).
+
+## `aso pool`, `aso pool-auto`, `aso pool-try`
+
+`aso pool` shows each role's model pool (its own model and the members with their shares,
+samples and spending), whether auto-tuning is on, the models queued to try, and the latest
+changes. `aso pool-auto <desks|reviewer> <on|off>` lets the Hub try the queued models and move
+the shares by itself; `aso pool-try <desks|reviewer> <models|none>` sets the queue
+(comma-separated, in order). See
+[Model pools and auto-tuning](models.md#model-pools-and-auto-tuning-a-mix-that-adjusts-itself).
 
 ## `aso tune`
 

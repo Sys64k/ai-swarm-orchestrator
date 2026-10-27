@@ -373,8 +373,38 @@ aso challenger desks none                              # end the trial
 - **Checked like a role's model:** it must take tools, and can't be a machine's own model. Give
   it a price so its spending counts.
 - **Not for the Architect:** plans are too few for a share of them to give data soon.
-- **In the console:** *Model providers* → *Trials*. `POST /api/models/challengers`; `GET
-  /api/desks` shows them (`challengers`).
+- **Several at once:** each `aso challenger` adds a member to the role's pool (together at most 90%
+  of the work); `--end` ends one, `none` ends them all.
+- **In the console:** *Model providers* → *Model pools*. `POST /api/models/challengers`; `GET
+  /api/tuning` shows them all.
+
+#### Model pools and auto-tuning: a mix that adjusts itself
+
+A role's pool is its own model (the *base*) and the members on trial, each with a share of the
+work. With auto-tuning on, the Hub runs the trials and moves the shares by itself:
+
+```bash
+aso pool                                                          # the pools, shares and latest changes
+aso pool-try desks openai/gpt-6.1-terra,anthropic/claude-sonnet-5-5   # models to try, in order
+aso pool-auto desks on                                            # let the Hub tune the desks' mix
+```
+
+- **Trying:** while fewer than two members are still gathering data and the pool has room, the
+  next queued model starts on 20% of the work, with the role's default budget. One that can't be
+  used (refused by the tool check) is skipped, and the log says why.
+- **Rebalancing:** every 5 new samples in the role, the models with enough data (the base, and
+  members the track records have 10 samples of) are compared by all-in cost per unit (a finished
+  task, a check) among those whose quality is within the role's margin of the best. The cheapest
+  of those grows by up to 15 points; the others good enough shrink toward 10%; a member clearly
+  worse is dropped, and so is one that spent its budget before it had data.
+- **A new base:** when a member comes to take more than the base, it becomes the role's own model
+  (the desks that were on the old one switch; the reviewer role changes), and the old base stays
+  in the pool as a member, so it keeps being measured.
+- **Seen and stoppable:** each change is logged (`aso pool`, the console) and sent as a push
+  notification; `aso pool-auto <role> off` stops it, and nothing changes until it's on. With it
+  off, members are plain trials: they end at their data or budget.
+- **Slow on purpose:** with tens of tasks a day, shares move in small steps, so one lucky or
+  unlucky task can't swing the mix.
 
 #### Sharing them publicly (a README)
 

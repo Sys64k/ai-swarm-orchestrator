@@ -31,6 +31,8 @@ import {
   RoleModelBodySchema,
   EscalationBodySchema,
   ChallengerBodySchema,
+  TuningBodySchema,
+  type TuningView,
   CHALLENGER_ROLES,
   DEFAULT_CHALLENGER_BUDGET_USD,
   DEFAULT_CHALLENGER_SHARE,
@@ -72,10 +74,12 @@ import { syncApiCopies } from "./api-sync.js";
 import type { z } from "zod";
 import { DEFAULT_MAX_TOKENS, type Effort, type LlmAdapter } from "./llm/adapter.js";
 import { AcceptanceChecker } from "./llm/acceptance.js";
-import { DeskModels, desksOf } from "./llm/desk-models.js";
+import { deskName, DeskModels, desksOf } from "./llm/desk-models.js";
 import { checkToolUse } from "./llm/tool-check.js";
-import { currentModels, defaultSince, modelSuggestions } from "./model-suggestions.js";
-import { takesTask, trialStatus } from "./challengers.js";
+import { currentModels, defaultSince, modelSuggestions, roleEvidence } from "./model-suggestions.js";
+import { trialStatus } from "./challengers.js";
+import { baseShare, desksOnModel, MAX_POOL_SHARE, memberFor, type PoolMember } from "./model-pool.js";
+import { tuneRole, tuningChangeText, type TunerDeps } from "./auto-tune.js";
 import { MACHINE_PREFIX, machineDeskAdapter, MachineModels } from "./llm/machine-models.js";
 import { Providers, resolveModel } from "./llm/providers.js";
 import { CustomPrices } from "./llm/custom-prices.js";
@@ -414,17 +418,13 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       return undefined;
     }
   };
-  /** How the trial in a role stands, if there is one. */
-  const trialOf = (role: ChallengerRole): Trial | undefined => {
-    const ch = deskModels.challenger(role);
-    return ch && trialStatus(role, ch, routeOf(ch.spec)?.adapter.model ?? ch.spec, tasks.list());
-  };
-  /** The model on trial in `role` when it takes the task `taskId`. */
-  const challengerFor = (role: ChallengerRole, taskId: string): string | undefined => {
-    const ch = deskModels.challenger(role);
-    if (!ch) return undefined;
-    return takesTask(role, ch, trialStatus(role, ch, routeOf(ch.spec)?.adapter.model ?? ch.spec, tasks.list()), taskId) ? ch.spec : undefined;
-  };
+  /** A spec's name as its provider calls it (what jobs record), or the spec itself. */
+  const nameOf = (spec: string) => routeOf(spec)?.adapter.model ?? spec;
+  /** A role's members, and how each one's trial stands. */
+  const poolOf = (role: ChallengerRole): PoolMember[] =>
+    deskModels.members(role).map((member) => ({ member, status: trialStatus(role, member, nameOf(member.spec), tasks.list()) }));
+  /** The member of `role`'s pool that takes the task `taskId`, if any (else the role's own model does). */
+  const challengerFor = (role: ChallengerRole, taskId: string): string | undefined => memberFor(role, poolOf(role), deskModels.tuning(role).auto, taskId);
   // Only now: the acceptance check asks deskModels for the reviewer's model.
   setReviewModel(adapter);
   // Escalation: a task that keeps failing on its desk's model moves up to stronger ones. These are
@@ -824,16 +824,20 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   app.get("/api/llm", (c) => c.json(conversations.status()));
   // Which model each desk's agents use: the models to choose from, and the desks' choices.
   const defaultAgentModel = () => (agentAdapter ?? adapter)?.model ?? null;
-  /** The desks' and roles' models, as `GET /api/desks` answers. */
+  /** The connected worker machines, by hostname and job slots. */
+  const machineList = () => registry.workerSnapshots().map((w) => ({ hostname: w.hardware.hostname, slots: w.slots }));
+  /** The desks' and roles' models, as `GET /api/desks` answers; `challengers` names each role's first member (`GET /api/tuning` shows all). */
   const deskView = () => {
     const trials = Object.fromEntries(
       CHALLENGER_ROLES.flatMap((role) => {
-        const trial = trialOf(role);
-        return trial ? [[role, trial]] : [];
+        const first = poolOf(role)[0];
+        return first ? [[role, first.status]] : [];
       }),
     );
     return { ...deskModels.view(adapter?.model ?? null, defaultAgentModel(), startEscalation), challengers: trials };
   };
+  /** What each role is on now, from the connected desks and the roles' models. */
+  const currentOf = () => currentModels(machineList(), (d) => deskModels.modelOf(d), deskView());
   /** A model named as a person would (`default`, `local-model`, `<provider>/<model>`) → its spec; null: the default. */
   const resolveSpec = async (model: string): Promise<{ spec: string | null } | { error: string }> => {
     if (model === "default") return { spec: null };
@@ -905,20 +909,47 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   app.post("/api/models/challengers", async (c) => {
     const req = await parsed(c, ChallengerBodySchema);
     if (!req.ok) return c.json({ error: req.error }, 400);
-    const { role, model, share = DEFAULT_CHALLENGER_SHARE, budgetUsd = DEFAULT_CHALLENGER_BUDGET_USD[role] } = req.data;
-    let spec: string | null = null;
-    if (model !== "none") {
-      const resolved = await resolveSpecOrMachine(model);
-      if ("error" in resolved) return c.json({ error: resolved.error }, 400);
-      if (resolved.spec === null) return c.json({ error: "a trial needs a model; give none to end it" }, 400);
-      spec = resolved.spec;
-    }
+    const { role, model, share = DEFAULT_CHALLENGER_SHARE, budgetUsd = DEFAULT_CHALLENGER_BUDGET_USD[role], end } = req.data;
     try {
-      await deskModels.setChallenger(role, spec, { share, budgetUsd });
+      if (model === "none") await deskModels.endChallenger(role, null);
+      else {
+        const resolved = await resolveSpecOrMachine(model);
+        if ("error" in resolved) return c.json({ error: resolved.error }, 400);
+        if (resolved.spec === null) return c.json({ error: "a trial needs a model; give none to end them all" }, 400);
+        if (end) await deskModels.endChallenger(role, resolved.spec);
+        else await deskModels.setChallenger(role, resolved.spec, { share, budgetUsd, maxShare: MAX_POOL_SHARE });
+      }
     } catch (err) {
       return c.json({ error: (err as Error).message }, 400);
     }
     return c.json(deskView());
+  });
+  /** Each role's model pool: its own model, the members and their shares, auto-tuning, and its log. */
+  const tuningView = (): TuningView => {
+    const current = currentOf();
+    const roleView = (role: ChallengerRole) => {
+      const tuning = deskModels.tuning(role);
+      const members = poolOf(role);
+      return { base: current[role] ?? null, baseShare: baseShare(members, tuning.auto), members: members.map((m) => m.status), auto: tuning.auto, candidates: tuning.candidates };
+    };
+    return { roles: { desks: roleView("desks"), reviewer: roleView("reviewer") }, log: [...deskModels.tuningEntries()] };
+  };
+  app.get("/api/tuning", (c) => c.json(tuningView()));
+  /** Turn a role's auto-tuning on or off, or set the models it tries next. */
+  app.post("/api/tuning", async (c) => {
+    const req = await parsed(c, TuningBodySchema);
+    if (!req.ok) return c.json({ error: req.error }, 400);
+    const { role, auto, candidates } = req.data;
+    const specs: string[] = [];
+    for (const model of candidates ?? []) {
+      const resolved = await resolveSpecOrMachine(model);
+      if ("error" in resolved) return c.json({ error: resolved.error }, 400);
+      if (resolved.spec === null || resolved.spec.startsWith(MACHINE_PREFIX)) return c.json({ error: `${model} can't be tried: give a model the Hub calls` }, 400);
+      specs.push(resolved.spec);
+    }
+    await deskModels.setTuning(role, { ...(auto !== undefined ? { auto } : {}), ...(candidates !== undefined ? { candidates: specs } : {}) });
+    await deskModels.addTuningLog([{ at: new Date().toISOString(), role, text: tuningChangeText({ auto, ...(candidates !== undefined ? { candidates: specs } : {}) }) }]);
+    return c.json(tuningView());
   });
   /** Change where failing tasks move: the ladder of stronger models, the tries before it, or either back to the start setting. */
   app.post("/api/models/escalation", async (c) => {
@@ -962,8 +993,8 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     const query = ModelSuggestionsQuerySchema.safeParse(c.req.query());
     if (!query.success) return c.json({ error: query.error.issues.map((i) => `${i.path.join(".") || "query"}: ${i.message}`).join("; ") }, 400);
     const since = query.data.since ?? defaultSince();
-    const machines = registry.workerSnapshots().map((w) => ({ hostname: w.hardware.hostname, slots: w.slots }));
-    const current = currentModels(machines, (d) => deskModels.modelOf(d), deskView());
+    const machines = machineList();
+    const current = currentOf();
     const records = trackRecords(tasks.list(), plans.list(), { by: "model", since });
     return c.json(modelSuggestions(records, since, current, (await providers.models()).models, [...new Set(machines.map((m) => m.hostname))]));
   });
@@ -1368,6 +1399,25 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   const gateway = opts.gateway ? await startGateway(opts.gateway) : undefined;
   log.info(`listening on ${host}:${boundPort} (ws ${WS_PATH}, git ${GIT_PATH}/<project>.git), ${opts.projectsRoot ? `projects in ${opts.projectsRoot}` : `project ${opts.targetDir}`}`);
 
+  /** Auto-tuning's view of the Hub. */
+  const tunerDeps: TunerDeps = {
+    models: deskModels,
+    poolOf,
+    evidence: (role) => roleEvidence(trackRecords(tasks.list(), plans.list(), { by: "model", since: defaultSince() }), role),
+    base: (role) => currentOf()[role],
+    nameOf,
+    promote: async (role, spec, from) => {
+      if (role === "reviewer") return deskModels.assignRole("reviewer", spec);
+      // The desks that were on the old model; desks on a model of their own keep it.
+      const desks = machineList().flatMap((m) => Array.from({ length: m.slots }, (_, i) => deskName(m.hostname, i + 1)));
+      const onOld = desksOnModel(desks, (d) => deskModels.modelOf(d), defaultAgentModel(), from);
+      if (onOld.length) await deskModels.assign(onOld, spec);
+    },
+    notify: (title, body) => void notifier.send({ title, body, url: "/", tag: "model-mix" }),
+    now: () => new Date(),
+  };
+  /** The auto-tuning round running now, so rounds never overlap. */
+  let tuningRound: Promise<void> | undefined;
   // Half-open TCP connections (sleeping laptops, pulled cables) never fire onClose on their own.
   const sweep = setInterval(() => {
     for (const node of registry.stale(nodeTimeoutMs)) {
@@ -1380,6 +1430,10 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     for (const p of projects.list()) p.tasks.sweepDetached();
     conversations.sweep();
     for (const n of workerWatch.check()) void notifier.send(n);
+    tuningRound ??= Promise.all(CHALLENGER_ROLES.map((role) => tuneRole(role, tunerDeps)))
+      .then(() => undefined)
+      .catch((err: Error) => log.warn(`auto-tuning failed: ${err.message}`))
+      .finally(() => (tuningRound = undefined));
     // Often enough for whichever of these delays is shortest (tests shorten them).
   }, Math.min(15_000, nodeTimeoutMs, opts.reclaimGraceMs ?? Infinity, opts.push?.workerOfflineMs ?? Infinity));
   sweep.unref();
@@ -1410,6 +1464,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     routes: () => app.routes.filter((r) => r.method === "GET" || r.method === "POST").map((r) => ({ method: r.method, path: r.path })),
     close: async () => {
       clearInterval(sweep);
+      await tuningRound;
       await apiSyncing;
       // Save before the nodes are disconnected: those disconnects are the Hub's doing, and
       // restore() decides what happens to their jobs. Hub-side steps still running (a merge)

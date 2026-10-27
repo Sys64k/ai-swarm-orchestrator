@@ -49,6 +49,14 @@ function evidenceOf(row: Row, role: SuggestionRole): SuggestionEvidence | undefi
   }
 }
 
+/** Each model's record in a role, from track records by model (models with none left out). */
+export function roleEvidence(byModel: TrackRecords, role: SuggestionRole): SuggestionEvidence[] {
+  return byModel.rows.flatMap((row) => {
+    const e = evidenceOf(row, role);
+    return e ? [e] : [];
+  });
+}
+
 const pct = (q: number) => `${Math.round(q * 100)}%`;
 const usd = (n: number) => `$${n.toFixed(2)}`;
 

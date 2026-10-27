@@ -1984,6 +1984,24 @@ model, so escalation and refusals work as for a desk's model); the `AcceptanceCh
 reviewer's challenger first in its models for a task it takes. `GET /api/desks` adds
 `challengers`; `POST /api/models/challengers` starts or ends one.
 
+### Model pools and auto-tuning (`model-pool.ts`, `auto-tune.ts`)
+
+A role's challengers are a list (its pool's members; `models.json` read a single trial from
+before as a one-member list). `memberFor` places the hash of `<role>:<taskId>` among the members'
+shares in order (the rest goes to the base); `takesWork` keeps a member with enough data taking
+work only with auto-tuning on. `rebalance` (pure) compares the base and the members the track
+records have `minSamples` of, by `evidenceOf` (the suggestions' figures): the cheapest within the
+quality margin of the best grows toward `MAX_POOL_SHARE` less the exploring members and the
+others' `MIN_KEEP_SHARE`, the rest good enough shrink toward it, worse ones are dropped, each by
+at most `SHARE_STEP`; a member over the base's remainder is promoted. `nextCandidate` starts the
+queue's next model while fewer than `MAX_EXPLORING` explore and there's room. `tuneRole` (with
+`TunerDeps`, so it's tested without a Hub) does one round when the role's `tuning.auto` is on:
+start a candidate, and every `REBALANCE_EVERY` new samples rebalance, set the members, promote
+(the server's `promote`: the desks that were on the old base, or the reviewer role), log
+(`tuningLog`, the latest 100) and notify. The server runs a round per role on each sweep, never
+two at once, and `close` waits for one. `GET /api/tuning` shows the pools; `POST /api/tuning`
+sets `auto` and `candidates`.
+
 ### A machine's own model (`llm/machine-models.ts`)
 
 A worker started with `--local-model <url>` lists that server's models (`GET /models`) before

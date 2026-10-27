@@ -293,7 +293,16 @@ export const ChallengerBodySchema = z.strictObject({
   model: z.string().min(1).max(200).describe("A model from GET /api/models (<provider>/<model>), or none to end the trial"),
   share: z.number().min(0.01).max(MAX_CHALLENGER_SHARE).optional().describe("The share of tasks it takes (default 0.1)"),
   budgetUsd: z.number().min(0.5).max(1000).optional().describe("What the trial may spend in all (default 20 for the desks, 5 for the reviewer)"),
+  end: z.literal(true).optional().describe("End this model's trial (model none ends every one in the role)"),
 });
+
+export const TuningBodySchema = z
+  .strictObject({
+    role: z.enum(CHALLENGER_ROLES),
+    auto: z.boolean().optional().describe("Let the Hub try the queued candidates and move the shares by itself"),
+    candidates: z.array(z.string().min(1).max(200)).max(5).optional().describe("Models to try, in order (from GET /api/models); [] clears the queue"),
+  })
+  .refine((b) => b.auto !== undefined || b.candidates !== undefined, "give auto, candidates or both");
 
 /** A trial, as `GET /api/desks` shows it. */
 export const TrialSchema = z.object({
@@ -307,6 +316,20 @@ export const TrialSchema = z.object({
   ended: z.enum(["enough data", "budget spent"]).optional().describe("Why it takes no more tasks"),
 });
 export type Trial = z.infer<typeof TrialSchema>;
+
+/** A role's model pool, as `GET /api/tuning` shows it. */
+export const RolePoolSchema = z.object({
+  base: z.string().nullable().describe("The role's own model: it takes the work the members don't"),
+  baseShare: z.number().describe("The share of the work the base takes"),
+  members: z.array(TrialSchema).describe("Models with a share of the work, and how each stands"),
+  auto: z.boolean().describe("Whether the Hub tries the candidates and moves the shares by itself"),
+  candidates: z.array(z.string()).describe("Models queued to try, in order"),
+});
+export const TuningViewSchema = z.object({
+  roles: z.object({ desks: RolePoolSchema, reviewer: RolePoolSchema }),
+  log: z.array(z.object({ at: z.string(), role: z.enum(CHALLENGER_ROLES), text: z.string() })).describe("What auto-tuning changed, oldest first"),
+});
+export type TuningView = z.infer<typeof TuningViewSchema>;
 
 export const RoleModelBodySchema = DeskModelSettingsSchema.extend({
   role: z.enum(MODEL_ROLES).describe("architect: who plans; reviewer: who judges work in the acceptance check"),
@@ -783,7 +806,7 @@ export const DesksSchema = z.object({
   challengers: z
     .object({ desks: TrialSchema.optional(), reviewer: TrialSchema.optional() })
     .optional()
-    .describe("Models on trial in a role, taking a share of its work (aso challenger)"),
+    .describe("The first model on trial in each role (GET /api/tuning shows all of them)"),
   defaultAgent: z.string().nullable(),
   desks: z.array(z.object({ desk: DeskSchema, model: z.string() })).describe("Desks with a model of their own; the others use the default"),
   models: z

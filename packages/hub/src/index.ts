@@ -59,8 +59,10 @@ export { ACCEPTANCE_DIFF_LIMIT, AcceptanceChecker, acceptanceCounts, acceptanceP
 export { AttemptLimiter, clientAddress, createGatewayApp, gatewayAccess, GATEWAY_MAX_FAILURES, JOIN_PATH, PUBLIC_API_PATHS, type GatewayRule } from "./gateway.js";
 export { addOutcome, describeRecord, JOB_OUTCOMES, type JobOutcome, type TrackRecord } from "./track-record.js";
 export { trackRecords, type ReportPlan, type ReportTask } from "./job-report.js";
-export { isFresh, picked, takesTask, trialStatus, type Challenger, type TrialTask } from "./challengers.js";
-export { COST_MARGIN, currentDeskModel, currentModels, DEFAULT_PERIOD_DAYS, defaultSince, modelName, modelSuggestions, ROLE_RULES, suggestFor } from "./model-suggestions.js";
+export { hashUnit, isFresh, picked, takesTask, trialStatus, type Challenger, type TrialTask } from "./challengers.js";
+export { baseShare, desksOnModel, EXPLORE_SHARE, MAX_EXPLORING, MAX_POOL_SHARE, memberFor, MIN_KEEP_SHARE, nextCandidate, REBALANCE_EVERY, rebalance, SHARE_STEP, takesWork, type PoolMember, type Rebalance } from "./model-pool.js";
+export { tuneRole, tuningChangeText, type TunerDeps } from "./auto-tune.js";
+export { COST_MARGIN, currentDeskModel, currentModels, roleEvidence, DEFAULT_PERIOD_DAYS, defaultSince, modelName, modelSuggestions, ROLE_RULES, suggestFor } from "./model-suggestions.js";
 export { PUBLIC_STATS_CACHE_SEC, publicModelName, publicStats, publicStatsFor } from "./public-stats.js";
 export { addBuildUsage, endJob, failedBuildResult, JOBS_LIMIT, lastBuild, markAcceptance, markOverturned, markQa, markVerified, openJob, startJob, type Desk, type JobKind } from "./jobs.js";
 export { budgetSpent, describeScope, mayUseProject, projectOfGitPath, REFUSE_ALL, refuseJob, type KeyScope, type WorkerJob } from "./worker-scope.js";

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { currentDeskModel, currentModels, defaultSince, modelName, modelSuggestions, suggestFor } from "@aso/hub";
+import { currentDeskModel, currentModels, defaultSince, modelName, modelSuggestions, roleEvidence, suggestFor } from "@aso/hub";
 import { ModelSuggestionsSchema, type TrackRecordRow } from "@aso/shared";
 import { TOKEN, withHub } from "./helpers.ts";
 
@@ -50,6 +50,12 @@ describe("model suggestions", () => {
     assert.deepEqual(suggestFor("desks", [], "gemini"), { note: "gemini: 0 of 10 settled tasks needed to compare it." });
     const alone = [row("gemini", { started: [12, 11, 12] })];
     assert.deepEqual(suggestFor("desks", alone, "gemini"), { note: "No other model has 10 settled tasks yet to compare gemini with. Put one on trial to get it: aso challenger desks <model>." });
+  });
+
+  it("reads each model's record in a role, leaving out models with none", () => {
+    const records = { by: "model" as const, since: null, rows: [row("opus", { reviews: [4, 1, 0.4] }), row("gemini", { started: [5, 4, 4] })] };
+    assert.deepEqual(roleEvidence(records, "reviewer").map((e) => [e.model, e.samples, e.quality]), [["opus", 4, 0.75]]);
+    assert.deepEqual(roleEvidence(records, "desks").map((e) => e.model), ["gemini"]);
   });
 
   it("doesn't flip on small differences", () => {
