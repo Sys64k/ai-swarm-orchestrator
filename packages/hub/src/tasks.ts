@@ -29,6 +29,7 @@ import { acceptanceCounts, unmetReason, type AcceptanceChecker } from "./llm/acc
 import type { WorkerJob } from "./worker-scope.js";
 import type { JobOutcome } from "./track-record.js";
 import { addBuildUsage, endJob, failedBuildResult, markAcceptance, markOverturned, markQa, markVerified, openJob, startJob, type JobKind } from "./jobs.js";
+import { OnePerKey } from "./one-per-key.js";
 
 const log = createLogger("tasks");
 
@@ -231,6 +232,8 @@ const ACTIVE: ReadonlySet<TaskState> = new Set(["assigned", "in_progress", "test
 /** Task queue and pipeline: routes work to workers, verifies pushes, runs QA, merges. */
 export class TaskManager {
   private readonly tasks = new Map<string, TaskRecord>();
+  /** Pull requests being opened or updated now, by task. */
+  private readonly openingReview = new OnePerKey<string | undefined>();
   private readonly acceptance: TaskManagerOptions["acceptance"];
   private readonly policies: RoutingPolicies;
   private readonly maxDrops: number;
@@ -963,9 +966,15 @@ export class TaskManager {
 
   /**
    * Push the branch and open or update the task's pull request. A failure is kept on the task
-   * and tried again by the next review check.
+   * and tried again by the next review check. One at a time per task: a call while one runs for
+   * the same commit (the review check, say) waits for it, since GitHub's list of pull requests can
+   * lag behind a new one and a second call would open another; one for a newer commit runs after it.
    */
-  async openReview(task: TaskRecord): Promise<void> {
+  openReview(task: TaskRecord): Promise<void> {
+    return this.openingReview.run(task.spec.taskId, task.commit, () => this.openReviewNow(task));
+  }
+
+  private async openReviewNow(task: TaskRecord): Promise<void> {
     if (!this.reviewGate || task.state !== "awaiting_review" || !task.review) return;
     const info = task.review;
     try {

@@ -30,10 +30,17 @@ interface FakePull {
 /** GitHub's pull request API, in memory, over the bare repository the Hub pushes to. */
 class FakeGitHub {
   readonly pulls = new Map<number, FakePull>();
+  private readonly createdAt = new Map<number, number>();
   /** Requests that did not carry the token. */
   unauthorized = 0;
   /** The next N `POST /pulls` fail with HTTP 502. */
   failCreates = 0;
+  /** How long a new pull request stays out of `GET /pulls` (GitHub's list lags behind a creation). */
+  listLagMs = 0;
+  /** How long `POST /pulls` takes, so another request can come in meanwhile. */
+  createDelayMs = 0;
+  /** `POST /pulls` requests received so far. */
+  createsAsked = 0;
   /** Check runs and commit statuses per commit. */
   checkRuns = new Map<string, Array<{ name: string; status: string; conclusion: string | null; html_url: string }>>();
   statuses = new Map<string, Array<{ context: string; state: string; target_url: string }>>();
@@ -114,14 +121,18 @@ class FakeGitHub {
     if (req.method === "GET" && route === "") return [200, this.repoInfo];
     if (req.method === "GET" && route === "/pulls") {
       const head = url.searchParams.get("head")?.split(":")[1];
-      return [200, [...this.pulls.values()].filter((p) => p.state === "open" && p.head === head).map((p) => this.json(p))];
+      const listed = (p: FakePull) => Date.now() - (this.createdAt.get(p.number) ?? 0) >= this.listLagMs;
+      return [200, [...this.pulls.values()].filter((p) => p.state === "open" && p.head === head && listed(p)).map((p) => this.json(p))];
     }
     if (req.method === "POST" && route === "/pulls") {
+      this.createsAsked++;
+      if (this.createDelayMs) await new Promise((r) => setTimeout(r, this.createDelayMs));
       if (this.failCreates > 0) {
         this.failCreates--;
         return [502, { message: "Server Error" }];
       }
       const number = this.pulls.size + 1;
+      this.createdAt.set(number, Date.now());
       const pull: FakePull = {
         number,
         head: String(body.head),
@@ -387,6 +398,30 @@ describe("pull requests on GitHub", () => {
       const own = await dev.next();
       assert.ok(own.type === "TASK_ASSIGNMENT" && own.payload.rework);
       assert.match(own.payload.rework.reason, /^Review round 2: hub-token-owner asked for changes on GitHub: Add a full stop\.$/);
+      dev.ws.close();
+      qa.ws.close();
+    }));
+
+  it("opens one pull request when asked again while it is still being opened", () =>
+    withGitHub(async (ctx) => {
+      const dev = await worker(ctx.port, "dev");
+      const qa = await worker(ctx.port, "qa");
+      github.listLagMs = 5000;
+      github.createDelayMs = 1500;
+      try {
+        await postTask(ctx.port, task("greet"));
+        await implementAndPass(ctx, dev, qa, "greet", { "greeting.txt": "hello\n" });
+        // The work went to review and GitHub is creating its pull request; another call to open it comes now.
+        const asked = github.createsAsked;
+        await waitFor(() => github.createsAsked > asked, 10_000, "the pull request being created");
+        await ctx.hub.projects.get("project")!.tasks.openReview(ctx.hub.tasks.get("greet")!);
+        await reviewed(ctx, "greet");
+        assert.equal([...github.pulls.values()].filter((p) => p.head === "task/greet").length, 1, "one pull request, not two");
+        assert.equal(ctx.hub.tasks.get("greet")!.history.filter((h) => /opened for review/.test(h.event)).length, 1);
+      } finally {
+        github.listLagMs = 0;
+        github.createDelayMs = 0;
+      }
       dev.ws.close();
       qa.ws.close();
     }));
