@@ -69,6 +69,39 @@ aso hub-service uninstall
 - **One Hub per port.** The install refuses while another Hub answers on the port: stop that
   one first.
 
+### The database
+
+The Hub keeps its tasks, plans, agent conversations and model usage totals in **PostgreSQL**.
+
+- **With `--docker`, it brings its own.** Compose starts a `postgres:17-alpine` container
+  (`db`) next to the Hub. Its data is in the `aso-db` Docker volume. It isn't published on any
+  port: only the Hub reaches it.
+- **The password** is made on the first start and kept in `~/.config/aso/db-password` (mode
+  600). Keep it: the database takes it when its volume is first created, so a new password
+  later would lock the Hub out.
+- **Your own database** (on another machine, or a managed one in the cloud):
+  `--database-url postgres://user:password@host:5432/db`, or `ASO_DATABASE_URL` in
+  `~/.config/aso/.env`. The Hub creates and updates its tables itself at start; the user needs
+  rights to create tables in that database.
+- **Without Docker and without a database URL,** the Hub keeps them in files as before: each
+  project's `.git/aso/state.json`, and conversations in `~/aso-projects/.aso/`.
+- **What stays in files either way:** settings and keys (`~/aso-projects/.aso/`), and each
+  task's transcript and QA screenshots (the project's `.git/aso/`).
+
+**Moving from files to the database** is automatic. On its first start with a database, the Hub
+imports each project's `state.json` and the saved conversations, once, and logs what it
+imported. The files are left as they were, as a backup.
+
+**Backing up and moving it.** One command copies everything into a file, and one puts it into
+another database:
+
+```bash
+docker exec aso-db-1 pg_dump -U aso -Fc aso > aso-backup.dump
+pg_restore -d postgres://user:password@new-host:5432/aso --no-owner aso-backup.dump
+```
+
+Then start the Hub with `--database-url` pointing at the new database.
+
 ## Worker machines
 
 Workers install the package the Hub serves. No clone, build or npm registry access is needed.

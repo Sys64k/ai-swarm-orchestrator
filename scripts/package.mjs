@@ -48,7 +48,7 @@ await build({
   format: "esm",
   target: "node20",
   // Optional native accelerators of `ws` / platform-specific helpers: loaded in try/catch at runtime.
-  external: ["bufferutil", "utf-8-validate", "osx-temperature-sensor"],
+  external: ["bufferutil", "utf-8-validate", "osx-temperature-sensor", "pg-native"],
   // CommonJS dependencies inside an ES module bundle need require/__dirname.
   banner: {
     js: [

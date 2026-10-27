@@ -1,6 +1,7 @@
 import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createLogger } from "@aso/shared";
+import { SaveScheduler } from "./save-scheduler.js";
 
 const log = createLogger("state");
 
@@ -15,20 +16,54 @@ export interface Snapshot<T, P> {
   plans: P[];
 }
 
+/** Where a project's tasks and plans are kept: its state file, or the database. */
+export interface ProjectStateStore {
+  /** Where they are, for people and logs. */
+  readonly location: string;
+  /** The saved tasks and plans, or undefined when there is nothing (usable) to restore. */
+  load<T, P>(): Promise<Snapshot<T, P> | undefined>;
+  /** Save soon; changes arriving in the meantime are batched into one write. */
+  scheduleSave(snapshot: () => Snapshot<unknown, unknown>): void;
+  /** Write any scheduled save now. */
+  flush(): Promise<unknown>;
+  /** Write what is pending, then ignore further changes (the Hub is shutting down). */
+  close(): Promise<void>;
+}
+
+/** Hub-wide state: agent conversations, and small named values such as the model usage totals. */
+export interface HubStateStore {
+  saveConversation(id: string, data: unknown): void;
+  deleteConversation(id: string): void;
+  /** Every saved conversation; unreadable ones are skipped with a warning. */
+  loadConversations<C>(): Promise<C[]>;
+  saveValue(key: string, value: unknown): void;
+  loadValue<V>(key: string): Promise<V | undefined>;
+  close(): Promise<void>;
+}
+
 /**
  * Hub state on disk, so tasks, plans and agent conversations survive a Hub restart.
  * `state.json` holds tasks + plans; each agent conversation is its own file because it grows
  * with every turn. Writes go to a temp file and are renamed into place, so a crash leaves the
  * previous version intact.
  */
-export class StateStore {
-  private timer?: NodeJS.Timeout;
-  private snapshot?: () => Snapshot<unknown, unknown>;
-  /** Serialises writes so an older snapshot can never overwrite a newer one. */
+export class StateStore implements ProjectStateStore, HubStateStore {
+  /** Tasks and plans: batched, one write at a time. */
+  private readonly saves: SaveScheduler<Snapshot<unknown, unknown>>;
+  /** Conversations and values, written one at a time in order. */
   private writes: Promise<unknown> = Promise.resolve();
   private closed = false;
 
-  constructor(readonly dir: string) {}
+  constructor(readonly dir: string) {
+    this.saves = new SaveScheduler(
+      ({ tasks, plans }) => this.writeAtomic(this.stateFile, JSON.stringify({ version: STATE_VERSION, savedAt: new Date().toISOString(), tasks, plans })),
+      { what: `the state in ${dir}`, delayMs: SAVE_DELAY_MS },
+    );
+  }
+
+  get location(): string {
+    return this.dir;
+  }
 
   private get stateFile() {
     return path.join(this.dir, "state.json");
@@ -63,28 +98,19 @@ export class StateStore {
 
   /** Save soon; changes arriving in the meantime are batched into one write. */
   scheduleSave(snapshot: () => Snapshot<unknown, unknown>): void {
-    if (this.closed) return;
-    this.snapshot = snapshot;
-    this.timer ??= setTimeout(() => void this.flush(), SAVE_DELAY_MS);
+    if (!this.closed) this.saves.schedule(snapshot);
   }
 
-  /** Write any scheduled save now (called on shutdown). */
-  flush(): Promise<unknown> {
-    clearTimeout(this.timer);
-    this.timer = undefined;
-    const snapshot = this.snapshot;
-    this.snapshot = undefined;
-    if (snapshot) {
-      const { tasks, plans } = snapshot();
-      const text = JSON.stringify({ version: STATE_VERSION, savedAt: new Date().toISOString(), tasks, plans });
-      this.enqueue(() => this.writeAtomic(this.stateFile, text));
-    }
+  /** Write any scheduled save now, and wait for conversation and value writes. */
+  async flush(): Promise<unknown> {
+    await this.saves.flush();
     return this.writes;
   }
 
   /** Write what is pending, then ignore further changes (the Hub is shutting down). */
   async close(): Promise<void> {
-    await this.flush();
+    await this.saves.close();
+    await this.writes;
     this.closed = true;
   }
 
@@ -118,6 +144,24 @@ export class StateStore {
       }
     }
     return out;
+  }
+
+  /** A named value, as `<dir>/values/<key>.json` (plain JSON: a file takes any text, unlike Postgres). */
+  saveValue(key: string, value: unknown): void {
+    if (this.closed) return;
+    if (!SAFE_ID.test(key)) return log.warn(`not saving value with unsafe key ${JSON.stringify(key)}`);
+    const text = JSON.stringify(value);
+    this.enqueue(() => this.writeAtomic(path.join(this.dir, "values", `${key}.json`), text));
+  }
+
+  async loadValue<V>(key: string): Promise<V | undefined> {
+    if (!SAFE_ID.test(key)) return undefined;
+    try {
+      return JSON.parse(await readFile(path.join(this.dir, "values", `${key}.json`), "utf8")) as V;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") log.warn(`could not read value ${key}: ${(err as Error).message}`);
+      return undefined;
+    }
   }
 
   private enqueue(fn: () => Promise<unknown>): void {

@@ -18,8 +18,11 @@ import {
   waitFor,
   worker,
 } from "./helpers.ts";
+import { freshDatabase, postgresSkip, sql } from "./postgres-helpers.ts";
 
 delete process.env.ANTHROPIC_API_KEY; // tests must never reach the real API
+// Before any describe(): tests declared after an await at the top level would not run.
+const pgSkip = await postgresSkip();
 
 /** A target repo whose Hub can be stopped and started again, like a redeploy. */
 async function restartable(opts: Partial<HubOptions> = {}) {
@@ -110,9 +113,14 @@ describe("state store", () => {
   });
 });
 
-describe("Hub restart", () => {
+const storages = [
+  { kind: "files", name: "state files", skip: false as const, options: async (): Promise<Partial<HubOptions>> => ({}) },
+  { kind: "postgres", name: "PostgreSQL", skip: pgSkip, options: async (): Promise<Partial<HubOptions>> => ({ databaseUrl: await freshDatabase() }) },
+];
+
+for (const storage of storages) describe(`Hub restart (${storage.name})`, { skip: storage.skip }, () => {
   it("keeps tasks and plans, and dispatches restored work to workers that connect later", async () => {
-    const env = await restartable();
+    const env = await restartable(await storage.options());
     try {
       let hub = await env.start();
       await postTask(hub.port, { taskId: "api", role: "backend", title: "API", description: "Build it" });
@@ -122,6 +130,7 @@ describe("Hub restart", () => {
       hub = await env.restart();
       const health = await api(hub.port, "/api/health");
       assert.equal(health.stateDir, env.stateDir);
+      assert.equal(health.storage, storage.kind);
       const tasks = (await api(hub.port, "/api/tasks")) as unknown as Array<Record<string, any>>;
       assert.deepEqual(tasks.map((t) => [t.spec.taskId, t.state]), [["api", "pending"], ["ui", "pending"]]);
       assert.equal((await api(hub.port, `/api/plans/${plan.planId}`)).requirement, "a todo app");
@@ -139,7 +148,7 @@ describe("Hub restart", () => {
   });
 
   it("requeues a job the worker had not started yet, without counting it as a node drop", async () => {
-    const env = await restartable();
+    const env = await restartable(await storage.options());
     try {
       let hub = await env.start();
       const w = await worker(hub.port, "dev");
@@ -162,7 +171,7 @@ describe("Hub restart", () => {
     const model = new ScriptedModel((_req, n) =>
       n === 0 ? reply([text("Looking."), toolUse("tu_1", "list_files", {})]) : reply([text("Done.")], "end_turn"),
     );
-    const env = await restartable({ llm: { adapter: model } });
+    const env = await restartable({ ...(await storage.options()), llm: { adapter: model } });
     try {
       let hub = await env.start();
       let w = await worker(hub.port, "dev");
@@ -183,6 +192,7 @@ describe("Hub restart", () => {
       assert.equal(held.nodeId, "dev");
       assert.ok(held.detachedAt !== undefined, "held for the worker to reconnect");
       assert.equal(held.llm.calls, 1, "cost so far survives");
+      assert.equal((await api(hub.port, "/api/llm")).totals.calls, 1, "so do the Hub's totals");
 
       w = await worker(hub.port, "dev", { resume: { taskId: "greet", job: "implement" } });
       await waitFor(() => hub.tasks.get("greet")?.detachedAt === undefined, 2000, "resume");
@@ -209,6 +219,9 @@ describe("Hub restart", () => {
     }
   });
 
+});
+
+describe("Hub restart (state files only)", () => {
   it("runs Hub-side steps again: a task caught mid-verification is verified after the restart", async () => {
     const env = await restartable();
     try {
@@ -240,6 +253,30 @@ describe("Hub restart", () => {
       assert.equal(hub.tasks.list().length, 0);
       assert.ok(!existsSync(env.stateDir));
       assert.equal((await api(hub.port, "/api/health")).stateDir, null);
+      assert.equal((await api(hub.port, "/api/health")).storage, "memory");
+    } finally {
+      await env.cleanup();
+    }
+  });
+});
+
+describe("moving a Hub to PostgreSQL", { skip: pgSkip }, () => {
+  it("brings the tasks and plans it kept in files along on its first start with a database", async () => {
+    const env = await restartable();
+    try {
+      let hub = await env.start();
+      await postTask(hub.port, { taskId: "api", role: "backend", title: "API", description: "Build it" });
+      await api(hub.port, "/api/plans", { method: "POST", body: JSON.stringify({ requirement: "a todo app" }) });
+      await hub.close();
+
+      const databaseUrl = await freshDatabase();
+      hub = await startHub({ targetDir: env.repoDir, port: 0, host: "127.0.0.1", token: TOKEN, databaseUrl });
+      assert.deepEqual(hub.tasks.list().map((t) => [t.spec.taskId, t.state]), [["api", "pending"]]);
+      assert.equal(hub.plans.list().length, 1);
+      assert.ok(existsSync(path.join(env.stateDir, "state.json")), "the file stays, as a backup");
+      await postTask(hub.port, { taskId: "ui", role: "frontend", title: "UI", description: "Build it" });
+      await hub.close();
+      assert.deepEqual((await sql(databaseUrl, "SELECT task_id FROM tasks ORDER BY seq")).map((r) => r.task_id), ["api", "ui"], "new work goes to the database");
     } finally {
       await env.cleanup();
     }

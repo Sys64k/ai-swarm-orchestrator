@@ -21,7 +21,7 @@ export {
   type RoutingRequest,
 } from "./routing.js";
 export { AnthropicApiAdapter, apiErrorText, classify, CREDIT_MESSAGE, LlmError, type Effort, type LlmAdapter, type LlmRequest, type LlmResponse } from "./llm/adapter.js";
-export { ConversationManager, DEFAULT_PLAN_BUDGET_USD, TURN_WARNING, describeCutOff, toolResultBlocks, withCutOffNote, withTurnWarning } from "./llm/conversations.js";
+export { ConversationManager, DEFAULT_PLAN_BUDGET_USD, TURN_WARNING, describeCutOff, toolResultBlocks, withCutOffNote, withTurnWarning, parseTotals, type UsageTotals } from "./llm/conversations.js";
 export { priceTable, priceUsage } from "./llm/pricing.js";
 export { CustomPrices } from "./llm/custom-prices.js";
 export { architectSystemPrompt, planPrompt, systemPrompt, taskPrompt } from "./llm/prompts.js";
@@ -31,7 +31,11 @@ export { API_DOC_VERSION, API_OPERATIONS, openApiDocument, operationId, type Api
 export { GitHubApi, GitHubError, parseGitHubRemote, parseGitHubRepo, type CheckRun, type CommitStatus, type PullRef, type RepoSlug } from "./git/github.js";
 export { autoMergeBlock, changesRequested, checkState, acceptanceNote, pullRequestBody, PullRequests, mergeBlock, reviewFeedback, summarizeChecks, type PullRequestStatus } from "./git/pull-requests.js";
 export { MAX_FILE_PATCH, MAX_TOTAL_PATCH, parseDiff } from "./git/diff.js";
-export { StateStore, type Snapshot } from "./state-store.js";
+export { StateStore, type HubStateStore, type ProjectStateStore, type Snapshot } from "./state-store.js";
+export { Database, describeDatabaseUrl, hubStateStore, projectStateStore } from "./postgres-store.js";
+export { diffRecords, PLANS, TASKS, toJsonText, type Table } from "./pg-records.js";
+export { MIGRATIONS } from "./db-migrations.js";
+export { SaveScheduler, type SaveSchedulerOptions } from "./save-scheduler.js";
 export { Transcripts, type TranscriptEntry, type TranscriptInput, type TranscriptSubject } from "./transcripts.js";
 export { SignInCodes, SIGN_IN_CODE_TTL_MS } from "./sign-in-codes.js";
 export { JOIN_CODE_TTL_MS, WorkerKeys, type ScopeSettings, type WorkerKeyView } from "./worker-keys.js";

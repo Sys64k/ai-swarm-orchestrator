@@ -10,6 +10,7 @@ Settings in `~/.config/aso/.env` and the environment.
 | `ASO_GIT_TOKEN` | *(none)* | Hub only: token for pushing to an HTTPS `origin` (e.g. GitHub fine-grained token) |
 | `ASO_PUSH` | `1` | `0` keeps merges local (same as `--no-push`) |
 | `ASO_CONFIG_DIR` | `~/.config/aso` | Where the token file and `.env` live |
+| `ASO_DATABASE_URL` | *(none)* | Hub only: its PostgreSQL database (same as `--database-url`). With `--docker` and none set, the Hub's own database container; its password is kept in `~/.config/aso/db-password`. See [The database](installation.md#the-database) |
 | `ASO_ENV_FILE` | *(none)* | An extra `.env` file to load (highest priority after the shell) |
 | `ASO_TEST_COMMAND` | `npm test` | Default for `--test-command` (also passed into the container) |
 | `ASO_QA` | `1` | `0` disables QA (same as `--no-qa`) |

@@ -106,6 +106,15 @@
               "null"
             ]
           },
+          "storage": {
+            "description": "Where tasks, plans and conversations are kept: a PostgreSQL database, state files, or memory only",
+            "type": "string",
+            "enum": [
+              "postgres",
+              "files",
+              "memory"
+            ]
+          },
           "mainBranch": {
             "type": [
               "string",
@@ -2496,13 +2505,18 @@
               },
               "costUsd": {
                 "type": "number"
+              },
+              "since": {
+                "description": "When counting began: kept across restarts when the Hub saves its state, else since it started",
+                "type": "string"
               }
             },
             "required": [
               "calls",
               "costUsd"
             ],
-            "additionalProperties": false
+            "additionalProperties": false,
+            "description": "Model calls and their estimated cost, all tasks and plans together"
           },
           "paused": {
             "description": "Model calls are on hold (the account ran out of credit); they resume once a call succeeds again",

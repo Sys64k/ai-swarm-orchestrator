@@ -48,9 +48,12 @@ flowchart TB
       DASH["Dashboard<br/>Next.js :7421"]
       HUB --- DASH
     end
+    DB[("PostgreSQL container (db)<br/>tasks · plans · conversations<br/>volume aso-db, no published port")]
+    HUB -- "ASO_DATABASE_URL" --> DB
     ARCH["Architect<br/>tmux session aso-architect"]
     REPO[("Target project repo<br/>mounted at /project<br/>canonical main")]
     CLIH -- "docker compose up" --> CTR
+    CLIH -- "docker compose up" --> DB
     CLIH -- "tmux: aso architect" --> ARCH
     HUB --- REPO
     ARCH -- "WebSocket via published port" --> HUB
@@ -92,9 +95,14 @@ flowchart TB
 - **`safe.directory`.** Git's `safe.directory` is set to `*` inside the image, so a mount owned
   by a different uid still works.
 - **`HOME`.** `HOME=/data` is a named volume, used for the npm cache.
-- **Projects.** The projects folder is mounted at `/projects`. Each project's tasks, plans and
-  transcripts live in its `.git/aso/`, and agent conversations in `/projects/.aso/`, so all
-  of them survive the container being removed or rebuilt.
+- **Projects.** The projects folder is mounted at `/projects`. Each project's transcripts and
+  screenshots live in its `.git/aso/`, and settings and keys in `/projects/.aso/`, so they
+  survive the container being removed or rebuilt.
+- **Database.** Tasks, plans, conversations and the model usage totals are in the `db` service
+  (`postgres:17-alpine`, volume `aso-db`, not published). The CLI makes its password once
+  (`~/.config/aso/db-password`) and passes it as `ASO_DB_PASSWORD`; the Hub gets
+  `ASO_DATABASE_URL` pointing at it, or at the CLI's `--database-url` instead. The Hub
+  container starts once `db` is healthy (`pg_isready`).
 - **Process handling.** `init: true` makes signals and child-process reaping work.
 - **Shutdown.** Ctrl+C reaches compose through the terminal's process group. The CLI only
   forwards signals that came from elsewhere, such as SIGTERM, because a second SIGINT would
@@ -148,7 +156,11 @@ flowchart LR
 | | `llm/prompts.ts`, `llm/pricing.ts` | Role system prompts, task prompt (with rework feedback), price table |
 | | `plans.ts` | `PlanManager`: plan queue, Architect assignment, validation, approval → tasks |
 | | `projects.ts` | `ProjectSet`: finds and creates projects; each has its own repo, tasks, plans, dependencies, push sync, state and transcripts. Hub-wide dispatch and lookup by task/plan id. `create(name, { github })` connects a GitHub repository: checks the token's write access and default branch (`GitHubApi.repoAccess`), then clones it or, when empty, pushes the first commit; nothing is left behind on failure |
-| | `state-store.ts` | `StateStore`: saves tasks and plans (per project, `.git/aso/`) and conversations (Hub-wide) and loads them on start |
+| | `state-store.ts` | `ProjectStateStore` / `HubStateStore`: where tasks and plans (per project) and conversations and named values (Hub-wide) are saved. `StateStore`: in files, when there is no database |
+| | `postgres-store.ts` | `Database` (the `pg` pool), the PostgreSQL stores, `projectStateStore` / `hubStateStore` (database or files), and the one-time import of the state files (`importOnce`) |
+| | `pg-records.ts` | How records map to tables: `TASKS`, `PLANS`, their query columns, `toJsonText`, `diffRecords` (what changed since the last save) |
+| | `db-migrations.ts` | `MIGRATIONS` and `migrate`, applied at start under an advisory lock |
+| | `save-scheduler.ts` | `SaveScheduler`: batches saves, writes one at a time, tries failed writes again (also while closing) |
 | `@aso/architect` | `client.ts`, `planner.ts` | Architect node: registers, plans each `PLAN_REQUEST` with read-only tools via the Hub, submits `PLAN_RESULT`. Run by the CLI's hidden `aso architect` command in tmux |
 | `@aso/worker` | `client.ts` | Connect, register (slots, running jobs as resume claims), heartbeat, offline outbox, dispatch jobs |
 | | `jobs.ts` | `JobRunner`: up to `slots` jobs at once, each in its own checkout; implementation jobs (via a `TaskExecutor`, with `requestDependencies` / `callModel`) and QA runs |
@@ -298,26 +310,49 @@ held result is accepted, instead of requeuing the job and rejecting the result.
 
 ### When the Hub restarts
 
-Tasks, plans and agent conversations are saved to disk, so a Hub restart looks to the swarm
-like every node dropping off at once and coming back.
+Tasks, plans and agent conversations are saved, so a Hub restart looks to the swarm like every
+node dropping off at once and coming back.
 
-**Where.**
-- **Per project:** tasks, plans and transcripts go in `<project>/.git/aso/`. Inside `.git` the
-  state stays with the project it describes, is covered by the Docker bind mount, and is never
-  committed or served. The Git endpoint only answers smart-HTTP paths, so clones don't include
-  it.
-- **Hub-wide:** agent conversations go in `<projects root>/.aso/`. That folder starts with a
-  dot, so it is never taken for a project.
+**Where.** Behind two interfaces in `state-store.ts`: `ProjectStateStore` (a project's tasks
+and plans) and `HubStateStore` (conversations, and named values such as the model usage totals).
+- **PostgreSQL** (`HubOptions.databaseUrl`; `postgres-store.ts`): one database for the Hub.
+- **Files** (no database): tasks and plans in `<project>/.git/aso/state.json`, conversations
+  in `<projects root>/.aso/conversations/`, values in `<projects root>/.aso/values/`.
 - **In memory only:** `HubOptions.stateDir: null`.
 
-| File | Content | Written |
-|---|---|---|
-| `state.json` | `{version, savedAt, tasks, plans}` | 200 ms after a change, batched; on shutdown |
-| `conversations/<id>.json` | Messages, next turn, pending tool calls, last answer | After every model turn; deleted with the conversation |
+Either way, transcripts and screenshots are files in `<project>/.git/aso/`. Inside `.git` they
+stay with the project, are covered by the Docker bind mount, and are never committed or served
+(the Git endpoint only answers smart-HTTP paths). `<projects root>/.aso/` starts with a dot, so
+it is never taken for a project.
 
-Writes go to a temp file that is renamed into place, one at a time, so a crash leaves the
-previous version intact. A file the Hub can't read (bad JSON, unknown `version`) is renamed
-to `state.json.unreadable-<time>`, never deleted, and the Hub starts empty.
+**PostgreSQL tables.** Each record is kept whole in a `json` column (`json`, not `jsonb`: the
+text comes back exactly, so a restored conversation is byte-identical for the prompt cache);
+the columns beside it are copies for querying.
+
+| Table | Key | Query columns | Written |
+|---|---|---|---|
+| `tasks` | `project, task_id` | `seq` (first-saved order), `state`, `role`, `title`, `created_at`, `updated_at`, `cost_usd` | 200 ms after a change, batched: only the records that changed, in one transaction |
+| `plans` | `project, plan_id` | `seq`, `state`, `created_at`, `updated_at` | likewise |
+| `conversations` | `id` | `updated_at` | After every model turn; deleted with the conversation |
+| `hub_values` | `key` | `updated_at` | `llm-totals` after every model call; `imported:…` markers |
+| `schema_migrations` | `version` | | At start: `MIGRATIONS` not yet applied, each in a transaction, under an advisory lock |
+
+- **Failed writes** are tried again 5 s later; changes stay pending until a write succeeds. On
+  shutdown a failed write is tried 3 more times, then its loss is logged as an error. The state
+  file uses the same `SaveScheduler`.
+- **Text Postgres refuses** (half of a UTF-16 surrogate pair, from output cut mid-character)
+  becomes U+FFFD.
+- **A newer schema** than the Hub knows stops the start with a message, rather than the Hub
+  running on tables it doesn't understand.
+- **The one-time import:** on the first load of a project with no rows yet, its `state.json`
+  is copied in, and `imported:project:<id>` is set in the same transaction; conversation files
+  likewise (`imported:conversations`). The files are left in place.
+
+**Files.** `state.json` (`{version, savedAt, tasks, plans}`) is written 200 ms after a change,
+batched, and on shutdown; `conversations/<id>.json` after every model turn. Writes go to a temp
+file that is renamed into place, one at a time, so a crash leaves the previous version intact.
+A file the Hub can't read (bad JSON, unknown `version`) is renamed to
+`state.json.unreadable-<time>`, never deleted, and the Hub starts empty.
 
 **On start**, before any node connects, saved work is put back like this:
 

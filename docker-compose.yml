@@ -1,7 +1,24 @@
 # Used by `aso start-hub --docker`, which sets these variables. To run it by hand:
-#   ASO_PROJECTS_ROOT=~/aso-projects ASO_TOKEN=... ASO_UID=$(id -u) ASO_GID=$(id -g) docker compose up --build
+#   ASO_PROJECTS_ROOT=~/aso-projects ASO_TOKEN=... ASO_DB_PASSWORD=$(cat ~/.config/aso/db-password) \
+#   ASO_UID=$(id -u) ASO_GID=$(id -g) docker compose up --build
 name: aso
 services:
+  # The Hub's database: tasks, plans, agent conversations. Not published: only the Hub reaches it.
+  # Its data is in the aso-db volume; the password is set when that volume is first created.
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: aso
+      POSTGRES_DB: aso
+      POSTGRES_PASSWORD: "${ASO_DB_PASSWORD:?the CLI passes the database password}"
+    volumes:
+      - aso-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aso -d aso"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
   hub:
     build:
       context: .
@@ -48,6 +65,8 @@ services:
       ASO_GATEWAY_HOST: "0.0.0.0"
       ASO_GATEWAY_URL: "${ASO_GATEWAY_URL:-}"
       ASO_AUTO_MERGE_SYNCS: "${ASO_AUTO_MERGE_SYNCS:-1}"
+      # The db service above, unless the CLI was given a database of its own (--database-url).
+      ASO_DATABASE_URL: "${ASO_DATABASE_URL:-postgres://aso:${ASO_DB_PASSWORD}@db:5432/aso}"
       # Read from the environment of `aso start-hub --docker`; never baked into the image.
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
       # Cloud providers' keys: each makes that provider available (docs/models.md, "Providers").
@@ -64,7 +83,11 @@ services:
       ASO_PUSH: "${ASO_PUSH:-1}"
       # For HTTPS remotes (e.g. a GitHub fine-grained token with Contents: read/write).
       ASO_GIT_TOKEN: "${ASO_GIT_TOKEN:-}"
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
   aso-data:
+  aso-db:

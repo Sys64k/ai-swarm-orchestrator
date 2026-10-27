@@ -144,10 +144,10 @@ A task is failed after 3 node losses.
 one. A retry gets fresh limits and budget, and the agent is told why it's running again. See
 [Hub endpoints](api.md#hub-endpoints).
 
-**If the Hub restarts** (redeploy, crash, reboot), it picks up where it left off. Each
-project's tasks, plans and transcripts are saved in its `.git/aso/` directory, so they stay
-with the project and never end up in a commit or a worker's clone. Agent conversations are
-saved in `~/aso-projects/.aso/`. On restart:
+**If the Hub restarts** (redeploy, crash, reboot), it picks up where it left off. Tasks, plans
+and agent conversations are kept in its database (see
+[The database](installation.md#the-database)); each task's transcript is saved in its project's
+`.git/aso/` directory, so it never ends up in a commit or a worker's clone. On restart:
 
 - **Started jobs** are held for 5 minutes, as if their worker had dropped off. The worker
   reconnects on its own, and its agent continues the same conversation.
@@ -156,9 +156,10 @@ saved in `~/aso-projects/.aso/`. On restart:
 - **Plans** the Architect was working on are planned again; proposed plans still wait for
   approval.
 
-Delete a project's `.git/aso/` while the Hub is stopped to start that project with an empty
-task list. A state file the
-Hub can't read is renamed to `state.json.unreadable-<time>` and the Hub starts empty.
+Without a database, the tasks and plans are in each project's `.git/aso/state.json` and the
+conversations in `~/aso-projects/.aso/`. Delete a project's `.git/aso/` while the Hub is
+stopped to start that project with an empty task list. A state file the Hub can't read is
+renamed to `state.json.unreadable-<time>` and the Hub starts empty.
 
 **The acceptance check.** Passing tests show the code runs, not that it does what the task
 asked. So after QA passes, the Architect's model reads the task, its acceptance criteria and the

@@ -83,7 +83,7 @@ import { WorkerKeys, type WorkerKeyView } from "./worker-keys.js";
 const MAX_FAILED_JOINS_PER_MIN = 30;
 import type { sendPush } from "./push/web-push.js";
 import { SignInCodes } from "./sign-in-codes.js";
-import { StateStore } from "./state-store.js";
+import { Database, hubStateStore } from "./postgres-store.js";
 import { TaskError, type QaOptions, type TaskRecord } from "./tasks.js";
 
 const log = createLogger("hub");
@@ -112,6 +112,12 @@ export interface HubOptions {
    * memory only.
    */
   stateDir?: null;
+  /**
+   * A PostgreSQL URL: tasks, plans, agent conversations and the model usage totals are kept
+   * there instead of in the state files, which are imported once on first start (and left in
+   * place). Settings, keys, transcripts and screenshots stay in files. Ignored with `stateDir: null`.
+   */
+  databaseUrl?: string;
   port?: number;
   host?: string;
   /**
@@ -251,11 +257,13 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   let scopeOfNode: (nodeId: string) => KeyScope | undefined = () => undefined;
   // Counts a job's outcome on its machine's worker key (machines on the Hub's own token have none).
   let recordOutcome: (nodeId: string, outcome: JobOutcome) => void = () => undefined;
+  const database = opts.databaseUrl && opts.stateDir !== null ? await Database.connect(opts.databaseUrl) : undefined;
   const projects = await ProjectSet.open(registry, {
     root: opts.projectsRoot,
     single: opts.targetDir,
     mainBranch: opts.mainBranch,
     persist: opts.stateDir !== null,
+    database,
     tasks: {
       policies: opts.policies,
       reclaimGraceMs: opts.reclaimGraceMs,
@@ -280,7 +288,8 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       : opts.projectsRoot
         ? path.join(opts.projectsRoot, ".aso")
         : path.join(await projects.get("project")!.repo.gitDir(), "aso");
-  const store = conversationDir ? new StateStore(conversationDir) : undefined;
+  const store = conversationDir ? hubStateStore(database, conversationDir) : undefined;
+  const storageKind = () => (database ? "postgres" : store ? "files" : "memory");
   notifier = await Notifier.open({ dir: conversationDir, subject: opts.push?.contact ?? (process.env.ASO_PUSH_CONTACT || undefined), send: opts.push?.send });
   // Remember every record's current state, so only what changes from now on notifies.
   for (const p of projects.list()) notifier.observe({ id: p.id, tasks: p.tasks.list(), plans: p.plans.list() });
@@ -682,7 +691,8 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       projects: projects.list().map((p) => p.id),
       // Single-project details, kept for tools that predate projects.
       targetDir: only?.dir ?? null,
-      stateDir: only?.store?.dir ?? null,
+      stateDir: only?.stateDir ?? null,
+      storage: storageKind(),
       mainBranch: only?.repo.mainBranch ?? null,
       sync: only?.sync.status() ?? null,
       qa: projects.list()[0]?.tasks.qa ?? null,
@@ -1239,6 +1249,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       await projects.close();
       await workerKeys.flush().catch((err: Error) => log.warn(`could not save worker key spending: ${err.message}`));
       await store?.close();
+      await database?.close();
       for (const c of connections.values()) c.ws.close(1001, "hub shutting down");
       await new Promise<void>((resolve) => server.close(() => resolve()));
       if (gateway) await new Promise<void>((resolve) => gateway.server.close(() => resolve()));

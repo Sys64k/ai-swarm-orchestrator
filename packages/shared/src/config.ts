@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { randomBytes } from "node:crypto";
 import { generateToken } from "./auth.js";
 
 /** Per-user ASO configuration directory (override with ASO_CONFIG_DIR, e.g. in tests). */
@@ -10,6 +11,30 @@ export function configDir(): string {
 
 export function tokenFile(): string {
   return path.join(configDir(), "token");
+}
+
+/** The password of the Hub's own database (`aso start-hub --docker`). Owner-only. */
+export function databasePasswordFile(): string {
+  return path.join(configDir(), "db-password");
+}
+
+/**
+ * The Hub's database password, made on first use and kept: the database takes it when it is
+ * first created, so a new one later would lock the Hub out. URL-safe, for the connection URL.
+ */
+export function ensureDatabasePassword(): { password: string; file: string; created: boolean } {
+  const file = databasePasswordFile();
+  if (existsSync(file)) {
+    const password = readFileSync(file, "utf8").trim();
+    if (password) return { password, file, created: false };
+  }
+  mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const password = randomBytes(24).toString("base64url");
+  const tmp = `${file}.${process.pid}.tmp`;
+  rmSync(tmp, { force: true });
+  writeFileSync(tmp, `${password}\n`, { mode: 0o600, flag: "wx" });
+  renameSync(tmp, file);
+  return { password, file, created: true };
 }
 
 /** This machine's worker key, from joining a Hub (`--join`). Owner-only. */

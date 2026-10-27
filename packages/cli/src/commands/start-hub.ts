@@ -1,7 +1,7 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, statSync } from "node:fs";
 import path from "node:path";
-import { ARCHITECT_TMUX_SESSION, createLogger, resolveToken } from "@aso/shared";
+import { ARCHITECT_TMUX_SESSION, createLogger, ensureDatabasePassword, resolveToken } from "@aso/shared";
 import { startHub, type Effort } from "@aso/hub";
 import { gitBuildId, layout } from "../layout.js";
 import { startDeployRunner, type DeployRunner } from "../deploy-runner.js";
@@ -54,6 +54,8 @@ export interface StartHubOptions {
   juniorTries: number;
   /** `--no-escalation` turns it off. */
   escalation: boolean;
+  /** PostgreSQL for the Hub's state (`--database-url`, else ASO_DATABASE_URL); with `--docker`, its own container by default. */
+  databaseUrl?: string;
   /** Git URL of the ASO repository whose main this Hub follows (`--update-from`). */
   updateFrom?: string;
 }
@@ -71,8 +73,11 @@ export async function startHubCommand(opts: StartHubOptions): Promise<void> {
   const testCommand = parseTestCommand(opts.testCommand);
   const qaEnabled = opts.qa && process.env.ASO_QA !== "0";
   const updater = hubUpdater(opts, auth.token);
+  const databaseUrl = opts.databaseUrl || process.env.ASO_DATABASE_URL || undefined;
+  if (!databaseUrl) log.info("no database: tasks and plans are kept in each project's .git/aso/state.json (--database-url, or --docker, for PostgreSQL)");
   const hub = await startHub({
     projectsRoot: root,
+    databaseUrl,
     projectsRootDisplay: process.env.ASO_PROJECTS_ROOT_DISPLAY || undefined,
     port: opts.port,
     host: opts.host,
@@ -141,6 +146,9 @@ async function startHubInDocker(root: string, opts: StartHubOptions, token: stri
       // Inside the container the folder is /projects; the console shows this host path instead.
       ASO_PROJECTS_ROOT_DISPLAY: root,
       ASO_TOKEN: token,
+      // The database container's password (made once, kept in the config folder), or a database of your own.
+      ASO_DB_PASSWORD: ensureDatabasePassword().password,
+      ASO_DATABASE_URL: opts.databaseUrl || process.env.ASO_DATABASE_URL || "",
       // The image has no .git; label the package it builds with the host's commit.
       ASO_BUILD: gitBuildId(layout.root),
       ASO_UID: String(process.getuid?.() ?? 1000),
