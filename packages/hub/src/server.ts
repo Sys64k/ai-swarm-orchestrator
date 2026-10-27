@@ -66,6 +66,7 @@ import type { z } from "zod";
 import { DEFAULT_MAX_TOKENS, type Effort, type LlmAdapter } from "./llm/adapter.js";
 import { AcceptanceChecker } from "./llm/acceptance.js";
 import { DeskModels, desksOf } from "./llm/desk-models.js";
+import { checkToolUse } from "./llm/tool-check.js";
 import { MACHINE_PREFIX, machineDeskAdapter, MachineModels } from "./llm/machine-models.js";
 import { Providers, resolveModel } from "./llm/providers.js";
 import { CustomPrices } from "./llm/custom-prices.js";
@@ -274,7 +275,8 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
         : new AcceptanceChecker(async () => {
             // Resolves once the models (and deskModels) are set up: a check waits for that.
             const hubModel = await reviewModel;
-            return deskModels.roleRoute("reviewer")?.adapter ?? hubModel;
+            // The reviewer's; if its call fails, the Architect's, then --model.
+            return [deskModels.roleRoute("reviewer")?.adapter, deskModels.roleRoute("architect")?.adapter, hubModel];
           });
   // A machine's worker-key scope (none for the Hub's own token); set once the keys are loaded below.
   let scopeOfNode: (nodeId: string) => KeyScope | undefined = () => undefined;
@@ -391,6 +393,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     (spec, settings) => (spec.startsWith(MACHINE_PREFIX) ? machineDeskAdapter(spec) : providers.adapterFor(spec, { maxTokens, effort, vision: settings.vision, baseUrl: settings.baseUrl })),
     llm.concurrency ?? 4,
     (spec) => spec.startsWith(MACHINE_PREFIX) || providers.isLocal(spec),
+    checkToolUse,
   );
   // Only now: the acceptance check asks deskModels for the reviewer's model.
   setReviewModel(adapter);

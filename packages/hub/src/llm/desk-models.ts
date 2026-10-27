@@ -63,6 +63,9 @@ export type IsLocal = (spec: ModelSpec) => boolean;
 /** Builds the adapter for a model; throws when it can't (e.g. an openai: model without an address). */
 export type AdapterFactory = (spec: ModelSpec, settings: ModelSettings) => LlmAdapter;
 
+/** Checks that a model takes the Hub's requests with tools; throws why not. */
+export type ToolCheck = (adapter: LlmAdapter) => Promise<void>;
+
 /** A model to call, with its limit on calls at once. */
 export interface Route {
   adapter: LlmAdapter;
@@ -89,12 +92,14 @@ export class DeskModels {
     private readonly factory: AdapterFactory,
     private readonly hubConcurrency: number,
     private readonly isLocal: IsLocal,
+    private readonly checkTools: ToolCheck | undefined,
     file?: string,
   ) {
     this.writer = file ? new JsonFileWriter(file, 0o600) : undefined;
   }
 
-  static async open(dir: string | undefined, factory: AdapterFactory, hubConcurrency: number, isLocal: IsLocal): Promise<DeskModels> {
+  /** `checkTools`: asked before a role or a ladder step goes on a model, so one that can't use tools is refused then, not at every task. */
+  static async open(dir: string | undefined, factory: AdapterFactory, hubConcurrency: number, isLocal: IsLocal, checkTools?: ToolCheck): Promise<DeskModels> {
     const file = dir ? path.join(dir, FILE) : undefined;
     let data: z.infer<typeof ModelsFileSchema> = { models: {}, desks: {}, roles: {}, escalation: {} };
     if (file) {
@@ -104,7 +109,7 @@ export class DeskModels {
         if ((err as NodeJS.ErrnoException).code !== "ENOENT") log.warn(`${file} is unreadable, starting with every desk on the default model: ${(err as Error).message}`);
       }
     }
-    return new DeskModels(data.models, data.desks, data.roles, data.escalation, factory, hubConcurrency, isLocal, file);
+    return new DeskModels(data.models, data.desks, data.roles, data.escalation, factory, hubConcurrency, isLocal, checkTools, file);
   }
 
   /** The model a desk uses, or undefined for the default agent model. */
@@ -142,8 +147,8 @@ export class DeskModels {
 
   /**
    * Put the Architect or the reviewer on a model, or back on the default with `null`. Like a
-   * desk's: the adapter is built first, so a model the Hub can't use is refused, and a failed
-   * save changes nothing. A machine's own model serves only that machine's jobs, so not a role.
+   * desk's: the adapter is built and its tool use checked first, so a model the Hub can't use is
+   * refused, and a failed save changes nothing. A machine's own model serves only that machine's jobs, so not a role.
    */
   async assignRole(role: ModelRole, spec: ModelSpec | null, settings?: ModelSettings): Promise<void> {
     const roles: Roles = { ...this.roles };
@@ -155,6 +160,7 @@ export class DeskModels {
       roles[role] = spec;
       const merged = settings ?? this.settings[spec] ?? {};
       const route = this.makeRoute(spec, merged);
+      await this.checkTools?.(route.adapter);
       await this.save({ roles }, { ...this.settings, [spec]: merged });
       this.routes.set(spec, route);
     }
@@ -186,6 +192,7 @@ export class DeskModels {
       if (machine) throw new Error(`a machine's own model serves only its own jobs; ${machine} can't take escalated tasks`);
       if (new Set(change.ladder).size !== change.ladder.length) throw new Error("a model can be on the ladder only once");
       for (const spec of change.ladder) routes.set(spec, this.makeRoute(spec, this.settings[spec] ?? {}));
+      for (const route of routes.values()) await this.checkTools?.(route.adapter);
       next.ladder = [...change.ladder];
     }
     if (change.juniorTries === null) delete next.juniorTries;

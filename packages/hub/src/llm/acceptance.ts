@@ -1,7 +1,9 @@
 import type Anthropic from "@anthropic-ai/sdk";
-import type { LlmUsage, TaskDiff } from "@aso/shared";
+import { createLogger, type LlmUsage, type TaskDiff } from "@aso/shared";
 import type { LlmAdapter } from "./adapter.js";
 import { priceUsage } from "./pricing.js";
+
+const log = createLogger("acceptance");
 
 /** How much of the diff the reviewer reads; a larger diff is cut, and the verdict says so. */
 export const ACCEPTANCE_DIFF_LIMIT = 120_000;
@@ -112,22 +114,37 @@ export function readVerdict(content: Anthropic.Beta.BetaContentBlock[], criteria
 /**
  * Checks finished work against its task's acceptance criteria with a strong model, after the
  * tests passed: tests show the code runs, not that it does what was asked (a cheaper builder
- * model may hand in something else). `model` resolves once the Hub has its models; undefined
- * means none, and every check is undecided.
+ * model may hand in something else). `models` resolves once the Hub has its models; none means
+ * every check is undecided.
  */
 export class AcceptanceChecker {
-  /** `model`: asked at each check for the reviewer's model (it can change while the Hub runs). */
-  constructor(private readonly model: () => Promise<LlmAdapter | undefined>) {}
+  /**
+   * `models`: asked at each check (the reviewer's can change while the Hub runs), in order: the
+   * reviewer's, then the Hub's own. A model whose call fails (refused, down) hands the check to
+   * the next, so a reviewer that can't do the job doesn't leave every task undecided.
+   */
+  constructor(private readonly models: () => Promise<ReadonlyArray<LlmAdapter | undefined>>) {}
 
   async check(task: AcceptanceSubject, diff: TaskDiff | undefined): Promise<AcceptanceVerdict> {
-    const adapter = await this.model();
-    if (!adapter) return { result: "undecided", reason: "no model is configured for the check" };
+    const adapters = (await this.models()).filter((a, i, all): a is LlmAdapter => a !== undefined && all.findIndex((b) => b?.model === a.model) === i);
+    if (!adapters.length) return { result: "undecided", reason: "no model is configured for the check" };
     if (!diff || diff.files.length === 0) return { result: "undecided", reason: "there is no diff to check" };
     let response;
-    try {
-      response = await adapter.complete({ system: SYSTEM, tools: [TOOL], messages: [{ role: "user", content: acceptancePrompt(task, diff) }] });
-    } catch (err) {
-      return { result: "undecided", reason: `the model failed: ${(err as Error).message}`, model: adapter.model };
+    let adapter = adapters[0];
+    const failures: string[] = [];
+    for (const next of adapters) {
+      adapter = next;
+      try {
+        response = await adapter.complete({ system: SYSTEM, tools: [TOOL], messages: [{ role: "user", content: acceptancePrompt(task, diff) }] });
+        break;
+      } catch (err) {
+        failures.push(`${adapter.model}: ${(err as Error).message}`);
+        if (next !== adapters.at(-1)) log.warn(`"${task.spec.title}": the acceptance check failed on ${adapter.model} (${(err as Error).message}); trying ${adapters[adapters.indexOf(next) + 1].model}`);
+      }
+    }
+    if (!response) {
+      const reason = failures.length === 1 ? `the model failed: ${failures[0].slice(adapter.model.length + 2)}` : `every model failed: ${failures.join("; ")}`;
+      return { result: "undecided", reason, model: adapter.model };
     }
     const usage = priceUsage(response.model, response.tokens);
     const read = readVerdict(response.content, task.spec.acceptanceCriteria);
