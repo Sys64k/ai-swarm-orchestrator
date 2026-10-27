@@ -43,8 +43,11 @@ export function apiHash(doc: object): string {
 }
 
 /** The sync task of one project for one version of the description (task ids are unique across projects). */
+/** What every sync task's id starts with. */
+export const SYNC_TASK_PREFIX = "sync-hub-api-";
+
 export function syncTaskId(projectId: string, hash: string): string {
-  return `sync-hub-api-${createHash("sha256").update(`${projectId}:${hash}`).digest("hex").slice(0, 12)}`;
+  return `${SYNC_TASK_PREFIX}${createHash("sha256").update(`${projectId}:${hash}`).digest("hex").slice(0, 12)}`;
 }
 
 /** What differs between two API descriptions: operations (`POST /api/x`) and schemas (`schema X`). */
@@ -150,6 +153,10 @@ export async function syncApiCopies(projects: readonly Project[], doc: OpenApi &
       try {
         // The acceptance check judges the agent's work after the Hub's own commit of the copy.
         project.tasks.submit(syncTaskSpec(taskId, version, apiChanges(theirs, doc)), { diffBase: seeded });
+        // Older syncs of this project's copy would bring an older description: this one replaces them.
+        for (const older of project.tasks.list()) {
+          if (older.spec.taskId !== taskId && older.spec.taskId.startsWith(SYNC_TASK_PREFIX)) project.tasks.supersede(older.spec.taskId, taskId);
+        }
       } catch (err) {
         await project.repo.deleteTaskBranch(taskId);
         throw err;
