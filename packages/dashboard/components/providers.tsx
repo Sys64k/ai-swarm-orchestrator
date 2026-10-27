@@ -4,8 +4,9 @@ import { useEffect, useState } from "react";
 import { hubPost } from "./hub-client.ts";
 import { usePoll } from "./use-poll.ts";
 import { ActionButton, Badge, Banner, Section, TopBar } from "./ui.tsx";
-import type { Models, Price, Provider, ProviderPreset } from "../lib/types.ts";
-import { keyTravelsInClear, priceBody, priceLine, providerBody, providerDetail, providerId, PROVIDER_FORMS } from "../lib/view.ts";
+import type { Desks, Models, Price, Provider, ProviderPreset } from "../lib/types.ts";
+import { keyTravelsInClear, priceBody, priceLine, providerBody, providerDetail, providerId, PROVIDER_FORMS, roleModelChoices, roleModelOf } from "../lib/view.ts";
+import { ModelPicker } from "./model-picker.tsx";
 
 const PRESETS = Object.keys(PROVIDER_FORMS) as ProviderPreset[];
 
@@ -14,6 +15,7 @@ export function Providers() {
   const providers = usePoll<Provider[]>("providers", 30_000);
   const prices = usePoll<Price[]>("prices", 30_000);
   const models = usePoll<Models>("models", 30_000);
+  const desks = usePoll<Desks>("desks", 30_000);
 
   return (
     <>
@@ -58,6 +60,29 @@ export function Providers() {
         </Section>
 
         <AddProvider taken={providers.data?.map((p) => p.id) ?? []} onAdded={() => { providers.refresh(); models.refresh(); }} />
+
+        {models.data && (
+          <Section title="Architect and reviewer">
+            <p className="muted small">
+              The Architect writes the plans; the reviewer judges each task&apos;s work against its acceptance criteria. The
+              reviewer runs on every task, so a cheaper model there saves the most; the track records show whether it holds up.
+            </p>
+            {(["architect", "reviewer"] as const).map((role) => (
+              <ModelPicker
+                key={role}
+                label={role === "architect" ? "Architect's model (plans)" : "Reviewer's model (acceptance check)"}
+                choices={roleModelChoices(role, models.data!, desks.data)}
+                value={roleModelOf(desks.data, role)}
+                onChoose={async (model) => {
+                  const r = await hubPost("models/roles", { role, model });
+                  desks.refresh();
+                  models.refresh();
+                  return r.ok ? undefined : r.error;
+                }}
+              />
+            ))}
+          </Section>
+        )}
 
         <Section title="Prices" count={prices.data?.length}>
           <p className="muted small">

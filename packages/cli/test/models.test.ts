@@ -49,8 +49,18 @@ describe("aso models and aso desks", () => {
         desks: [{ desk: "avalon#4", model: "openai:qwen3-coder:30b" }],
         models: [{ model: "openai:qwen3-coder:30b", concurrency: 1, running: 1, waiting: 2 }],
       }),
-      ["Desks without a model of their own: claude-haiku-5-5", "", "  avalon#4: openai:qwen3-coder:30b", "", "openai:qwen3-coder:30b: 1 call at once, 1 running, 2 waiting"],
+      [
+        "Architect: claude-opus-5-5",
+        "Reviewer (acceptance check): claude-opus-5-5 (the Architect's)",
+        "Desks without a model of their own: claude-haiku-5-5",
+        "",
+        "  avalon#4: openai:qwen3-coder:30b",
+        "",
+        "openai:qwen3-coder:30b: 1 call at once, 1 running, 2 waiting",
+      ],
+      "an older Hub sends no reviewer: the Architect's model",
     );
+    assert.equal(deskLines({ architect: "claude-opus-5-5", reviewer: "anthropic/claude-sonnet-5-5", defaultAgent: "x", desks: [], models: [] })[1], "Reviewer (acceptance check): anthropic/claude-sonnet-5-5");
     assert.match(deskLines({ architect: null, defaultAgent: "x", desks: [], models: [] }).join("\n"), /Every desk uses it/);
   });
 });

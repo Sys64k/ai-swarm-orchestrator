@@ -1,4 +1,4 @@
-import { hubHttpBase, type ApiNode, type Desks, type Models } from "@aso/shared";
+import { hubHttpBase, MODEL_ROLES, type ApiNode, type Desks, type Models } from "@aso/shared";
 import { api } from "../hub-api.js";
 
 /** What `aso models` prints: the models to choose from. */
@@ -19,7 +19,10 @@ export function modelLines(m: Models): string[] {
 
 /** What `aso desks` and `aso desk` print: each desk with its own model, and each model's load. */
 export function deskLines(d: Desks): string[] {
-  const lines = [`Desks without a model of their own: ${d.defaultAgent ?? "none"}`];
+  // An older Hub sends no reviewer: its acceptance check uses the Architect's model.
+  const reviewerModel = d.reviewer ?? d.architect;
+  const reviewer = reviewerModel && reviewerModel === d.architect ? `${reviewerModel} (the Architect's)` : (reviewerModel ?? "none");
+  const lines = [`Architect: ${d.architect ?? "none"}`, `Reviewer (acceptance check): ${reviewer}`, `Desks without a model of their own: ${d.defaultAgent ?? "none"}`];
   if (!d.desks.length) return [...lines, "Every desk uses it. `aso desk <host>#<slot> <model>` changes one."];
   lines.push("");
   for (const { desk, model } of d.desks) lines.push(`  ${desk}: ${model}`);
@@ -53,19 +56,19 @@ export async function desksCommand(opts: { hub: string }): Promise<void> {
   console.log([...deskLines(desks), ...ownModelLines(nodes)].join("\n"));
 }
 
-/** `aso desk <host>[#<slot>] <model|default>`. */
+/** `aso desk <host>[#<slot>] <model|default>`, or `aso desk architect|reviewer <model|default>`. */
 export async function deskCommand(
   target: string,
   model: string,
   opts: { hub: string; concurrency?: number; baseUrl?: string; vision?: boolean },
 ): Promise<void> {
-  const body = {
-    target,
-    model,
+  const settings = {
     ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
     ...(opts.baseUrl ? { baseUrl: opts.baseUrl } : {}),
     ...(opts.vision !== undefined ? { vision: opts.vision } : {}),
   };
-  const desks = await api<Desks>(hubHttpBase(opts.hub), "/api/desks", { method: "POST", body: JSON.stringify(body) });
+  const role = MODEL_ROLES.find((r) => r === target);
+  const [route, body] = role ? ["/api/models/roles", { role, model, ...settings }] : ["/api/desks", { target, model, ...settings }];
+  const desks = await api<Desks>(hubHttpBase(opts.hub), route, { method: "POST", body: JSON.stringify(body) });
   console.log(deskLines(desks).join("\n"));
 }

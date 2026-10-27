@@ -116,10 +116,11 @@ export function readVerdict(content: Anthropic.Beta.BetaContentBlock[], criteria
  * means none, and every check is undecided.
  */
 export class AcceptanceChecker {
-  constructor(private readonly model: Promise<LlmAdapter | undefined>) {}
+  /** `model`: asked at each check for the reviewer's model (it can change while the Hub runs). */
+  constructor(private readonly model: () => Promise<LlmAdapter | undefined>) {}
 
   async check(task: AcceptanceSubject, diff: TaskDiff | undefined): Promise<AcceptanceVerdict> {
-    const adapter = await this.model;
+    const adapter = await this.model();
     if (!adapter) return { result: "undecided", reason: "no model is configured for the check" };
     if (!diff || diff.files.length === 0) return { result: "undecided", reason: "there is no diff to check" };
     let response;

@@ -188,7 +188,9 @@ since most of an agent's input is read from the cache. `aso price remove <model>
 each desk with a model of its own, and each such model's calls at once and load.
 `aso desk <host>#<slot>|<host> <model|default>` puts a desk, or every desk of a connected
 machine, on a model (`--concurrency`, `--base-url`, `--vision`). See
-[A model per desk](models.md#a-model-per-desk).
+[A model per desk](models.md#a-model-per-desk). `aso desk architect|reviewer <model|default>`
+puts the Architect, or the acceptance check, on a model; see
+[The Architect's and the reviewer's model](models.md#the-architects-and-the-reviewers-model).
 
 ## `aso track-records`
 

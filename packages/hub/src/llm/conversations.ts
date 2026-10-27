@@ -277,7 +277,7 @@ export class ConversationManager {
    * Hub can no longer use (say its key was removed) falls back to the default.
    */
   private routeFor(conv: Conversation): Route | undefined {
-    if (conv.subject.role === "architect") return this.adapter && { adapter: this.adapter, slots: this.slots };
+    if (conv.subject.role === "architect") return this.architectRoute();
     if (conv.deskModel?.startsWith(MACHINE_PREFIX) && this.opts.machineModels) {
       try {
         return this.opts.machineModels.route(conv.nodeId, conv.deskModel);
@@ -294,6 +294,11 @@ export class ConversationManager {
       }
     }
     return this.agentAdapter && { adapter: this.agentAdapter, slots: this.slots };
+  }
+
+  /** The Architect's model: the one it was put on (`aso desk architect`), else the Hub's `--model`. `quiet`: for status, not a call. */
+  private architectRoute(quiet = false): Route | undefined {
+    return this.opts.deskModels?.roleRoute("architect", quiet) ?? (this.adapter && { adapter: this.adapter, slots: this.slots });
   }
 
   /** The model of the desk a task's agent works at on `nodeId` (from the task's crew), if any. */
@@ -335,7 +340,7 @@ export class ConversationManager {
     return {
       configured: this.adapter !== undefined,
       adapter: this.adapter?.name ?? null,
-      model: this.adapter?.model ?? null,
+      model: this.architectRoute(true)?.adapter.model ?? null,
       agentModel: this.agentAdapter?.model ?? null,
       taskBudgetUsd: this.taskBudgetUsd,
       planBudgetUsd: this.planBudgetUsd,

@@ -6,7 +6,8 @@ import { ActionButton, Badge, Banner, LoadingPage, Row, Section, TopBar } from "
 import type { WorkerAction } from "../lib/hub-routes.ts";
 import { useState } from "react";
 import type { Desks, HubNode, Models, Task } from "../lib/types.ts";
-import { agentRows, choiceGroups, deskModelChoices, deskModelOf, machineModelOf, workerView, type AgentRow, type DeskModelChoice } from "../lib/view.ts";
+import { agentRows, deskModelChoices, deskModelOf, machineModelOf, workerView, type AgentRow } from "../lib/view.ts";
+import { ModelPicker } from "./model-picker.tsx";
 
 /** One worker: what it runs, and draining or restarting it. */
 export function WorkerPage({ id }: { id: string }) {
@@ -137,39 +138,3 @@ function AgentLine({ agent }: { agent: AgentRow }) {
 }
 
 /** A model dropdown; shows the Hub's error under it when a choice is refused. */
-function ModelPicker({ label, choices, value, onChoose }: { label: string; choices: DeskModelChoice[]; value?: string; onChoose: (model: string) => Promise<string | undefined> }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
-  return (
-    <label className="model-picker">
-      <span className="muted small">{label}</span>
-      <select
-        className="input"
-        value={value ?? ""}
-        disabled={busy}
-        onChange={async (e) => {
-          setBusy(true);
-          setError(await onChoose(e.target.value));
-          setBusy(false);
-        }}
-      >
-        {value === undefined && <option value="">Mixed</option>}
-        {choiceGroups(choices).map(({ group, choices: inGroup }) => {
-          const options = inGroup.map((c) => (
-            <option key={c.value} value={c.value}>
-              {c.label}
-            </option>
-          ));
-          return group ? (
-            <optgroup key={group} label={group}>
-              {options}
-            </optgroup>
-          ) : (
-            options
-          );
-        })}
-      </select>
-      {error && <Banner tone="bad">{error}</Banner>}
-    </label>
-  );
-}

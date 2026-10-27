@@ -288,6 +288,8 @@ export interface Price {
 
 export interface Models {
   architect: string | null;
+  /** The acceptance check's model (absent from older Hubs: the Architect's). */
+  reviewer?: string | null;
   defaultAgent: string | null;
   available: AvailableModel[];
   localError?: string;
@@ -296,6 +298,9 @@ export interface Models {
 /** Which desks use a model of their own (`GET /api/desks`). */
 export interface Desks {
   architect: string | null;
+  reviewer?: string | null;
+  /** The roles put on a model of their own (absent from older Hubs). */
+  roles?: { architect?: string; reviewer?: string };
   defaultAgent: string | null;
   desks: Array<{ desk: string; model: string }>;
   models: Array<{ model: string; baseUrl?: string; concurrency: number; running: number; waiting: number }>;

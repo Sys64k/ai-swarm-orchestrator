@@ -174,6 +174,26 @@ aso desks                            # each desk's model, and how busy each mode
   a change applies from the next round. Each task's history says which model worked on it.
 - **Stored** in `<projects root>/.aso/models.json` (no secrets: keys stay with the providers).
 
+### The Architect's and the reviewer's model
+
+Two more roles take a model the same way, while the Hub runs:
+
+```bash
+aso desk architect claude-sonnet-5-5   # who writes the plans
+aso desk reviewer gpt-5                 # who judges work in the acceptance check
+aso desk reviewer default               # back to the Architect's model
+```
+
+- **Defaults:** the Architect uses the Hub's `--model`; the reviewer uses the Architect's model.
+- **The reviewer runs on every task** (the Architect only on plans), so a cheaper reviewer
+  saves the most. The [track records](#track-records-how-each-model-has-done) show what each
+  model approved, rejected or couldn't decide, so you can tell whether it holds up.
+- **A machine's own model can't take a role:** it serves only its own machine's jobs.
+- **In the console:** *Model providers* has a picker for each; `aso desks` and `GET /api/desks`
+  show both. A change applies to the next plan or check. Escalation's ladder still starts at
+  `--model` (`--escalate-to` changes it).
+- **Stored** with the desks' models in `models.json`; `POST /api/models/roles`.
+
 ### Escalation
 
 A task that keeps failing on a cheap model moves up to a stronger one, so the strong model's

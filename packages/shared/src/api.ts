@@ -261,6 +261,14 @@ export const DeskModelSettingsSchema = z.strictObject({
   baseUrl: z.string().url().max(500).optional().describe("For a model on another OpenAI-compatible server than the Hub's ASO_LLM_BASE_URL"),
   vision: z.boolean().optional().describe("For OpenAI-compatible models, whether the model accepts images"),
 });
+/** The model roles besides the desks: who plans, and who judges work in the acceptance check. */
+export const MODEL_ROLES = ["architect", "reviewer"] as const;
+export type ModelRole = (typeof MODEL_ROLES)[number];
+
+export const RoleModelBodySchema = DeskModelSettingsSchema.extend({
+  role: z.enum(MODEL_ROLES).describe("architect: who plans; reviewer: who judges work in the acceptance check"),
+  model: z.string().min(1).max(200).describe("A model from GET /api/models (<provider>/<model>), or default: the Hub's --model (the reviewer's default is the Architect's model)"),
+});
 export const DeskAssignmentBodySchema = DeskModelSettingsSchema.extend({
   target: z
     .string()
@@ -691,13 +699,18 @@ export const AvailableModelSchema = z.object({
 export type AvailableModel = z.infer<typeof AvailableModelSchema>;
 export const ModelsSchema = z.object({
   architect: z.string().nullable().describe("The Architect's model"),
+  reviewer: z.string().nullable().describe("The acceptance check's model (the Architect's unless put on another)"),
   defaultAgent: z.string().nullable().describe("The model of desks without one of their own"),
   available: z.array(AvailableModelSchema).describe("The models desks can use"),
   localError: z.string().optional().describe("Why the local models couldn't be listed"),
 });
 export type Models = z.infer<typeof ModelsSchema>;
 export const DesksSchema = z.object({
-  architect: z.string().nullable(),
+  architect: z.string().nullable().describe("The model the Architect plans on"),
+  reviewer: z.string().nullable().describe("The model that judges work in the acceptance check (the Architect's unless put on another)"),
+  roles: z
+    .object({ architect: z.string().optional(), reviewer: z.string().optional() })
+    .describe("The roles put on a model of their own (absent: on the default)"),
   defaultAgent: z.string().nullable(),
   desks: z.array(z.object({ desk: DeskSchema, model: z.string() })).describe("Desks with a model of their own; the others use the default"),
   models: z
