@@ -661,7 +661,8 @@ sequenceDiagram
   worker from that host registers again, "Worker <host> is back" replaces it (same tag). The
   sweep that times out stale nodes runs the check. Known hosts are kept in `workers.json`
   beside `push.json`, so a machine that never reconnects after a Hub restart is still reported,
-  counted from the restart. A host gone 14 days (`WORKER_FORGET_MS`) is forgotten.
+  counted from the restart; the Hub's `close` waits for its last write (`flush`), which the
+  nodes' disconnects cause. A host gone 14 days (`WORKER_FORGET_MS`) is forgotten.
 - **No replays.** A record seen for the first time (Hub start, a restored task) never notifies,
   so restarts don't repeat old news.
 - **No push library.** `hub/src/push/web-push.ts` implements RFC 8291 payload encryption
@@ -1348,7 +1349,9 @@ Each command is its own `docker run --rm` (`dockerRunArgs()`, a pure function wi
 - **Entrypoint.** The program itself, which bypasses image entrypoint scripts (Node's runs unknown
   commands as `node <name>`).
 - **Timeouts.** Killing the `docker` client doesn't stop the container, so a timed-out command's
-  container is removed with `docker rm -f`. Containers carry a label derived from the work
+  container is removed with `docker rm -f` (`removeContainer`), repeated until `docker ps` hasn't
+  listed it three times a second apart: the daemon may still be creating it when the client
+  dies, and a removal then would find nothing. Containers carry a label derived from the work
   directory; leftovers from a crashed worker are removed on the next start.
 - **Errors.** Exit 125 (Docker failed) and the init's "exec failed" (program not in the image)
   reject, like a missing program on the host. QA reports that as a node problem, not a test

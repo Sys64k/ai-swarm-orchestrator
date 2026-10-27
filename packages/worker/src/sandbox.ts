@@ -71,6 +71,24 @@ export interface DockerSandboxOptions {
  * gets none of the worker's environment (so no ASO token), and sees `.git` read-only so it
  * cannot plant hooks or config that the worker's own git would run on the host.
  */
+/**
+ * Remove a container for sure. Right after the docker client is killed, the daemon may still be
+ * creating it: a removal then finds nothing, and the container would run on unseen. So remove
+ * until `docker ps` hasn't listed it `ABSENT_CHECKS` times in a row, `waitMs` apart (at most
+ * `tries` checks). A timeout costs a few seconds more; a container left running costs far more.
+ */
+const ABSENT_CHECKS = 3;
+export async function removeContainer(name: string, tries = 30, waitMs = 1000): Promise<void> {
+  let absent = 0;
+  for (let i = 0; i < tries && absent < ABSENT_CHECKS; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, waitMs));
+    await exec("docker", ["rm", "-f", name]).catch(() => undefined);
+    const { stdout } = await exec("docker", ["ps", "-aq", "--filter", `name=^${name}$`]).catch(() => ({ stdout: "" }));
+    absent = stdout.trim() ? 0 : absent + 1;
+  }
+  if (absent < ABSENT_CHECKS) log.warn(`sandbox container ${name} is still there after a timeout; the next start removes it with the stale ones`);
+}
+
 export class DockerSandbox implements CommandRunner {
   readonly kind = "docker";
   readonly image: string;
@@ -139,7 +157,7 @@ export class DockerSandbox implements CommandRunner {
     });
     const result = await runCommand(["docker", ...args], { cwd: opts.cwd, timeoutMs: opts.timeoutMs });
     // Killing the docker client does not stop the container; remove it explicitly.
-    if (result.timedOut) await exec("docker", ["rm", "-f", name]).catch(() => undefined);
+    if (result.timedOut) await removeContainer(name);
     else if (result.exitCode === 125) throw new Error(`docker could not run the command: ${result.output.trim().split("\n").slice(-3).join(" ")}`);
     else if (result.exitCode === 127 && /OCI runtime|executable file not found|\[FATAL tini \(\d+\)\] exec /.test(result.output)) {
       throw new Error(`${argv[0]} is not installed in the sandbox image (${this.image})`);

@@ -1353,6 +1353,8 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       for (const c of connections.values()) c.ws.close(1001, "hub shutting down");
       await new Promise<void>((resolve) => server.close(() => resolve()));
       if (gateway) await new Promise<void>((resolve) => gateway.server.close(() => resolve()));
+      // The nodes' disconnects above save the machines' last-seen times; don't return mid-write.
+      await workerWatch.flush();
     },
   };
 }

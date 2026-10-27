@@ -4,7 +4,8 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } f
 import os from "node:os";
 import path from "node:path";
 import { after, before, describe, it } from "node:test";
-import { defaultSandboxImage, DockerSandbox, dockerRunArgs } from "@aso/worker";
+import { execFile } from "node:child_process";
+import { defaultSandboxImage, DockerSandbox, dockerRunArgs, removeContainer } from "@aso/worker";
 
 process.env.ASO_LOG_LEVEL ??= "error";
 
@@ -146,5 +147,13 @@ describe("Docker sandbox (real containers)", { skip: dockerUsable ? false : "Doc
     assert.equal(r.timedOut, true);
     const left = execFileSync("docker", ["ps", "-aq", "--filter", "name=aso-job-", "--filter", "ancestor=" + image], { encoding: "utf8" }).trim();
     assert.equal(left, "");
+  });
+
+  it("removes a container that only appears after the removal began (the daemon was still creating it)", async () => {
+    const name = `aso-job-late-${process.pid}`;
+    // As when the docker client is killed mid-create: the container comes up a moment later.
+    setTimeout(() => execFile("docker", ["run", "-d", "--name", name, image, "sleep", "600"], () => undefined), 300);
+    await removeContainer(name);
+    assert.equal(execFileSync("docker", ["ps", "-aq", "--filter", `name=^${name}$`], { encoding: "utf8" }).trim(), "");
   });
 });
