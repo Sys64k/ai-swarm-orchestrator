@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { LlmError, MachineModels } from "@aso/hub";
 import { createMessage, type AgentMessage } from "@aso/shared";
-import { postTask, reply, ScriptedModel, text, waitFor, withHub, worker } from "./helpers.ts";
+import { postTask, reply, ScriptedModel, text, TOKEN, waitFor, withHub, worker } from "./helpers.ts";
 
 delete process.env.ANTHROPIC_API_KEY; // tests must never reach the real API
 
@@ -65,6 +65,28 @@ describe("a machine's own model (Hub)", () => {
       assert.ok(result.outcome === "error" && result.retryable && /out of GPU memory/.test(result.error), "its error, to be tried again");
       gpu.ws.close();
       other.ws.close();
+    }, hubOpts);
+  });
+
+  it("puts a desk on its machine's own model only when that machine serves it", async () => {
+    await withHub(async (ctx) => {
+      const gpu = await worker(ctx.port, "gpu", { localModels: [{ id: "qwen" }, { id: "llama" }], defaultLocalModel: "qwen" });
+      const call = (body: unknown) =>
+        fetch(`http://127.0.0.1:${ctx.port}/api/desks`, { method: "POST", headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, body: (await r.json()) as any }));
+      const set = await call({ target: "test#1", model: "machine/llama" });
+      assert.equal(set.status, 200, JSON.stringify(set.body));
+      assert.deepEqual(set.body.desks, [{ desk: "test#1", model: "machine/llama" }]);
+      const refused = await call({ target: "test#1", model: "machine/gpt-5" });
+      assert.equal(refused.status, 400);
+      assert.match(refused.body.error, /test doesn't serve gpt-5 itself \(start its worker with --local-model\)/);
+
+      await postTask(ctx.port, { taskId: "greet", role: "backend", title: "Greet", description: "d" });
+      await startJob(ctx.port, gpu, "gpu", "greet");
+      assert.equal(payloadOf(await gpu.next(), "MODEL_CALL").model, "llama", "the desk's choice over the machine's default");
+      const nodes = (await fetch(`http://127.0.0.1:${ctx.port}/api/nodes`, { headers: { authorization: `Bearer ${TOKEN}` } }).then((r) => r.json())) as Array<{ nodeId: string; localModels?: unknown; defaultLocalModel?: string }>;
+      const shown = nodes.find((n) => n.nodeId === "gpu")!;
+      assert.deepEqual([shown.localModels, shown.defaultLocalModel], [[{ id: "qwen" }, { id: "llama" }], "qwen"], "the API shows what it serves");
+      gpu.ws.close();
     }, hubOpts);
   });
 

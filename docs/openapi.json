@@ -586,6 +586,29 @@
             "items": {
               "type": "string"
             }
+          },
+          "localModels": {
+            "description": "Models this machine serves itself, for its own jobs (machine/<model>)",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "vision": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "defaultLocalModel": {
+            "description": "The one its desks use unless put on another model",
+            "type": "string"
           }
         },
         "required": [

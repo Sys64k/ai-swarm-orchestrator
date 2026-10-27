@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { deskLines, modelLines } from "../dist/commands/models.js";
+import { deskLines, modelLines, ownModelLines } from "../dist/commands/models.js";
 
 describe("aso models and aso desks", () => {
   it("lists the models by provider, each by the spec a desk is put on", () => {
@@ -29,6 +29,16 @@ describe("aso models and aso desks", () => {
     const none = modelLines({ architect: null, defaultAgent: null, available: [], localError: "OpenAI: HTTP 401" }).join("\n");
     assert.match(none, /No models: add a provider/);
     assert.match(none, /Couldn't list: OpenAI: HTTP 401/);
+  });
+
+  it("lists the machines that serve their own models", () => {
+    const hw = (hostname: string) => ({ hostname }) as never;
+    assert.deepEqual(ownModelLines([{ hardware: hw("avalon"), localModels: [{ id: "qwen3-coder:30b" }, { id: "llama3" }], defaultLocalModel: "llama3" }, { hardware: hw("canfod") }]), [
+      "",
+      "Machines' own models (machine/<model>):",
+      "  avalon serves its own: qwen3-coder:30b, llama3 (its desks use llama3, free, unless put on another model)",
+    ]);
+    assert.deepEqual(ownModelLines([{ hardware: hw("canfod") }]), [], "none: nothing to add");
   });
 
   it("shows each desk's model and each model's load", () => {

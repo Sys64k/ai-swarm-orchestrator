@@ -354,8 +354,12 @@ export function canonicalSpec(spec: string): string {
  * The models a desk can be put on: the default first, then each provider's models (grouped by
  * provider), then any model a desk already uses that the Hub no longer lists (so it still shows).
  */
-export function deskModelChoices(models: Models, desks?: Pick<Desks, "desks">): DeskModelChoice[] {
-  const choices: DeskModelChoice[] = [{ value: "default", label: `Default (${models.defaultAgent ?? "none"})` }];
+export function deskModelChoices(models: Models, desks?: Pick<Desks, "desks">, machine?: Pick<HubNode, "localModels" | "defaultLocalModel">): DeskModelChoice[] {
+  const own = machine?.localModels ?? [];
+  const ownDefault = machine?.defaultLocalModel ?? own[0]?.id;
+  // On a machine with its own model, "default" means that model (the Hub routes its desks there).
+  const choices: DeskModelChoice[] = [{ value: "default", label: ownDefault ? `Default (this machine's own: ${ownDefault})` : `Default (${models.defaultAgent ?? "none"})` }];
+  for (const m of own) choices.push({ value: `machine/${m.id}`, label: m.id, group: "This machine's own (free)" });
   for (const m of models.available) choices.push({ value: m.spec, label: m.model, group: m.providerLabel ?? m.providerId ?? m.provider });
   for (const { model } of desks?.desks ?? []) {
     const value = canonicalSpec(model);

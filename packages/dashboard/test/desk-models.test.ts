@@ -46,6 +46,15 @@ describe("models per desk in the console", () => {
     ]);
   });
 
+  it("offers a machine's own models, free, and says the default is one of them", () => {
+    const choices = deskModelChoices(models, { desks: [] }, { localModels: [{ id: "qwen3-coder:30b" }], defaultLocalModel: "qwen3-coder:30b" });
+    assert.deepEqual(choices.slice(0, 2), [
+      { value: "default", label: "Default (this machine's own: qwen3-coder:30b)" },
+      { value: "machine/qwen3-coder:30b", label: "qwen3-coder:30b", group: "This machine's own (free)" },
+    ]);
+    assert.equal(deskModelChoices(models, { desks: [] }, { localModels: [] })[0].label, "Default (claude-haiku-5-5)", "a machine without its own");
+  });
+
   it("groups the choices by provider, the default first", () => {
     const groups = choiceGroups(deskModelChoices(models, desks));
     assert.deepEqual(groups.map((g) => [g.group ?? null, g.choices.length]), [[null, 1], ["Anthropic", 1], ["Local (avalon:11434)", 1], ["OpenAI", 1], ["Not listed", 1]]);

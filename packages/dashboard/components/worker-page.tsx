@@ -34,7 +34,7 @@ export function WorkerPage({ id }: { id: string }) {
   const w = workerView(node);
   const host = node.hardware?.hostname ?? "";
   const slots = node.slots ?? 1;
-  const choices = models ? deskModelChoices(models, desks) : undefined;
+  const choices = models ? deskModelChoices(models, desks, node) : undefined;
   /** Put `target` (a desk or the whole machine) on a model; the Hub's error, if any. */
   const choose = async (target: string, model: string) => {
     const err = await hubAction("desks", { target, model });
@@ -67,6 +67,12 @@ export function WorkerPage({ id }: { id: string }) {
           </div>
           {w.actions.restartNote && <p className="muted small">{w.actions.restartNote}</p>}
         </div>
+        {node.localModels?.length ? (
+          <p className="muted small">
+            Serves its own model{node.localModels.length === 1 ? "" : "s"}: {node.localModels.map((m) => m.id).join(", ")}. Its desks use{" "}
+            {node.defaultLocalModel ?? node.localModels[0].id} for its own jobs, free for the Hub, unless put on another model.
+          </p>
+        ) : null}
         {choices && models && (
           <ModelPicker
             label="Model for all desks"

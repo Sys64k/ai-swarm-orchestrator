@@ -387,6 +387,8 @@ export const NodeSchema = z.object({
   updates: z.enum(["package"]).optional(),
   /** Sent by workers from before roles were the Architect's call; ignored. */
   roles: z.array(z.string()).optional(),
+  localModels: z.array(z.object({ id: z.string(), vision: z.boolean().optional() })).optional().describe("Models this machine serves itself, for its own jobs (machine/<model>)"),
+  defaultLocalModel: z.string().optional().describe("The one its desks use unless put on another model"),
 });
 export type ApiNode = z.infer<typeof NodeSchema>;
 

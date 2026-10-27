@@ -59,7 +59,7 @@ import type { z } from "zod";
 import { DEFAULT_MAX_TOKENS, type Effort, type LlmAdapter } from "./llm/adapter.js";
 import { AcceptanceChecker } from "./llm/acceptance.js";
 import { DeskModels, desksOf } from "./llm/desk-models.js";
-import { MachineModels } from "./llm/machine-models.js";
+import { MACHINE_PREFIX, machineDeskAdapter, MachineModels } from "./llm/machine-models.js";
 import { Providers, resolveModel } from "./llm/providers.js";
 import { CustomPrices } from "./llm/custom-prices.js";
 import { buildEscalationPolicy } from "./llm/escalation.js";
@@ -345,9 +345,10 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   // Desks can each use their own model; the catalog says which models there are to choose from.
   const deskModels = await DeskModels.open(
     conversationDir,
-    (spec, settings) => providers.adapterFor(spec, { maxTokens, effort, vision: settings.vision, baseUrl: settings.baseUrl }),
+    // A machine's own model is routed per machine (MachineModels); a desk on one only names it.
+    (spec, settings) => (spec.startsWith(MACHINE_PREFIX) ? machineDeskAdapter(spec) : providers.adapterFor(spec, { maxTokens, effort, vision: settings.vision, baseUrl: settings.baseUrl })),
     llm.concurrency ?? 4,
-    (spec) => providers.isLocal(spec),
+    (spec) => spec.startsWith(MACHINE_PREFIX) || providers.isLocal(spec),
   );
   // Escalation: a task that keeps failing on its desk's model moves up to stronger ones.
   const escalation = buildEscalationPolicy({ ...llm, model }, (spec) => {
@@ -787,7 +788,14 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     const desks = desksOf(target, registry.workerSnapshots().map((w) => ({ hostname: w.hardware.hostname, slots: w.slots })));
     if (!Array.isArray(desks)) return c.json({ error: desks.error }, 404);
     let spec: string | null = null;
-    if (model !== "default") {
+    if (model.startsWith(MACHINE_PREFIX)) {
+      // Each desk's own machine must serve it: a machine's model serves only its own jobs.
+      const own = model.slice(MACHINE_PREFIX.length);
+      const hosts = [...new Set(desks.map((d) => d.split("#")[0]))];
+      const without = hosts.filter((host) => !registry.workerSnapshots().some((w) => w.hardware.hostname === host && machineModels.serves(w.nodeId, own)));
+      if (without.length) return c.json({ error: `${without.join(", ")} doesn't serve ${own} itself (start its worker with --local-model)` }, 400);
+      spec = model;
+    } else if (model !== "default") {
       const resolved = resolveModel(model, (await providers.models()).models, providers.list());
       if ("error" in resolved) return c.json({ error: resolved.error }, 400);
       spec = resolved.spec;

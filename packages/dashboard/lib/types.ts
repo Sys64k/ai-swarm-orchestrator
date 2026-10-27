@@ -101,6 +101,10 @@ export interface Plan {
 export interface HubNode {
   nodeId: string;
   nodeKind: "worker" | "architect";
+  /** Models this machine serves itself, for its own jobs (absent: none, or an older Hub). */
+  localModels?: Array<{ id: string; vision?: boolean }>;
+  /** The one its desks use unless put on another model. */
+  defaultLocalModel?: string;
   hardware?: { hostname: string; cpu: { logicalCores: number }; memory: { totalBytes: number } };
   heartbeat: { memoryAvailableBytes: number; cpuLoadPercent: number } | null;
   currentTaskId: string | null;

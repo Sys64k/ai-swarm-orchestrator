@@ -230,7 +230,12 @@ aso service install --join <code> --local-model http://localhost:11434/v1 \
 - **The machine calls only its own server**, and only models it listed when it connected,
   whatever the Hub asks.
 - **Its desks use that model by default** (`machine/<model>` in the task's history: "this
-  machine's own model"); a desk you put on another model with `aso desk` keeps that one. A
+  machine's own model"); a desk you put on another model with `aso desk` keeps that one. To
+  pick another of its own models: `aso desk avalon#2 machine/llama3` (refused unless that
+  machine serves it).
+- **Where to see it:** the console's page for that machine names its own models, and its desk
+  pickers list them under "This machine's own (free)"; `aso desks` lists the machines that
+  serve their own. A
   machine's model never serves other machines' jobs, and takes one call at a time.
 - **Free for the Hub:** these calls count $0, also against the key's budget.
 - **The safety nets stay:** QA on a trusted machine, the acceptance check, your review, and

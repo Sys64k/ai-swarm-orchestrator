@@ -32,7 +32,9 @@ describe("console sign-in", () => {
     const [v, issued, nonce, mac] = session.split(".");
     assert.ok(!(await isValidSession(token, [v, String(Number(issued) + 1), nonce, mac].join("."), now)), "the issue time is signed");
     assert.ok(!(await isValidSession(token, [v, issued, `${nonce}x`, mac].join("."), now)));
-    assert.ok(!(await isValidSession(token, [v, issued, nonce, `${mac.slice(0, -1)}A`].join("."), now)));
+    // Another last character (the signature is random: a fixed "A" was its own last character 1 time in 64).
+    const forged = `${mac.slice(0, -1)}${mac.endsWith("A") ? "B" : "A"}`;
+    assert.ok(!(await isValidSession(token, [v, issued, nonce, forged].join("."), now)), "a forged signature");
     assert.ok(!(await isValidSession(token, ["v2", issued, nonce, mac].join("."), now)));
     assert.ok(!(await isValidSession(token, "v1.not-a-time.x.y", now)));
     assert.ok(await isValidSession(token, session, now + (SESSION_MAX_AGE_SEC - 1) * 1000));

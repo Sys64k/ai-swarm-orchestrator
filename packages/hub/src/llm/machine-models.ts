@@ -50,6 +50,11 @@ export class MachineModels {
     }
   }
 
+  /** Whether `nodeId` serves `model` itself. */
+  serves(nodeId: string, model: string): boolean {
+    return this.machines.get(nodeId)?.models.some((m) => m.id === model) ?? false;
+  }
+
   /** The spec a machine's desks use by default (its chosen local model); undefined when it serves none. */
   defaultSpec(nodeId: string): string | undefined {
     const m = this.machines.get(nodeId);
@@ -99,6 +104,18 @@ export class MachineModels {
       }
     });
   }
+}
+
+/**
+ * What a desk put on `machine/<model>` holds in DeskModels: only its name. Calls are routed per
+ * machine by MachineModels (ConversationManager), never through this.
+ */
+export function machineDeskAdapter(spec: string): LlmAdapter {
+  return {
+    name: "machine",
+    model: spec,
+    complete: () => Promise.reject(new LlmError(`${spec} is called on its machine, not through a desk`, false)),
+  };
 }
 
 /** A machine's own model, called over its connection. */

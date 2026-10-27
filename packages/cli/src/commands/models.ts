@@ -1,4 +1,4 @@
-import { hubHttpBase, type Desks, type Models } from "@aso/shared";
+import { hubHttpBase, type ApiNode, type Desks, type Models } from "@aso/shared";
 import { api } from "../hub-api.js";
 
 /** What `aso models` prints: the models to choose from. */
@@ -36,9 +36,21 @@ export async function modelsCommand(opts: { hub: string }): Promise<void> {
   console.log(modelLines(await api<Models>(hubHttpBase(opts.hub), "/api/models")).join("\n"));
 }
 
+/** Machines that serve their own models: "avalon serves its own: qwen3-coder:30b (its desks use it)". */
+export function ownModelLines(nodes: ReadonlyArray<Pick<ApiNode, "hardware" | "localModels" | "defaultLocalModel">>): string[] {
+  const lines = nodes.flatMap((n) => {
+    if (!n.localModels?.length || !n.hardware) return [];
+    const used = n.defaultLocalModel ?? n.localModels[0].id;
+    return [`  ${n.hardware.hostname} serves its own: ${n.localModels.map((m) => m.id).join(", ")} (its desks use ${used}, free, unless put on another model)`];
+  });
+  return lines.length ? ["", "Machines' own models (machine/<model>):", ...lines] : [];
+}
+
 /** `aso desks`. */
 export async function desksCommand(opts: { hub: string }): Promise<void> {
-  console.log(deskLines(await api<Desks>(hubHttpBase(opts.hub), "/api/desks")).join("\n"));
+  const base = hubHttpBase(opts.hub);
+  const [desks, nodes] = await Promise.all([api<Desks>(base, "/api/desks"), api<ApiNode[]>(base, "/api/nodes")]);
+  console.log([...deskLines(desks), ...ownModelLines(nodes)].join("\n"));
 }
 
 /** `aso desk <host>[#<slot>] <model|default>`. */
