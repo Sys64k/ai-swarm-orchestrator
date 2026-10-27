@@ -23,6 +23,13 @@ async function fakeApi(ids: string[], key?: string) {
       const chunk = { choices: [{ delta: { content: "ok" }, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1 } };
       return void res.writeHead(200, { "content-type": "text/event-stream" }).end(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`);
     }
+    if (req.url?.endsWith("/responses")) {
+      let raw = "";
+      for await (const chunk of req) raw += chunk;
+      bodies.push({ ...(JSON.parse(raw) as Record<string, unknown>), url: req.url });
+      const done = { type: "response.completed", response: { status: "completed", output: [{ type: "message", content: [{ type: "output_text", text: "ok" }] }], usage: { input_tokens: 1, output_tokens: 1 } } };
+      return void res.writeHead(200, { "content-type": "text/event-stream" }).end(`event: response.completed\ndata: ${JSON.stringify(done)}\n\n`);
+    }
     res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ data: ids.map((id) => ({ id, pricing: { prompt: "0.000001", completion: "0.000002" } })) }));
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
@@ -145,7 +152,7 @@ describe("providers", () => {
     assert.equal((await Providers.open(undefined, { ASO_LLM_BASE_URL: "http://avalon:11434/v1" })).defaultModel(), undefined, "the person chooses");
   });
 
-  it("asks OpenAI's models with max_completion_tokens, others with max_tokens", async () => {
+  it("asks OpenAI's models on its Responses API, other providers on Chat Completions", async () => {
     const api = await fakeApi(["gpt-5"], "sk-oa");
     try {
       const providers = await Providers.open(undefined, {});
@@ -155,8 +162,8 @@ describe("providers", () => {
       await providers.adapterFor("openai/gpt-5", opts).complete({ system: "s", tools: [], messages: [{ role: "user", content: "x" }] });
       await providers.adapterFor("lab/gpt-5", opts).complete({ system: "s", tools: [], messages: [{ role: "user", content: "x" }] });
       const [openAi, lab] = api.bodies;
-      assert.deepEqual([openAi.max_completion_tokens, "max_tokens" in openAi], [1000, false]);
-      assert.deepEqual([lab.max_tokens, "max_completion_tokens" in lab], [1000, false]);
+      assert.deepEqual([openAi.url, openAi.max_output_tokens, openAi.store], ["/v1/responses", 1000, false], "nothing stored at OpenAI");
+      assert.deepEqual([lab.max_tokens, "max_completion_tokens" in lab, "url" in lab], [1000, false, false]);
     } finally {
       await api.close();
     }

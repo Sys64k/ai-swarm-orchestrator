@@ -150,7 +150,9 @@ flowchart LR
 | | `git/http-backend.ts` | Git smart-HTTP via a `git http-backend` CGI bridge, with the push policy |
 | | `git/hub-repo.ts` | `HubRepository`: verify task commits, merge and add dependencies on main under one lock |
 | | `llm/adapter.ts` | `LlmAdapter` interface; `AnthropicApiAdapter` (official SDK, streaming, caching, fallbacks) |
-| | `llm/openai-compatible.ts` | `OpenAiCompatibleAdapter`: any Chat Completions API (OpenAI, OpenRouter, Ollama, vLLM…) |
+| | `llm/openai-compatible.ts` | `OpenAiCompatibleAdapter`: any Chat Completions API (OpenRouter, Gemini, Ollama, vLLM…) |
+| | `llm/openai-responses.ts` | `OpenAiResponsesAdapter`: OpenAI's own models, through its Responses API |
+| | `llm/openai-http.ts` | What both share: the streamed POST and `classifyHttp`, `parseToolArguments`, `flattenToolResult` |
 | | `llm/providers.ts` | `Providers`: the model providers (added with a key or address, plus the `.env`'s), their model lists, and the adapter for a `<provider>/<model>` spec |
 | | `llm/conversations.ts` | `ConversationManager`: Hub-held conversations, turn checks, budget, concurrency queue |
 | | `llm/prompts.ts`, `llm/pricing.ts` | Role system prompts, task prompt (with rework feedback), price table |
@@ -1116,9 +1118,9 @@ sequenceDiagram
 | `fallbacks` | `"default"` + `server-side-fallback-2026-07-01` | If the model declines for policy reasons, Anthropic retries on its recommended fallback model |
 | Tools | `eager_input_streaming: true`; inputs validated on the worker | Large file contents stream as generated |
 
-### Other providers (`OpenAiCompatibleAdapter`)
+### Other providers (`OpenAiCompatibleAdapter`, `OpenAiResponsesAdapter`)
 
-Every provider except Anthropic uses the OpenAI-compatible adapter, at its base URL with its key
+The `openai` preset uses `OpenAiResponsesAdapter` (below). Every other provider except Anthropic uses the OpenAI-compatible adapter, at its base URL with its key
 (see [Providers](#providers-providers)). Conversations keep the Messages API format, and each
 request is translated:
 
@@ -1142,6 +1144,18 @@ asked again), and finish reasons map to the Hub's: `stop` → `end_turn`, `tool_
 input reported in `prompt_tokens_details` counts as cache reads. The answer limit goes in the
 field the provider's preset names (`maxTokensField`): `max_completion_tokens` for OpenAI, whose
 reasoning models refuse `max_tokens`, and `max_tokens` elsewhere.
+
+OpenAI's newer models (`gpt-6.1-sol`, `-terra`) refuse function tools on Chat Completions while
+they reason, so OpenAI's own preset goes through `OpenAiResponsesAdapter` (`POST /responses`,
+`store: false`, streamed): `system` → `instructions`; assistant text → an `assistant` input
+message; `tool_use` → a `function_call` item and `tool_result` → `function_call_output`, paired
+by `call_id`; images follow as a `user` message with `input_image` parts (or a note); `thinking`
+dropped; `max_output_tokens`. The answer is the last `response.completed`/`.incomplete`/`.failed`
+event's (`finalResponse`): `output_text` and `function_call` items become text and `tool_use`
+blocks; `refusal` content or `content_filter` → `refusal`, `max_output_tokens` → `max_tokens`;
+`input_tokens_details.cached_tokens` count as cache reads. Reasoning items aren't requested or
+sent back (nothing is stored), so a model starts each turn from the conversation alone. HTTP
+errors are handled as above (`classifyHttp`).
 
 Prices (`llm/pricing.ts`) are looked up per model name, in order: prices set on the Hub
 (`llm/custom-prices.ts`, `<state>/prices.json`, `aso price set`; their cache rates default to

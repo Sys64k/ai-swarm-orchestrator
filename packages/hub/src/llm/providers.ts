@@ -6,6 +6,7 @@ import { createLogger, PRESET_INFO, type ProviderPreset, ProviderAddBodySchema, 
 import { JsonFileWriter } from "../push/json-file.js";
 import { AnthropicApiAdapter, type Effort, type LlmAdapter } from "./adapter.js";
 import { OPENAI_PREFIX, OpenAiCompatibleAdapter } from "./openai-compatible.js";
+import { OpenAiResponsesAdapter } from "./openai-responses.js";
 import { registerPrices } from "./pricing.js";
 
 const log = createLogger("providers");
@@ -341,6 +342,11 @@ export class Providers {
     if (p.kind === "anthropic") return new AnthropicApiAdapter({ model: parsed.model, effort: opts.effort, maxTokens: opts.maxTokens, apiKey: p.key });
     const baseUrl = opts.baseUrl ?? p.baseUrl;
     if (!baseUrl) throw new Error(`${p.label} has no address`);
+    // OpenAI's own newer models take tools with reasoning only on its Responses API; the other
+    // OpenAI-compatible providers speak Chat Completions.
+    if (p.preset === "openai") {
+      return new OpenAiResponsesAdapter({ baseUrl, model: parsed.model, apiKey: p.key, maxTokens: opts.maxTokens, vision: opts.vision ?? p.vision ?? false });
+    }
     return new OpenAiCompatibleAdapter({
       baseUrl,
       model: parsed.model,

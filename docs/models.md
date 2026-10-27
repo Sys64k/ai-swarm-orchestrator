@@ -45,10 +45,10 @@ aso provider remove openai                 # forgets the key
 - **The Architect's model:** `--model <provider>/<model>`. Without it, the Hub uses Claude Opus
   when Anthropic is a provider; with no Anthropic provider, give `--model` (and restart the Hub
   after adding the provider it names).
-- **One way of calling for all:** every provider but Anthropic is called through the same
-  OpenAI-style Chat Completions API; only the address, key and model name differ. For OpenAI
-  the answer limit is sent as `max_completion_tokens` (its reasoning models refuse
-  `max_tokens`). Models only on OpenAI's newer Responses API aren't supported.
+- **Two ways of calling:** OpenAI itself through its **Responses API** (its newer models, such as
+  `gpt-6.1-sol`, take tools with reasoning only there); every other provider but Anthropic
+  through the OpenAI-style Chat Completions API, where only the address, key and model name
+  differ. Nothing is stored at OpenAI (`store: false`).
 - **Or put keys in the Hub's `.env`** (`~/.config/aso/.env`, read when the Hub starts):
   `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`
   and `MISTRAL_API_KEY` each make that provider available, and `ASO_LLM_BASE_URL` adds one
@@ -191,8 +191,7 @@ aso desk reviewer default               # back to the Architect's model
   [overturned](#when-a-reviewers-met-proves-wrong) later, so you can tell whether it holds up.
 - **A machine's own model can't take a role:** it serves only its own machine's jobs.
 - **Checked before it takes the role:** the Hub makes one small call with a tool, and refuses a
-  model that can't take it. Some OpenAI models (e.g. `gpt-6.1-sol`) take tools only on OpenAI's
-  Responses API, which the Hub doesn't use; they're refused here instead of failing every task.
+  model that can't take it (with the provider's reason), instead of it failing every task.
 - **If the reviewer's call fails anyway** (its provider is down, say), that check runs on the
   Architect's model, then `--model`, so tasks don't all end up waiting for a person.
 - **In the console:** *Model providers* has a picker for each; `aso desks` and `GET /api/desks`
