@@ -50,6 +50,7 @@ export { hubUpdateNotification } from "./hub-update.js";
 export { apiChanges, apiFileContents, apiHash, API_COPY_PATH, syncApiCopies, syncTaskId, syncTaskSpec, type ApiChanges } from "./api-sync.js";
 export { PROVIDER_DATA, withoutProviderData } from "./llm/provider-data.js";
 export { buildEscalationPolicy, calledSpec, canonicalSpec, canSwitchFrom, DEFAULT_JUNIOR_TRIES, roundModel, type EscalationPolicy, type EscalationTask, type RoundModel } from "./llm/escalation.js";
+export { fromResponsesAnswer, finalResponse, OpenAiResponsesAdapter, responsesRequest, toResponsesInput, toResponsesTools, type ResponsesAnswer } from "./llm/openai-responses.js";
 export { OpenAiCompatibleAdapter, OPENAI_PREFIX, accumulateChunks, classifyHttp, fromChatAnswer, sseData, toChatMessages, toChatTools, type ChatAnswer, type ChatMessage } from "./llm/openai-compatible.js";
 export { deskName, DeskModels, desksOf, modelConcurrency, type ModelSettings, type Route, type ToolCheck } from "./llm/desk-models.js";
 export { checkToolUse } from "./llm/tool-check.js";
