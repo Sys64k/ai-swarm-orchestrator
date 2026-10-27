@@ -13,10 +13,12 @@ import { GIT_PATH, WS_PATH } from "@aso/shared";
 
 /** Where a machine joins with a one-time code. */
 export const JOIN_PATH = "/api/worker-keys/join";
+/** The swarm's track record as the Hub shares it (404 unless it is told to, with `--public-stats`). */
+export const PUBLIC_STATS_PATH = "/api/public-stats";
 /** API paths anyone may call on the Hub's own port (the Hub's allow-list uses this too). */
-export const PUBLIC_API_PATHS = ["/api/health", "/api/version", "/api/openapi.json", JOIN_PATH] as const;
+export const PUBLIC_API_PATHS = ["/api/health", "/api/version", "/api/openapi.json", JOIN_PATH, PUBLIC_STATS_PATH] as const;
 /** The public ones the gateway serves: not the API description, which a worker doesn't need. */
-const GATEWAY_PUBLIC = new Set(["GET /api/health", "GET /api/version", "GET /dist/aso.tgz", `POST ${JOIN_PATH}`]);
+const GATEWAY_PUBLIC = new Set(["GET /api/health", "GET /api/version", "GET /dist/aso.tgz", `POST ${JOIN_PATH}`, `GET ${PUBLIC_STATS_PATH}`]);
 
 /** Failed keys or join codes one address may try per window before it is refused. */
 export const GATEWAY_MAX_FAILURES = 20;

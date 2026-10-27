@@ -56,7 +56,8 @@ export { CLAUDE_FALLBACK, DEFAULT_CLAUDE_MODEL, environmentProviders, fetchModel
 export { ACCEPTANCE_DIFF_LIMIT, AcceptanceChecker, acceptanceCounts, acceptancePrompt, diffText, readVerdict, unmetReason, type AcceptanceVerdict, type CriterionVerdict } from "./llm/acceptance.js";
 export { AttemptLimiter, clientAddress, createGatewayApp, gatewayAccess, GATEWAY_MAX_FAILURES, JOIN_PATH, PUBLIC_API_PATHS, type GatewayRule } from "./gateway.js";
 export { addOutcome, describeRecord, JOB_OUTCOMES, type JobOutcome, type TrackRecord } from "./track-record.js";
-export { trackRecords, type ReportTask } from "./job-report.js";
+export { trackRecords, type ReportPlan, type ReportTask } from "./job-report.js";
+export { PUBLIC_STATS_CACHE_SEC, publicModelName, publicStats, publicStatsFor } from "./public-stats.js";
 export { addBuildUsage, endJob, failedBuildResult, JOBS_LIMIT, lastBuild, markAcceptance, markQa, markVerified, openJob, startJob, type Desk, type JobKind } from "./jobs.js";
 export { budgetSpent, describeScope, mayUseProject, projectOfGitPath, REFUSE_ALL, refuseJob, type KeyScope, type WorkerJob } from "./worker-scope.js";
 export { MACHINE_PREFIX, MachineModels } from "./llm/machine-models.js";

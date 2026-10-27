@@ -3425,6 +3425,194 @@
         "additionalProperties": false,
         "description": "Track records: how models, machines, desks, roles or projects have done with their jobs"
       },
+      "PublicStats": {
+        "type": "object",
+        "properties": {
+          "since": {
+            "description": "When the oldest job counted started",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "at": {
+            "type": "string",
+            "description": "When these numbers were made"
+          },
+          "tasks": {
+            "type": "object",
+            "properties": {
+              "finished": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991,
+                "description": "Merged tasks"
+              },
+              "firstTry": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991,
+                "description": "Of those, merged after a single build"
+              },
+              "tookOver": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991,
+                "description": "Of those, finished by a model that took over from another"
+              }
+            },
+            "required": [
+              "finished",
+              "firstTry",
+              "tookOver"
+            ],
+            "additionalProperties": false
+          },
+          "plans": {
+            "type": "object",
+            "properties": {
+              "proposed": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "approved": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "proposed",
+              "approved"
+            ],
+            "additionalProperties": false
+          },
+          "costs": {
+            "description": "Only when the Hub shares costs",
+            "type": "object",
+            "properties": {
+              "totalUsd": {
+                "type": "number",
+                "description": "Estimated model cost of the builds, plans and acceptance checks counted"
+              },
+              "perTaskUsd": {
+                "description": "That per task finished",
+                "type": "number"
+              }
+            },
+            "required": [
+              "totalUsd"
+            ],
+            "additionalProperties": false
+          },
+          "models": {
+            "description": "Per model, only when the Hub shares models",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "model": {
+                  "type": "string"
+                },
+                "finished": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "firstTry": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "tookOver": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "builds": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "qaPassed": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "qaFailed": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "accepted": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "unmet": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "plansProposed": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "plansApproved": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "checks": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Acceptance checks it made as the reviewer"
+                },
+                "checksMet": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "costUsd": {
+                  "description": "Its builds, plans and checks (only when the Hub shares costs)",
+                  "type": "number"
+                },
+                "costPerTaskUsd": {
+                  "description": "Its builds' cost per task it finished (only when the Hub shares costs)",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "model",
+                "finished",
+                "firstTry",
+                "tookOver",
+                "builds",
+                "qaPassed",
+                "qaFailed",
+                "accepted",
+                "unmet",
+                "plansProposed",
+                "plansApproved",
+                "checks",
+                "checksMet"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "since",
+          "at",
+          "tasks",
+          "plans"
+        ],
+        "additionalProperties": false,
+        "description": "The swarm's track record as the Hub shares it publicly: totals, and per model and costs if it chose to; never machines, people or task titles"
+      },
       "Provider": {
         "type": "object",
         "properties": {
@@ -4159,6 +4347,38 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Version"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/public-stats": {
+      "get": {
+        "operationId": "getPublicStats",
+        "tags": [
+          "Hub"
+        ],
+        "summary": "The swarm's track record as this Hub shares it publicly (totals; per model and costs if it chose to)",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicStats"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "This Hub doesn't share its stats",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }

@@ -16,7 +16,7 @@
     "build:dashboard": "npm run build -w @aso/dashboard",
     "clean": "tsc -b --clean packages/cli",
     "aso": "node packages/cli/dist/index.js",
-    "test": "npm run build && node --test \"packages/*/test/*.test.ts\" && node scripts/check-docs.mjs",
+    "test": "npm run build && node --test \"packages/*/test/*.test.ts\" \"scripts/*.test.mjs\" && node scripts/check-docs.mjs",
     "package": "node scripts/package.mjs",
     "openapi": "npm run build && node scripts/openapi.mjs",
     "check-docs": "node scripts/check-docs.mjs"

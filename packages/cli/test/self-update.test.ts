@@ -7,7 +7,7 @@ import { describe, it } from "node:test";
 import { startHub } from "@aso/hub";
 import type { Exec } from "../dist/exec.js";
 import { HubVersions } from "../dist/hub-versions.js";
-import { buildEnv, HubUpdater, isBuildOf, rollbackUnconfirmed, swarmIdle, type UpdatePaths } from "../dist/self-update.js";
+import { buildEnv, HubUpdater, isBuildOf, isDocumentation, onlyDocumentation, rollbackUnconfirmed, swarmIdle, type UpdatePaths } from "../dist/self-update.js";
 
 delete process.env.ANTHROPIC_API_KEY; // tests must never reach the real API
 
@@ -40,6 +40,8 @@ interface SetupOptions {
   restartFails?: boolean;
   /** `git ls-remote` fails. */
   remoteFails?: boolean;
+  /** What `git diff --name-only` lists between the running version and main. */
+  changed?: string[];
 }
 
 /** A Hub with one project, an installed running version, and fakes for what the updater runs. */
@@ -81,6 +83,7 @@ async function setup(opts: SetupOptions = {}) {
     if (line.startsWith("git ls-remote") && opts.remoteFails) throw new Error("`git ls-remote` exited with code 128: Permission denied (publickey)");
     if (line.startsWith("git ls-remote")) return `${remotes.length > 1 ? remotes.shift() : remotes[0]}\trefs/heads/main\n`;
     if (line.startsWith("git clone")) mkdirSync(path.join(args.at(-1)!, ".git"), { recursive: true });
+    if (line.startsWith("git diff --name-only")) return (opts.changed ?? ["packages/hub/src/server.ts"]).join("\n");
     if (line === "npm test" && opts.failTests) throw new Error("`npm test` exited with code 1: 1 failing");
     if (line === "npm run package") {
       mkdirSync(path.join(o.cwd!, "release"), { recursive: true });
@@ -160,6 +163,7 @@ describe("the Hub's own update", () => {
         "git ls-remote",
         "git clone",
         "git fetch",
+        "git diff", // what changed: code, so it's built
         "git checkout",
         "git clean",
         "npm ci",
@@ -401,11 +405,44 @@ describe("the update watchdog", () => {
     try {
       fakeInstall(s.versions.dirOf(NEW_VERSION), "built on an earlier pass");
       await s.checkUntilRestart();
-      assert.deepEqual(s.calls, [LS_REMOTE, LS_REMOTE], "no build, only the re-check after waiting");
+      assert.deepEqual(
+        s.calls.filter((c) => !/^git (clone|fetch|diff) /.test(c)),
+        [LS_REMOTE, LS_REMOTE],
+        "no build, only the re-check after waiting",
+      );
       assert.equal(s.current(), s.versions.dirOf(NEW_VERSION));
     } finally {
       await s.cleanup();
     }
+  });
+
+  it("stays as it is when main changed only documentation, and builds once code changes too", async () => {
+    const s = await setup({ changed: ["README.md", "docs/models.md", ".github/workflows/swarm-stats.yml"] });
+    try {
+      const updater = s.updater();
+      await updater.check();
+      await updater.check();
+      assert.ok(!s.calls.some((c) => /^(npm|git checkout)/.test(c)), "nothing built");
+      assert.equal(s.calls.filter((c) => c.startsWith("git diff")).length, 1, "asked once for that commit");
+      assert.equal((await s.status()).state, "current");
+      assert.equal(s.restarts(), 0);
+    } finally {
+      await s.cleanup();
+    }
+    const withCode = await setup({ changed: ["README.md", "packages/hub/src/server.ts"] });
+    try {
+      await withCode.checkUntilRestart();
+      assert.ok(withCode.calls.includes("npm test"), "built");
+    } finally {
+      await withCode.cleanup();
+    }
+  });
+
+  it("tells documentation from what a Hub is built of", () => {
+    for (const f of ["README.md", "docs/cli.md", "ARCHITECTURE.md", "packages/hub/README.md", "docs/images/x.png", ".github/workflows/a.yml", "LICENSE"]) assert.ok(isDocumentation(f), f);
+    for (const f of ["docs/openapi.json", "packages/hub/src/server.ts", "package.json", "docker-compose.yml", "scripts/package.mjs"]) assert.ok(!isDocumentation(f), f);
+    assert.equal(onlyDocumentation([]), false, "nothing changed isn't documentation only");
+    assert.equal(onlyDocumentation(["README.md", "package.json"]), false);
   });
 
   it("reports when the repository can't be read", async () => {

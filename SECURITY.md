@@ -91,12 +91,17 @@ the Hub (`aso hub-service restart`). `aso llm-check` confirms the Anthropic key.
 
 - **Plain HTTP by default.** On the LAN, traffic (the token, codes, jobs) is unencrypted. Use a
   trusted network, Tailscale, or a TLS reverse proxy (`wss://`) if the LAN isn't trusted.
+- **Public stats are opt-in and say little.** `--public-stats` makes `GET /api/public-stats`
+  answer anyone, on both ports: totals, and per model and costs only when listed. It never
+  names machines, desks, people, projects or tasks; `--public-stats-projects` limits whose work
+  is counted. Its answer is made at most once a minute.
 - **No plain `ws://` to the internet.** Before every connection, a worker refuses a Hub address
   that resolves to a public IP unless it's `wss://` (`--allow-insecure` overrides).
   Private ranges, loopback and Tailscale's `100.64.0.0/10` count as private.
 - **The worker gateway is the only part meant for the internet.** With `--gateway-port`, a
   second listener (on `127.0.0.1`, behind a TLS tunnel such as Tailscale Funnel) serves only
-  the worker connection, Git, the package, `health`, `version` and joining. Everything else
+  the worker connection, Git, the package, `health`, `version`, joining and, only when the Hub
+  is started with `--public-stats`, the swarm's public stats. Everything else
   answers 404, and the main token is refused there, so the API, the console and everything a
   leaked token could do stay off the internet. A worker key there can do what it can anywhere:
   take jobs and use the projects' Git (clone any project, push only its own task branches). An

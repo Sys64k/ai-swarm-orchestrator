@@ -1602,7 +1602,9 @@ in `cli/src/commands/service.ts`.
 flowchart TD
   P["every UPDATE_POLL_MS (5 min): git ls-remote main"] -->|"the running build"| C["report current"]
   P -->|"given up on"| X["skip"]
-  P -->|newer| B["own clone, own HOME: checkout, npm ci, npm test, npm run package"]
+  P -->|newer| D{"git diff --name-only running..main: documentation only? (onlyDocumentation)"}
+  D -->|yes| C
+  D -->|no, or can't tell| B["own clone, own HOME: checkout, npm ci, npm test, npm run package"]
   B -->|fails| F["failed.json (3 attempts), report failed"]
   B --> V["install into versions/&lt;version&gt;/ (running version untouched; reused if already there)"]
   V --> W["waiting: until no task at work, no running deploy, no plan being made"]
@@ -1897,7 +1899,11 @@ project and counts builds by result (`COUNTED_BUILD_RESULTS`), the verdicts on t
 (not by model: tests run without one) and cost. A merged task counts as finished for whoever
 made its last `built` build (`finishedBy`): `firstTry` when that was its only build, `tookOver`
 when an earlier build was someone else's. That is judged over all the task's builds, so
-`since` can't make a reworked task look like a first try. By model and by project it also
+`since` can't make a reworked task look like a first try. `publicStats` (`public-stats.ts`) reduces
+the by-model report to what `--public-stats` shares (totals; `models`, `costs`), served at
+`GET /api/public-stats` without a token on both ports (`PUBLIC_API_PATHS`, the gateway's public
+set), cached a minute; `scripts/readme-stats.mjs` renders it into the README daily
+(`.github/workflows/swarm-stats.yml`). By model and by project it also
 counts `plans` (a plan's `model` is the Architect's, recorded by `PlanManager.recordModel` when
 its conversation starts; plans have no role, so `role` leaves them out) and `reviews` (the
 builds' acceptance verdicts, by `acceptanceModel`; checks from before it was recorded count

@@ -304,7 +304,10 @@ A Hub installed with `aso hub-service install --update-from <git-url>` follows t
 repository's `main` itself:
 
 1. **Every 5 minutes** it asks the repository for `main`, with the Hub's own git setup (SSH
-   agent, keys, credential helpers). A newer commit is checked out in its own clone
+   agent, keys, credential helpers). **A newer commit that changes only documentation** (Markdown,
+   `docs/` apart from `docs/openapi.json`, `.github/`, `LICENSE`) is left alone: nothing to build
+   or restart for, and the next code change brings it along. Any other newer commit is checked
+   out in its own clone
    (`~/.local/share/aso/hub/build/src`), installed with `npm ci`, tested with `npm test` and
    packaged. Those three get none of the Hub's variables (tokens, API key) and a home folder of
    their own, but they run as you: this is not a sandbox, so merge into the followed branch only
