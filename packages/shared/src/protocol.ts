@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { AGENT_SUMMARY_MAX, IMAGE_MAX_BYTES, IMAGE_MEDIA_TYPES, QA_SCREENSHOTS_MAX, QA_SCREENSHOTS_MAX_BYTES } from "./constants.js";
+import { ChatAnswerSchema } from "./chat-stream.js";
 
 // ---------------------------------------------------------------------------
 // Primitives
@@ -136,6 +137,14 @@ export type ResumeClaim = z.infer<typeof ResumeClaimSchema>;
 export const SupervisorSchema = z.enum(["systemd"]);
 export type Supervisor = z.infer<typeof SupervisorSchema>;
 
+/** A model the worker's machine serves itself (an OpenAI-compatible server on it, e.g. Ollama). */
+export const LocalModelSchema = z.strictObject({
+  id: z.string().min(1).max(200),
+  /** It accepts images (QA screenshots). */
+  vision: z.boolean().optional(),
+});
+export type LocalModel = z.infer<typeof LocalModelSchema>;
+
 const NodeRegistrationPayload = z.discriminatedUnion("nodeKind", [
   z.strictObject({
     nodeKind: z.literal("worker"),
@@ -156,6 +165,10 @@ const NodeRegistrationPayload = z.discriminatedUnion("nodeKind", [
     running: z.array(ResumeClaimSchema).max(MAX_WORKER_SLOTS).optional(),
     /** The single running job, as workers sent it before slots. */
     resume: ResumeClaimSchema.optional(),
+    /** Models this machine serves itself; the Hub may call them for this machine's own jobs (MODEL_CALL). */
+    localModels: z.array(LocalModelSchema).max(50).optional(),
+    /** Which of them this machine's desks use when the Hub hasn't put a desk on another model. */
+    defaultLocalModel: z.string().min(1).max(200).optional(),
   }),
   z.strictObject({
     nodeKind: z.literal("architect"),
@@ -581,6 +594,27 @@ function message<T extends string, P extends z.ZodType>(type: T, payload: P) {
   });
 }
 
+/** Hub → worker: call one of the worker's own local models with this Chat Completions request. */
+const ModelCallPayload = z.strictObject({
+  callId: z.uuid(),
+  /** One of the models the worker listed in its registration. */
+  model: z.string().min(1).max(200),
+  /** The Chat Completions request body (messages, tools, token limit); the worker streams it. */
+  request: z.record(z.string(), z.unknown()),
+});
+
+/** Worker → Hub: the answer to a MODEL_CALL, added up from the stream, or why there is none. */
+const ModelAnswerPayload = z.discriminatedUnion("outcome", [
+  z.strictObject({ callId: z.uuid(), outcome: z.literal("ok"), answer: ChatAnswerSchema }),
+  z.strictObject({
+    callId: z.uuid(),
+    outcome: z.literal("error"),
+    error: z.string().min(1).max(5000),
+    /** The same call may work if made again (the server was busy or briefly unreachable). */
+    retryable: z.boolean(),
+  }),
+]);
+
 export const AgentMessageSchema = z.discriminatedUnion("type", [
   message("NODE_REGISTRATION", NodeRegistrationPayload),
   message("REGISTRATION_ACK", RegistrationAckPayload),
@@ -599,6 +633,8 @@ export const AgentMessageSchema = z.discriminatedUnion("type", [
   message("NODE_CONTROL", NodeControlPayload),
   message("UPDATE_FAILED", UpdateFailedPayload),
   message("PROTOCOL_ERROR", ProtocolErrorPayload),
+  message("MODEL_CALL", ModelCallPayload),
+  message("MODEL_ANSWER", ModelAnswerPayload),
 ]);
 
 export type AgentMessage = z.infer<typeof AgentMessageSchema>;
@@ -621,6 +657,7 @@ export const NODE_TO_HUB_TYPES = new Set<AgentMessageType>([
   "PROMPT_EXECUTION",
   "PLAN_RESULT",
   "UPDATE_FAILED",
+  "MODEL_ANSWER",
 ]);
 
 /** Message types only the Hub may send. */
@@ -633,6 +670,7 @@ export const HUB_TO_NODE_TYPES = new Set<AgentMessageType>([
   "PLAN_REQUEST",
   "NODE_CONTROL",
   "PROTOCOL_ERROR",
+  "MODEL_CALL",
 ]);
 
 /** Build and validate an outbound message. Throws if the payload is invalid. */

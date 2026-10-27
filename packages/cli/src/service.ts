@@ -18,6 +18,9 @@ export interface WorkerServiceOptions {
   sandboxImage?: string;
   sandboxNetwork?: string;
   allowInsecure?: boolean;
+  localModel?: string;
+  localModelName?: string;
+  localModelVision?: boolean;
 }
 
 /** `start-worker` arguments for the service, with defaults left out so later defaults apply. */
@@ -30,6 +33,9 @@ export function workerArgs(o: WorkerServiceOptions, defaultPort: number): string
   if (o.sandboxImage) args.push("--sandbox-image", o.sandboxImage);
   if (o.sandboxNetwork) args.push("--sandbox-network", o.sandboxNetwork);
   if (o.allowInsecure) args.push("--allow-insecure");
+  if (o.localModel) args.push("--local-model", o.localModel);
+  if (o.localModelName) args.push("--local-model-name", o.localModelName);
+  if (o.localModelVision) args.push("--local-model-vision");
   return args;
 }
 

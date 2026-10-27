@@ -53,3 +53,4 @@ export { ACCEPTANCE_DIFF_LIMIT, AcceptanceChecker, acceptanceCounts, acceptanceP
 export { AttemptLimiter, clientAddress, createGatewayApp, gatewayAccess, GATEWAY_MAX_FAILURES, JOIN_PATH, PUBLIC_API_PATHS, type GatewayRule } from "./gateway.js";
 export { addOutcome, describeRecord, JOB_OUTCOMES, type JobOutcome, type TrackRecord } from "./track-record.js";
 export { budgetSpent, describeScope, mayUseProject, projectOfGitPath, REFUSE_ALL, refuseJob, type KeyScope, type WorkerJob } from "./worker-scope.js";
+export { MACHINE_PREFIX, MachineModels } from "./llm/machine-models.js";

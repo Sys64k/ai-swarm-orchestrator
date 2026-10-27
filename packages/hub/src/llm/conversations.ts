@@ -23,6 +23,7 @@ import { LlmError, type LlmAdapter } from "./adapter.js";
 import { priceUsage } from "./pricing.js";
 import { Semaphore } from "./semaphore.js";
 import { deskName, type DeskModels, type Route } from "./desk-models.js";
+import { MACHINE_PREFIX, type MachineModels } from "./machine-models.js";
 import { calledSpec, canSwitchFrom, roundModel, type EscalationPolicy, type RoundModel } from "./escalation.js";
 import { architectSystemPrompt, CONTINUE_PROMPT, planPrompt, systemPrompt, taskPrompt } from "./prompts.js";
 
@@ -48,6 +49,8 @@ export interface ConversationOptions {
   concurrency?: number;
   /** Each desk's model; desks without one use `agentAdapter`. */
   deskModels?: DeskModels;
+  /** Models worker machines serve themselves (`machine/<model>`), for their own jobs. */
+  machineModels?: MachineModels;
   /** The default agent model's spec (what `agentAdapter` calls), to compare models by. */
   defaultAgentSpec?: string;
   /** Stronger models a task moves to after failing rounds; none: every round on its desk's model. */
@@ -252,6 +255,14 @@ export class ConversationManager {
    */
   private routeFor(conv: Conversation): Route | undefined {
     if (conv.subject.role === "architect") return this.adapter && { adapter: this.adapter, slots: this.slots };
+    if (conv.deskModel?.startsWith(MACHINE_PREFIX) && this.opts.machineModels) {
+      try {
+        return this.opts.machineModels.route(conv.nodeId, conv.deskModel);
+      } catch (err) {
+        log.warn(`${conv.subject.id}: can't use ${conv.deskModel} (${(err as Error).message}); using the default`);
+        return this.agentAdapter && { adapter: this.agentAdapter, slots: this.slots };
+      }
+    }
     if (conv.deskModel && this.opts.deskModels) {
       try {
         return this.opts.deskModels.route(conv.deskModel);
@@ -268,10 +279,19 @@ export class ConversationManager {
     return member && this.opts.deskModels?.modelOf(deskName(member.host, member.slot));
   }
 
-  /** This round's model for a task's agent: its desk's, or one up the escalation ladder, skipping models that refused it. */
+  /** The model a task's agent on `nodeId` starts from: its desk's, else the machine's own one; undefined: the default. */
+  private ownModelOf(taskId: string, nodeId: string): string | undefined {
+    return this.deskModelOf(taskId, nodeId) ?? this.opts.machineModels?.defaultSpec(nodeId);
+  }
+
+  /**
+   * This round's model for a task's agent: its desk's, else the machine's own model when it serves
+   * one, or one up the escalation ladder, skipping models that refused it.
+   */
   private roundModelOf(taskId: string, nodeId: string): RoundModel {
     const task = this.tasks.get(taskId);
-    return roundModel(this.opts.escalation, task ?? { reworkRound: 0 }, this.deskModelOf(taskId, nodeId), this.opts.defaultAgentSpec);
+    const choice = roundModel(this.opts.escalation, task ?? { reworkRound: 0 }, this.ownModelOf(taskId, nodeId), this.opts.defaultAgentSpec);
+    return choice.spec?.startsWith(MACHINE_PREFIX) && choice.why === "this desk's model" ? { ...choice, why: "this machine's own model" } : choice;
   }
 
   /**
@@ -283,7 +303,7 @@ export class ConversationManager {
     const spec = calledSpec({ spec: conv.deskModel }, this.opts.defaultAgentSpec);
     const task = this.tasks.get(conv.subject.id);
     if (!spec || !task) return;
-    if (canSwitchFrom(this.opts.escalation, task, this.deskModelOf(task.spec.taskId, conv.nodeId), this.opts.defaultAgentSpec, spec)) {
+    if (canSwitchFrom(this.opts.escalation, task, this.ownModelOf(task.spec.taskId, conv.nodeId), this.opts.defaultAgentSpec, spec)) {
       this.tasks.recordModelRefused(task.spec.taskId, spec, error);
     }
   }

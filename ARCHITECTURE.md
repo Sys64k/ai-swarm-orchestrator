@@ -1825,6 +1825,24 @@ and `accepted` / `unmet` (the verdicts on that work, credited to the builder, `t
 every reconnect. Machines on the Hub's own token have no key and no record. `describeRecord`
 (CLI) and `workerKeyRecord` (console) say it in words.
 
+### A machine's own model (`llm/machine-models.ts`)
+
+A worker started with `--local-model <url>` lists that server's models (`GET /models`) before
+each connection and registers them (`localModels`, `defaultLocalModel`). `MachineModels` keeps
+each machine's list; `ConversationManager` starts a task conversation on `machine/<model>`
+(`defaultSpec(nodeId)`) when the desk has no model of its own, and routes it with
+`MachineModels.route(nodeId, spec)`: a `MachineModelAdapter` and a one-call `Semaphore` per
+machine and model.
+
+A call: the adapter builds the Chat Completions body (`chatRequest`, the same as for APIs) and
+sends `MODEL_CALL { callId, model, request }` on the machine's connection; the worker
+(`worker/src/local-model.ts`) refuses a model it didn't list, streams the request to its own
+server only, adds the stream up (`accumulateChunks`, now in shared) and sends `MODEL_ANSWER`
+(`ok` with the answer, or `error` with `retryable`). The Hub matches the answer to the call and
+its machine (another machine's answer is a protocol error); a machine that disconnects fails its
+waiting calls as retryable; a call times out after 31 minutes. The answer's model is named
+`machine/<model>`, which no price matches, so it costs $0.
+
 ### Docker cleanup (`cli/src/docker-cleanup.ts`)
 
 Each Hub update builds a new Hub image and each deploy a new project image, so build cache and

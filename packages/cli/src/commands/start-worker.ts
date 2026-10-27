@@ -19,6 +19,10 @@ export async function startWorkerCommand(opts: {
   sandboxNetwork?: string;
   join?: string;
   allowInsecure?: boolean;
+  /** This machine's own model server, whose models the Hub may use for this machine's jobs. */
+  localModel?: string;
+  localModelName?: string;
+  localModelVision?: boolean;
 }): Promise<void> {
   if (opts.hub) await checkTransport(opts.hub, opts.port, opts.allowInsecure ?? false);
   const joinedAt = opts.join ? await joinHub(opts.hub ?? (await findHub(opts.join)).address, opts.port, opts.join) : undefined;
@@ -26,7 +30,7 @@ export async function startWorkerCommand(opts: {
   if (!token) {
     throw new Error("no worker key: join with --join <code> (from `aso worker-key new` on the Hub), or pass --token");
   }
-  const { sandboxImage, sandboxNetwork, join: _join, allowInsecure: _allowInsecure, ...rest } = opts;
+  const { sandboxImage, sandboxNetwork, join: _join, allowInsecure: _allowInsecure, localModel, localModelName, localModelVision, ...rest } = opts;
   // Our unit has Restart=always, so exiting restarts the worker on the installed build.
   const supervisor = runsAsSystemdService(process.env, process.pid) ? ("systemd" as const) : undefined;
   // Only a package install run as a service updates itself: a source checkout follows its git
@@ -57,6 +61,7 @@ export async function startWorkerCommand(opts: {
     token,
     version: layout.version(),
     sandboxOptions: { image: sandboxImage, network: sandboxNetwork },
+    ...(localModel ? { localModel: { url: localModel, ...(localModelName ? { default: localModelName } : {}), ...(localModelVision ? { vision: true } : {}) } } : {}),
     supervisor,
     onRestart: supervisor && (() => shutdown("restart request from the console")),
     onUpdate: canUpdateItself ? update : undefined,
