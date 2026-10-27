@@ -211,7 +211,14 @@ function workerOptions(cmd: Command): Command {
       "docker",
     )
     .option("--sandbox-image <image>", "Docker image for job commands (default: built on first start)")
-    .option("--sandbox-network <name>", "docker network for job commands (default: bridge; `none` blocks network access)");
+    .option("--sandbox-network <name>", "docker network for job commands (default: bridge; `none` blocks network access)")
+    .option(
+      "--local-model <url>",
+      "this machine's own model server (OpenAI-compatible, e.g. Ollama's http://localhost:11434/v1): the Hub uses its models for this machine's jobs, at no cost to the Hub",
+      process.env.ASO_LOCAL_MODEL_URL || undefined,
+    )
+    .option("--local-model-name <id>", "which of its models this machine's desks use (default: the first it lists)")
+    .option("--local-model-vision", "its models accept images");
 }
 
 workerOptions(program.command("start-worker").description("Start a Worker node: scan hardware and connect to the Hub")).action(startWorkerCommand);

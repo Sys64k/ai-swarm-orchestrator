@@ -212,3 +212,26 @@ aso hub-service install ... --agent-model claude-haiku-5-5 \
 - **A person's retry** starts the task again on its desk's model and gives refused models
   another chance (a refusal may have been fixed since).
 - **Off:** `--no-escalation` keeps every round on the desk's model.
+
+### A machine's own model (volunteer GPUs)
+
+A worker machine with its own model server (Ollama, vLLM, LM Studio) can serve the model calls
+of **its own jobs**, so a volunteer contributes AI capacity, not only CPU, and those calls cost
+the Hub nothing:
+
+```bash
+aso service install --join <code> --local-model http://localhost:11434/v1 \
+  [--local-model-name qwen3-coder:30b] [--local-model-vision]
+```
+
+- **The Hub keeps the conversation** (prompts, tools, history, checks) and sends each finished
+  request over the machine's own connection; the machine calls its server and answers. It works
+  behind a home router and through the worker gateway: the Hub never connects to the machine.
+- **The machine calls only its own server**, and only models it listed when it connected,
+  whatever the Hub asks.
+- **Its desks use that model by default** (`machine/<model>` in the task's history: "this
+  machine's own model"); a desk you put on another model with `aso desk` keeps that one. A
+  machine's model never serves other machines' jobs, and takes one call at a time.
+- **Free for the Hub:** these calls count $0, also against the key's budget.
+- **The safety nets stay:** QA on a trusted machine, the acceptance check, your review, and
+  escalation to a stronger model if its work keeps coming back.

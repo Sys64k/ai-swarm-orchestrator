@@ -14,3 +14,4 @@ export * from "./plan-dialogue.js";
 export * from "./api.js";
 export * from "./format.js";
 export * from "./tailnet.js";
+export * from "./chat-stream.js";

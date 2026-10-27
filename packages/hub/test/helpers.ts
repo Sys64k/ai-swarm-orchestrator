@@ -173,6 +173,9 @@ export async function worker(
     running?: Array<{ taskId: string; job: "implement" | "test" }>;
     /** What it connects with (default: the Hub's token). */
     token?: string;
+    /** Models the machine serves itself. */
+    localModels?: Array<{ id: string; vision?: boolean }>;
+    defaultLocalModel?: string;
   } = {},
 ) {
   const c = await connect(port, opts.token ?? TOKEN);
@@ -186,6 +189,8 @@ export async function worker(
       updates: opts.updates,
       slots: opts.slots,
       running: opts.running,
+      localModels: opts.localModels,
+      defaultLocalModel: opts.defaultLocalModel,
     }),
   );
   const ack = await c.next();

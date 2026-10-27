@@ -53,6 +53,9 @@ outgoing messages and sends them once it has registered again.
 | `--slots <n>` | from the machine | Jobs to run at once, 1–16, each in its own checkout (`<project>`, `<project>.2`, …). The default is one per 2 threads and 6 GiB of RAM, at most 4, and 1 with `--sandbox none` (jobs would share ports) |
 | `--token <token>` | `ASO_TOKEN` / worker key / token file | What to connect with (normally the machine's worker key) |
 | `--join <code>` | | Join the Hub with a one-time code from `aso worker-key new`: the machine gets its own worker key |
+| `--local-model <url>` | *(none)* | This machine's own model server (OpenAI-compatible): its models serve this machine's jobs. See [A machine's own model](models.md#a-machines-own-model-volunteer-gpus) |
+| `--local-model-name <id>` | the first it lists | Which of its models this machine's desks use |
+| `--local-model-vision` | | Its models accept images |
 | `--allow-insecure` | | Allow plain `ws://` to a Hub on the internet (refused otherwise) |
 | `--sandbox <mode>` | `docker` | `docker`: each job command runs in a throwaway container that sees only the checkout. `none`: directly on this machine as this user. The worker refuses to start if `docker` is chosen but Docker isn't usable |
 | `--sandbox-image <image>` | built on first start | Image for job commands. The default is `node:<worker's Node major>-bookworm` plus Playwright's Chromium libraries |

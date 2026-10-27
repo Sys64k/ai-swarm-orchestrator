@@ -59,6 +59,7 @@ import type { z } from "zod";
 import { DEFAULT_MAX_TOKENS, type Effort, type LlmAdapter } from "./llm/adapter.js";
 import { AcceptanceChecker } from "./llm/acceptance.js";
 import { DeskModels, desksOf } from "./llm/desk-models.js";
+import { MachineModels } from "./llm/machine-models.js";
 import { Providers, resolveModel } from "./llm/providers.js";
 import { CustomPrices } from "./llm/custom-prices.js";
 import { buildEscalationPolicy } from "./llm/escalation.js";
@@ -359,7 +360,10 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     }
   });
   if (escalation) log.info(`escalation: after ${escalation.juniorTries} tries on a desk's model, tasks move to ${escalation.ladder.join(", then ")}`);
+  // Models worker machines serve themselves, called over their own connections for their own jobs.
+  const machineModels = new MachineModels((nodeId, payload) => registry.send(nodeId, "MODEL_CALL", payload), maxTokens);
   const conversations = new ConversationManager(adapter, tasks, registry, plans, {
+    machineModels,
     agentAdapter,
     deskModels,
     defaultAgentSpec: llm.agentModel || model,
@@ -389,6 +393,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   const dropNode = (nodeId: string, transport: NodeTransport) => {
     const gone = registry.unregister(nodeId, transport);
     if (!gone) return;
+    machineModels.forget(nodeId);
     workerWatch.dropped(nodeId, gone.registration);
     for (const p of projects.list()) {
       p.tasks.handleNodeGone(nodeId);
@@ -443,6 +448,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       };
       registry.register(msg.from, msg.payload, conn.transport);
       const p = msg.payload;
+      if (p.nodeKind === "worker") machineModels.register(msg.from, p.localModels, p.defaultLocalModel);
       log.info(
         p.nodeKind === "worker"
           ? `worker ${msg.from} registered from ${p.hardware.hostname} (aso ${p.version}, ` +
@@ -500,6 +506,11 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       }
       case "PROMPT_EXECUTION": {
         const error = conversations.handle(conn.nodeId, msg.payload);
+        if (error) reject(conn, error, [], msg.id);
+        return;
+      }
+      case "MODEL_ANSWER": {
+        const error = machineModels.answer(conn.nodeId, msg.payload);
         if (error) reject(conn, error, [], msg.id);
         return;
       }

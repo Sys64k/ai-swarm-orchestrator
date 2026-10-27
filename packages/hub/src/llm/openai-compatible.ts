@@ -1,6 +1,9 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { LlmError, type LlmAdapter, type LlmRequest, type LlmResponse } from "./adapter.js";
 import { PROVIDER_DATA } from "./provider-data.js";
+import { accumulateChunks, sseData, type ChatAnswer, type ChatToolCall } from "@aso/shared";
+
+export { accumulateChunks, sseData, type ChatAnswer };
 
 /**
  * Any model behind an OpenAI-compatible Chat Completions API: OpenAI, Gemini, Mistral, Groq,
@@ -29,13 +32,6 @@ export interface OpenAiCompatibleOptions {
   fetch?: typeof fetch;
 }
 
-interface ChatToolCall {
-  id: string;
-  type: "function";
-  function: { name: string; arguments: string };
-  /** Provider data to send back with the call (Gemini: `{ google: { thought_signature } }`). */
-  extra_content?: unknown;
-}
 
 type ChatContentPart = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
 
@@ -50,14 +46,6 @@ export interface ChatTool {
   function: { name: string; description?: string; parameters: unknown };
 }
 
-/** What a streamed answer adds up to. */
-export interface ChatAnswer {
-  content: string;
-  toolCalls: ChatToolCall[];
-  finishReason: string | null;
-  model?: string;
-  usage?: { prompt_tokens?: number; completion_tokens?: number; prompt_tokens_details?: { cached_tokens?: number } };
-}
 
 const IMAGE_OMITTED = "[ASO] The image is not shown: this model is not set up to accept images.";
 
@@ -115,6 +103,19 @@ export function toChatMessages(system: string, messages: Anthropic.Beta.BetaMess
   return out;
 }
 
+/** A Hub request as a Chat Completions request body (without the streaming fields). */
+export function chatRequest(
+  req: LlmRequest,
+  opts: { model: string; maxTokens: number; maxTokensField?: "max_tokens" | "max_completion_tokens"; vision: boolean },
+): Record<string, unknown> {
+  return {
+    model: opts.model,
+    messages: toChatMessages(req.system, req.messages, { vision: opts.vision }),
+    tools: toChatTools(req.tools),
+    [opts.maxTokensField ?? "max_tokens"]: opts.maxTokens,
+  };
+}
+
 const STOP_REASONS: Record<string, string> = { stop: "end_turn", tool_calls: "tool_use", function_call: "tool_use", length: "max_tokens", content_filter: "refusal" };
 
 /** The answer in the Hub's format. Rejects tool calls whose arguments aren't a JSON object. */
@@ -153,55 +154,8 @@ export function fromChatAnswer(answer: ChatAnswer, requestedModel: string): LlmR
   };
 }
 
-interface ChatChunk {
-  model?: string;
-  choices?: Array<{
-    delta?: { content?: string | null; tool_calls?: Array<{ index?: number; id?: string; function?: { name?: string; arguments?: string }; extra_content?: unknown }> };
-    finish_reason?: string | null;
-  }>;
-  usage?: ChatAnswer["usage"];
-}
 
-/** Add up a streamed answer's chunks (the `data:` payloads of its server-sent events). */
-export function accumulateChunks(chunks: Iterable<ChatChunk>): ChatAnswer {
-  const answer: ChatAnswer = { content: "", toolCalls: [], finishReason: null };
-  const calls = new Map<number, ChatToolCall>();
-  for (const chunk of chunks) {
-    if (chunk.model) answer.model = chunk.model;
-    if (chunk.usage) answer.usage = chunk.usage;
-    const choice = chunk.choices?.[0];
-    if (!choice) continue;
-    if (choice.delta?.content) answer.content += choice.delta.content;
-    for (const [i, d] of (choice.delta?.tool_calls ?? []).entries()) {
-      const index = d.index ?? i;
-      const call = calls.get(index) ?? { id: "", type: "function" as const, function: { name: "", arguments: "" } };
-      if (d.id) call.id = d.id;
-      if (d.function?.name) call.function.name += d.function.name;
-      if (d.function?.arguments) call.function.arguments += d.function.arguments;
-      if (d.extra_content !== undefined) call.extra_content = d.extra_content;
-      calls.set(index, call);
-    }
-    if (choice.finish_reason) answer.finishReason = choice.finish_reason;
-  }
-  answer.toolCalls = [...calls.entries()]
-    .sort(([a], [b]) => a - b)
-    .map(([index, call]) => ({ ...call, id: call.id || `call_${index}` }));
-  return answer;
-}
 
-/** The JSON payloads in a server-sent-events body, up to `[DONE]`. */
-export function* sseData(body: string): Generator<ChatChunk> {
-  for (const line of body.split(/\r?\n/)) {
-    if (!line.startsWith("data:")) continue;
-    const data = line.slice(5).trim();
-    if (!data || data === "[DONE]") continue;
-    try {
-      yield JSON.parse(data) as ChatChunk;
-    } catch {
-      // A keep-alive or a provider's comment: not part of the answer.
-    }
-  }
-}
 
 /** An HTTP error as the Hub handles it: what to say, and whether trying again can help. */
 export function classifyHttp(status: number, body: string): LlmError {
@@ -233,10 +187,7 @@ export class OpenAiCompatibleAdapter implements LlmAdapter {
         method: "POST",
         headers: { "content-type": "application/json", ...(this.opts.apiKey ? { authorization: `Bearer ${this.opts.apiKey}` } : {}) },
         body: JSON.stringify({
-          model: this.model,
-          messages: toChatMessages(req.system, req.messages, { vision: this.opts.vision ?? false }),
-          tools: toChatTools(req.tools),
-          [this.opts.maxTokensField ?? "max_tokens"]: this.opts.maxTokens,
+          ...chatRequest(req, { model: this.model, maxTokens: this.opts.maxTokens, maxTokensField: this.opts.maxTokensField, vision: this.opts.vision ?? false }),
           // Streamed, so a slow answer keeps the connection alive past HTTP timeouts.
           stream: true,
           stream_options: { include_usage: true },

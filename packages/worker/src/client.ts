@@ -16,12 +16,14 @@ import {
   type PayloadInput,
   type Supervisor,
   UNKNOWN_VERSION,
+  type LocalModel,
 } from "@aso/shared";
 import { profileHardware, resolveSlots, sampleLoad } from "./hardware.js";
 import { LlmTaskExecutor } from "./agent/executor.js";
 import { JobRunner, type RunningJob, type TaskExecutor } from "./jobs.js";
 import { DockerSandbox, hostRunner, type CommandRunner, type DockerSandboxOptions } from "./sandbox.js";
 import { lockWorkDir } from "./work-dir-lock.js";
+import { callLocalModel, listLocalModels, type LocalModelServer } from "./local-model.js";
 
 const log = createLogger("worker");
 
@@ -39,6 +41,8 @@ export interface WorkerOptions {
    */
   checkHub?: (url: URL) => Promise<void>;
   port?: number;
+  /** This machine's own model server, whose models the Hub may use for this machine's jobs. */
+  localModel?: LocalModelServer;
   /** Directory for task checkouts; also where the I/O benchmark runs. Default ~/.aso/work. */
   workDir?: string;
   /** Does the implementation work. Defaults to the LLM agent (model calls go through the Hub). */
@@ -121,6 +125,9 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
 
   let ws: WebSocket | undefined;
   let registered = false;
+  /** This machine's local models, as last listed (see LocalModelServer). */
+  let localModels: LocalModel[] = [];
+  const defaultLocal = () => (opts.localModel?.default && localModels.some((m) => m.id === opts.localModel!.default) ? opts.localModel.default : localModels[0]?.id);
   let attempt = 0;
   let stopped = false;
   let retryTimer: NodeJS.Timeout | undefined;
@@ -187,6 +194,9 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
       return;
     }
     if (stopped) return;
+    // Listed anew on every connection: models added or removed since show up.
+    if (opts.localModel) localModels = await listLocalModels(opts.localModel);
+    if (stopped) return;
     const socket = new WebSocket(url, { headers: opts.token ? { authorization: authorizationHeader(opts.token) } : {} });
     ws = socket;
     registered = false;
@@ -203,6 +213,7 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
             hardware: profile,
             slots,
             running: claims(),
+            ...(localModels.length ? { localModels, defaultLocalModel: defaultLocal() } : {}),
           }),
         ),
       );
@@ -258,6 +269,15 @@ export async function startWorker(opts: WorkerOptions): Promise<WorkerHandle> {
         case "PROTOCOL_ERROR":
           log.error(`hub rejected message: ${msg.payload.reason}`, msg.payload.issues);
           break;
+        case "MODEL_CALL": {
+          const { callId, model, request } = msg.payload;
+          if (!opts.localModel) {
+            send("MODEL_ANSWER", { callId, outcome: "error", error: "this machine serves no local models", retryable: false });
+            break;
+          }
+          void callLocalModel(opts.localModel, localModels, model, request).then((answer) => send("MODEL_ANSWER", { callId, ...answer }));
+          break;
+        }
         default:
           log.debug(`${msg.type} received`, msg.payload);
       }
