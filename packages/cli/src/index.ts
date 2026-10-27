@@ -40,7 +40,7 @@ import {
 } from "./commands/service.js";
 import { startWorkerCommand } from "./commands/start-worker.js";
 import { findHubCommand } from "./commands/find-hub.js";
-import { deskCommand, desksCommand, escalationCommand, modelsCommand } from "./commands/models.js";
+import { challengerCommand, deskCommand, desksCommand, escalationCommand, modelsCommand } from "./commands/models.js";
 import { tuneCommand } from "./commands/tune.js";
 import { trackRecordsCommand } from "./commands/track-records.js";
 import { addProviderCommand, providersCommand, removeProviderCommand } from "./commands/providers.js";
@@ -458,6 +458,13 @@ program
   .option("--json", "print the Hub's answer as JSON")
   .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
   .action(trackRecordsCommand);
+program
+  .command("challenger <role> <model>")
+  .description("Try a model for the desks or the reviewer on a share of the work, within a budget, until `aso tune` can compare it; `none` ends the trial")
+  .option("--share <percent>", "the share of tasks it takes (default 10, at most 50); it needs 10 tasks, so at 10% about 100 tasks pass: a small swarm wants more", parsePositiveInt)
+  .option("--budget <usd>", "what the trial may spend in all (default 20 for the desks, 5 for the reviewer)", parseUsd)
+  .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
+  .action(challengerCommand);
 program
   .command("tune")
   .description("Suggest a model for the desks, the reviewer and the Architect from the track records: as good for less, or clearly better")

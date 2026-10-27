@@ -10,6 +10,9 @@ import {
   nextLadderStep,
   startedSummary,
   suggestionNote,
+  trialBody,
+  trialLength,
+  trialSummary,
   suggestionRequests,
   suggestionTitle,
   roleModelChoices,
@@ -811,5 +814,27 @@ describe("model suggestions", () => {
     assert.deepEqual(suggestionRequests({ ...desks, role: "reviewer", apply: [{ kind: "role", target: "reviewer", model: "openai/gpt-6.1-sol" }] }), [{ path: "models/roles", body: { role: "reviewer", model: "openai/gpt-6.1-sol" } }]);
     assert.deepEqual(suggestionRequests({ ...desks, spec: undefined, apply: [] }), [], "no provider offers it now");
     assert.equal(hubPath("GET", ["model-suggestions"]), "/api/model-suggestions");
+  });
+});
+
+describe("trials", () => {
+  const trial = { model: "openai/gpt-6.1-terra", share: 0.1, budgetUsd: 5, since: "x", samples: 3, needed: 10, spentUsd: 0.8 };
+
+  it("says how a trial stands", () => {
+    assert.equal(trialSummary("desks", trial), "openai/gpt-6.1-terra takes 10% of the tasks: 3 of 10 settled so far, $0.80 of $5.00 spent.");
+    assert.equal(
+      trialSummary("reviewer", { ...trial, samples: 10, ended: "enough data" }),
+      "openai/gpt-6.1-terra took 10% of the acceptance checks until it had enough data: 10 of 10 met verdicts so far, $0.80 of $5.00 spent.",
+    );
+  });
+
+  it("builds the request to start one, and says why it can't", () => {
+    assert.deepEqual(trialBody("desks", "openai/gpt-6.1-terra", "20", "3"), { body: { role: "desks", model: "openai/gpt-6.1-terra", share: 0.2, budgetUsd: 3 } });
+    assert.match((trialBody("desks", "", "10", "5") as { error: string }).error, /Choose a model/);
+    for (const share of ["0", "51", "2.5", ""]) assert.match((trialBody("desks", "m", share, "5") as { error: string }).error, /whole percentage from 1 to 50/, share);
+    assert.match((trialBody("desks", "m", "10", "0.1") as { error: string }).error, /\$0\.50 to \$1000/);
+    assert.equal(hubPath("POST", ["models", "challengers"]), "/api/models/challengers");
+    assert.equal(trialLength(10, 10), "about 100 tasks");
+    assert.equal(trialLength(30, 10), "about 34 tasks");
   });
 });

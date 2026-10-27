@@ -8,6 +8,7 @@ import type { Desks, Models, Price, Provider, ProviderPreset } from "../lib/type
 import { keyTravelsInClear, priceBody, priceLine, providerBody, providerDetail, providerId, PROVIDER_FORMS, roleModelChoices, roleModelOf } from "../lib/view.ts";
 import { ModelPicker } from "./model-picker.tsx";
 import { EscalationEditor } from "./escalation-editor.tsx";
+import { Trials } from "./trials.tsx";
 
 const PRESETS = Object.keys(PROVIDER_FORMS) as ProviderPreset[];
 
@@ -86,6 +87,8 @@ export function Providers() {
         )}
 
         {models.data && <EscalationEditor models={models.data} desks={desks.data} onSaved={desks.refresh} />}
+
+        {models.data && <Trials models={models.data} desks={desks.data} onChanged={desks.refresh} />}
 
         <Section title="Prices" count={prices.data?.length}>
           <p className="muted small">

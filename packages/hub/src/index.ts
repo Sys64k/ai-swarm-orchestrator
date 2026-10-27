@@ -59,6 +59,7 @@ export { ACCEPTANCE_DIFF_LIMIT, AcceptanceChecker, acceptanceCounts, acceptanceP
 export { AttemptLimiter, clientAddress, createGatewayApp, gatewayAccess, GATEWAY_MAX_FAILURES, JOIN_PATH, PUBLIC_API_PATHS, type GatewayRule } from "./gateway.js";
 export { addOutcome, describeRecord, JOB_OUTCOMES, type JobOutcome, type TrackRecord } from "./track-record.js";
 export { trackRecords, type ReportPlan, type ReportTask } from "./job-report.js";
+export { isFresh, picked, takesTask, trialStatus, type Challenger, type TrialTask } from "./challengers.js";
 export { COST_MARGIN, currentDeskModel, currentModels, DEFAULT_PERIOD_DAYS, defaultSince, modelName, modelSuggestions, ROLE_RULES, suggestFor } from "./model-suggestions.js";
 export { PUBLIC_STATS_CACHE_SEC, publicModelName, publicStats, publicStatsFor } from "./public-stats.js";
 export { addBuildUsage, endJob, failedBuildResult, JOBS_LIMIT, lastBuild, markAcceptance, markOverturned, markQa, markVerified, openJob, startJob, type Desk, type JobKind } from "./jobs.js";

@@ -22,8 +22,10 @@ export type AcceptanceVerdict =
 
 /** What the check reads of a task. */
 export interface AcceptanceSubject {
-  spec: { title: string; description: string; acceptanceCriteria: string[] };
+  spec: { taskId?: string; title: string; description: string; acceptanceCriteria: string[] };
   summary?: string;
+  /** The commit being judged. */
+  commit?: string;
 }
 
 const TOOL: Anthropic.Beta.BetaTool = {
@@ -119,14 +121,14 @@ export function readVerdict(content: Anthropic.Beta.BetaContentBlock[], criteria
  */
 export class AcceptanceChecker {
   /**
-   * `models`: asked at each check (the reviewer's can change while the Hub runs), in order: the
-   * reviewer's, then the Hub's own. A model whose call fails (refused, down) hands the check to
+   * `models`: asked at each check, for that task (the reviewer's can change while the Hub runs, and a
+   * model on trial may take this one), in order: the reviewer's, then the Hub's own. A model whose call fails (refused, down) hands the check to
    * the next, so a reviewer that can't do the job doesn't leave every task undecided.
    */
-  constructor(private readonly models: () => Promise<ReadonlyArray<LlmAdapter | undefined>>) {}
+  constructor(private readonly models: (task: AcceptanceSubject) => Promise<ReadonlyArray<LlmAdapter | undefined>>) {}
 
   async check(task: AcceptanceSubject, diff: TaskDiff | undefined): Promise<AcceptanceVerdict> {
-    const adapters = (await this.models()).filter((a, i, all): a is LlmAdapter => a !== undefined && all.findIndex((b) => b?.model === a.model) === i);
+    const adapters = (await this.models(task)).filter((a, i, all): a is LlmAdapter => a !== undefined && all.findIndex((b) => b?.model === a.model) === i);
     if (!adapters.length) return { result: "undecided", reason: "no model is configured for the check" };
     if (!diff || diff.files.length === 0) return { result: "undecided", reason: "there is no diff to check" };
     let response;

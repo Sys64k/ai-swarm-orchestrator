@@ -3,7 +3,7 @@ import http from "node:http";
 import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
-import { checkToolUse, DEFAULT_JUNIOR_TRIES, DeskModels, desksOf, modelConcurrency, type LlmAdapter } from "@aso/hub";
+import { checkToolUse, DEFAULT_JUNIOR_TRIES, DeskModels, desksOf, modelConcurrency, picked, type LlmAdapter } from "@aso/hub";
 import { createMessage, type AgentMessage, type AvailableModel } from "@aso/shared";
 import { postTask, pushTaskBranch, reply, ScriptedModel, tempDir, text, TOKEN, waitFor, withHub, worker } from "./helpers.ts";
 
@@ -131,6 +131,20 @@ describe("desk models", () => {
     assert.equal(models.roleModel("reviewer"), "openai/gpt-6.1-terra", "a model that takes tools goes on");
   });
 
+  it("keeps a trial across restarts, refuses one it can't run, and ends it", async () => {
+    const dir = tempDir();
+    const models = await open(dir);
+    await models.setChallenger("reviewer", "openai/gpt-6.1-sol", { share: 0.2, budgetUsd: 3 }, new Date("2026-10-27T12:00:00.000Z"));
+    assert.deepEqual((await open(dir)).challenger("reviewer"), { spec: "openai/gpt-6.1-sol", share: 0.2, budgetUsd: 3, since: "2026-10-27T12:00:00.000Z" });
+    await assert.rejects(models.setChallenger("desks", "machine/llama", { share: 0.1, budgetUsd: 5 }), /machine's own model/);
+    const noTools = await DeskModels.open(undefined, (spec) => ({ name: "f", model: spec, complete: async () => { throw new Error("no tools here"); } }), 4, isLocal, checkToolUse);
+    await assert.rejects(noTools.setChallenger("desks", "x/y", { share: 0.1, budgetUsd: 5 }), /can't take the Hub's requests with tools/);
+    assert.equal(noTools.challenger("desks"), undefined);
+    await models.setChallenger("reviewer", null, { share: 0.1, budgetUsd: 5 });
+    assert.equal((await open(dir)).challenger("reviewer"), undefined);
+    assert.doesNotMatch(readFileSync(path.join(dir, "models.json"), "utf8"), /gpt-6/, "a model nothing uses is forgotten");
+  });
+
   it("gives a local model one call at once unless told otherwise; Claude gets the Hub's limit", async () => {
     assert.equal(modelConcurrency({}, true, 4), 1, "a local server");
     assert.equal(modelConcurrency({ concurrency: 3 }, true, 4), 3);
@@ -241,6 +255,75 @@ describe("desks on their own models (Hub)", () => {
           qa.ws.close();
         },
         { llm: { adapter: hubModel } },
+      );
+    } finally {
+      if (saved === undefined) delete process.env.ASO_LLM_BASE_URL;
+      else process.env.ASO_LLM_BASE_URL = saved;
+      await provider.close();
+    }
+  });
+
+  it("tries a challenger on a share of the tasks (desks) and of the checks (reviewer), and ends the trial", async () => {
+    const provider = await fakeProvider();
+    const saved = process.env.ASO_LLM_BASE_URL;
+    process.env.ASO_LLM_BASE_URL = provider.url;
+    const defaultModel = new ScriptedModel(() => reply([text("from the default")], "end_turn"), "claude-haiku-5-5");
+    // Task ids each trial takes at 50%: the share is a hash of the id, so find some.
+    const ids = Array.from({ length: 40 }, (_, i) => `t${i}`);
+    const desksTakes = ids.find((id) => picked(`desks:${id}`, 0.5) && !picked(`reviewer:${id}`, 0.5))!;
+    const reviewerTakes = ids.find((id) => picked(`reviewer:${id}`, 0.5) && !picked(`desks:${id}`, 0.5))!;
+    try {
+      await withHub(
+        async (ctx) => {
+          assert.equal((await call(ctx.port, "/api/models/challengers", { role: "desks", model: "machine/llama" })).status, 400);
+          assert.equal((await call(ctx.port, "/api/models/challengers", { role: "desks", model: "local-model", share: 0.9 })).status, 400, "at most half the work");
+          const set = await call(ctx.port, "/api/models/challengers", { role: "desks", model: "local-model", share: 0.5, budgetUsd: 2 });
+          assert.equal(set.status, 200, JSON.stringify(set.body));
+          assert.deepEqual((({ since, ...t }) => t)(set.body.challengers.desks), { model: "local/local-model", share: 0.5, budgetUsd: 2, samples: 0, needed: 10, spentUsd: 0 });
+          const reviewerTrial = await call(ctx.port, "/api/models/challengers", { role: "reviewer", model: "local-model", share: 0.5 });
+          assert.equal(reviewerTrial.body.challengers.reviewer.budgetUsd, 5, "the reviewer's default budget");
+
+          const dev = await worker(ctx.port, "dev");
+          const qa = await worker(ctx.port, "qa");
+          // A task the desks trial takes starts on the challenger.
+          await postTask(ctx.port, { taskId: desksTakes, role: "backend", title: "On trial", description: "d" });
+          assert.equal((await dev.next()).type, "TASK_ASSIGNMENT");
+          dev.send(createMessage("STATUS_UPDATE", "dev", { state: "in_progress", taskId: desksTakes, slot: 1 }));
+          await waitFor(() => ctx.hub.tasks.get(desksTakes)?.state === "in_progress");
+          dev.send(createMessage("PROMPT_EXECUTION", "dev", { requestId: crypto.randomUUID(), taskId: desksTakes, conversationId: crypto.randomUUID(), turn: 0, toolResults: [] } as never));
+          assert.match(JSON.stringify(promptResult(await dev.next(5000))), /from the desk's model/);
+          const onTrial = ctx.hub.tasks.get(desksTakes)!;
+          assert.equal(onTrial.challenger, "local/local-model");
+          assert.ok(onTrial.history.some((h) => /\(local-model, a model on trial\)/.test(h.event)));
+          await call(ctx.port, `/api/tasks/${desksTakes}/cancel`, {});
+          await waitFor(() => ctx.hub.tasks.get(desksTakes)?.state === "cancelled");
+
+          // A task the reviewer trial takes: its acceptance check runs on the challenger.
+          await postTask(ctx.port, { taskId: reviewerTakes, role: "backend", title: "Checked on trial", description: "d", acceptanceCriteria: ["it greets"] });
+          // Whichever machine is free builds it; the other tests it.
+          const builderId = await waitFor(() => ctx.hub.tasks.get(reviewerTakes)?.nodeId, 5000, "assigned");
+          const [builder, tester] = builderId === "dev" ? [dev, qa] : [qa, dev];
+          let next = await builder.next();
+          while (next.type !== "TASK_ASSIGNMENT") next = await builder.next(); // the cancel's stop message first
+          builder.send(createMessage("STATUS_UPDATE", builderId, { state: "in_progress", taskId: reviewerTakes, slot: 1 }));
+          const commit = await pushTaskBranch(ctx.gitUrl, reviewerTakes, { "greet.txt": "hi\n" });
+          builder.send(createMessage("STATUS_UPDATE", builderId, { state: "completed", taskId: reviewerTakes, commit }));
+          let run = await tester.next();
+          while (run.type !== "TEST_EXECUTION") run = await tester.next();
+          tester.send(createMessage("FEEDBACK_LOOP", builderId === "dev" ? "qa" : "dev", { taskId: reviewerTakes, commit, outcome: "pass", summary: "ok" }));
+          await waitFor(() => ctx.hub.tasks.get(reviewerTakes)?.jobs?.[0]?.acceptance !== undefined, 10_000, "the acceptance check");
+          assert.equal(ctx.hub.tasks.get(reviewerTakes)!.jobs![0].acceptanceModel, "local-model", "checked by the challenger");
+          assert.equal(ctx.hub.tasks.get(reviewerTakes)!.challenger, undefined, "not on the desks trial");
+
+          const ended = await call(ctx.port, "/api/models/challengers", { role: "desks", model: "none" });
+          assert.equal((await call(ctx.port, "/api/models/challengers", { role: "desks", model: "local-model" })).body.challengers.desks.budgetUsd, 20, "the desks' default budget");
+          await call(ctx.port, "/api/models/challengers", { role: "desks", model: "none" });
+          assert.equal(ended.body.challengers.desks, undefined);
+          assert.ok(ended.body.challengers.reviewer, "the other trial goes on");
+          dev.ws.close();
+          qa.ws.close();
+        },
+        { llm: { adapter: new ScriptedModel(() => reply([text("from --model")], "end_turn"), "claude-opus-5-5"), agentAdapter: defaultModel } },
       );
     } finally {
       if (saved === undefined) delete process.env.ASO_LLM_BASE_URL;

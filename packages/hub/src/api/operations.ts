@@ -16,6 +16,7 @@ import {
   DesksSchema,
   RoleModelBodySchema,
   EscalationBodySchema,
+  ChallengerBodySchema,
   TrackRecordsSchema,
   ModelSuggestionsSchema,
   PublicStatsSchema,
@@ -80,6 +81,7 @@ export const REQUEST_SCHEMAS = {
   DeskAssignment: DeskAssignmentBodySchema,
   RoleModel: RoleModelBodySchema,
   Escalation: EscalationBodySchema,
+  Challenger: ChallengerBodySchema,
   ProviderAdd: ProviderAddBodySchema,
   PriceSet: PriceSetBodySchema,
   PriceRemove: PriceRemoveBodySchema,
@@ -324,6 +326,10 @@ const WORKERS: ApiOperation[] = [
   {
     method: "post", path: "/api/models/roles", tag: "Workers", summary: "Put the Architect or the reviewer (the acceptance check) on a model, or back on the default", body: "RoleModel",
     responses: { 200: ok("Desks"), 400: err("Not a model the Hub can use for it") },
+  },
+  {
+    method: "post", path: "/api/models/challengers", tag: "Workers", summary: "Put a model on trial for the desks or the reviewer: it takes a share of the work within a budget, until suggestions can compare it; model none ends it", body: "Challenger",
+    responses: { 200: ok("Desks"), 400: err("Not a model the Hub can use for it, or an invalid body") },
   },
   {
     method: "post", path: "/api/models/escalation", tag: "Workers", summary: "Change where failing tasks move: the ladder of stronger models, the tries on a desk's model before it, or either back to the Hub's start setting", body: "Escalation",

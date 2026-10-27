@@ -25,6 +25,7 @@ import { Semaphore } from "./semaphore.js";
 import { deskName, type DeskModels, type Route } from "./desk-models.js";
 import { MACHINE_PREFIX, type MachineModels } from "./machine-models.js";
 import { calledSpec, canSwitchFrom, roundModel, type EscalationPolicy, type RoundModel } from "./escalation.js";
+import { isFresh } from "../challengers.js";
 import { architectSystemPrompt, CONTINUE_PROMPT, planPrompt, systemPrompt, taskPrompt } from "./prompts.js";
 
 /** The model usage totals, kept across restarts. */
@@ -76,6 +77,8 @@ export interface ConversationOptions {
    * the Hub runs; undefined: every round on its desk's model.
    */
   escalation?: () => EscalationPolicy | undefined;
+  /** The model on trial for the desks that a task starting now should start on, if any (asked once per task). */
+  challenger?: (taskId: string) => string | undefined;
   /** A machine's model spending, counted against its worker key's budget. */
   spend?: {
     /** Why its agents may make no more model calls; undefined: they may. */
@@ -312,7 +315,15 @@ export class ConversationManager {
 
   /** The model a task's agent on `nodeId` starts from: its desk's, else the machine's own one; undefined: the default. */
   private ownModelOf(taskId: string, nodeId: string): string | undefined {
-    return this.deskModelOf(taskId, nodeId) ?? this.opts.machineModels?.defaultSpec(nodeId);
+    return this.tasks.get(taskId)?.challenger ?? this.deskModelOf(taskId, nodeId) ?? this.opts.machineModels?.defaultSpec(nodeId);
+  }
+
+  /** A task about to be built for the first time may start on the model on trial for the desks (records it on the task). */
+  private maybeChallenger(taskId: string): void {
+    const task = this.tasks.get(taskId);
+    if (!task || !isFresh(task)) return;
+    const spec = this.opts.challenger?.(taskId);
+    if (spec) this.tasks.recordChallenger(taskId, spec);
   }
 
   /**
@@ -320,9 +331,12 @@ export class ConversationManager {
    * one, or one up the escalation ladder, skipping models that refused it.
    */
   private roundModelOf(taskId: string, nodeId: string): RoundModel {
+    this.maybeChallenger(taskId);
     const task = this.tasks.get(taskId);
     const choice = roundModel(this.opts.escalation?.(), task ?? { reworkRound: 0 }, this.ownModelOf(taskId, nodeId), this.opts.defaultAgentSpec);
-    return choice.spec?.startsWith(MACHINE_PREFIX) && choice.why === "this desk's model" ? { ...choice, why: "this machine's own model" } : choice;
+    if (choice.why !== "this desk's model") return choice;
+    if (task?.challenger && choice.spec === task.challenger) return { ...choice, why: "a model on trial" };
+    return choice.spec?.startsWith(MACHINE_PREFIX) ? { ...choice, why: "this machine's own model" } : choice;
   }
 
   /**

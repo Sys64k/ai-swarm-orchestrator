@@ -1711,6 +1711,10 @@
           "planId": {
             "type": "string"
           },
+          "challenger": {
+            "description": "The model on trial it started on (aso challenger), instead of its desk's",
+            "type": "string"
+          },
           "waitingReason": {
             "description": "Why a queued task is not running yet",
             "type": "string"
@@ -3120,6 +3124,115 @@
             },
             "additionalProperties": false,
             "description": "What was changed while the Hub runs (absent: the Hub's start settings)"
+          },
+          "challengers": {
+            "description": "Models on trial in a role, taking a share of its work (aso challenger)",
+            "type": "object",
+            "properties": {
+              "desks": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "string"
+                  },
+                  "share": {
+                    "type": "number"
+                  },
+                  "budgetUsd": {
+                    "type": "number"
+                  },
+                  "since": {
+                    "type": "string",
+                    "description": "When the trial began"
+                  },
+                  "samples": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991,
+                    "description": "Settled tasks it started (desks) or met verdicts it gave (reviewer) since then"
+                  },
+                  "needed": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991,
+                    "description": "How many suggestions need to compare it"
+                  },
+                  "spentUsd": {
+                    "type": "number"
+                  },
+                  "ended": {
+                    "description": "Why it takes no more tasks",
+                    "type": "string",
+                    "enum": [
+                      "enough data",
+                      "budget spent"
+                    ]
+                  }
+                },
+                "required": [
+                  "model",
+                  "share",
+                  "budgetUsd",
+                  "since",
+                  "samples",
+                  "needed",
+                  "spentUsd"
+                ],
+                "additionalProperties": false
+              },
+              "reviewer": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "string"
+                  },
+                  "share": {
+                    "type": "number"
+                  },
+                  "budgetUsd": {
+                    "type": "number"
+                  },
+                  "since": {
+                    "type": "string",
+                    "description": "When the trial began"
+                  },
+                  "samples": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991,
+                    "description": "Settled tasks it started (desks) or met verdicts it gave (reviewer) since then"
+                  },
+                  "needed": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991,
+                    "description": "How many suggestions need to compare it"
+                  },
+                  "spentUsd": {
+                    "type": "number"
+                  },
+                  "ended": {
+                    "description": "Why it takes no more tasks",
+                    "type": "string",
+                    "enum": [
+                      "enough data",
+                      "budget spent"
+                    ]
+                  }
+                },
+                "required": [
+                  "model",
+                  "share",
+                  "budgetUsd",
+                  "since",
+                  "samples",
+                  "needed",
+                  "spentUsd"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
           },
           "defaultAgent": {
             "type": [
@@ -4539,6 +4652,42 @@
             ]
           }
         },
+        "additionalProperties": false
+      },
+      "Challenger": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "desks",
+              "reviewer"
+            ],
+            "description": "desks: tasks start on it; reviewer: it makes their acceptance checks"
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "A model from GET /api/models (<provider>/<model>), or none to end the trial"
+          },
+          "share": {
+            "description": "The share of tasks it takes (default 0.1)",
+            "type": "number",
+            "minimum": 0.01,
+            "maximum": 0.5
+          },
+          "budgetUsd": {
+            "description": "What the trial may spend in all (default 20 for the desks, 5 for the reviewer)",
+            "type": "number",
+            "minimum": 0.5,
+            "maximum": 1000
+          }
+        },
+        "required": [
+          "role",
+          "model"
+        ],
         "additionalProperties": false
       },
       "ProviderAdd": {
@@ -7253,6 +7402,50 @@
           },
           "400": {
             "description": "Not a model the Hub can use for it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          }
+        }
+      }
+    },
+    "/api/models/challengers": {
+      "post": {
+        "operationId": "postModelsChallengers",
+        "tags": [
+          "Workers"
+        ],
+        "summary": "Put a model on trial for the desks or the reviewer: it takes a share of the work within a budget, until suggestions can compare it; model none ends it",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Challenger"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Desks"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not a model the Hub can use for it, or an invalid body",
             "content": {
               "application/json": {
                 "schema": {

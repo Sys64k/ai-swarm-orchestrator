@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { deskLines, escalationLines, modelLines, ownModelLines } from "../dist/commands/models.js";
+import { deskLines, escalationLines, modelLines, ownModelLines, trialLines } from "../dist/commands/models.js";
 
 describe("aso models and aso desks", () => {
   it("lists the models by provider, each by the spec a desk is put on", () => {
@@ -75,5 +75,14 @@ describe("aso models and aso desks", () => {
     assert.deepEqual(escalationLines({} as never), [], "an older Hub doesn't say");
     const lines = deskLines({ architect: "a", reviewer: "a", escalation: { ladder: ["b"], juniorTries: 2 }, escalationSet: {}, defaultAgent: "x", desks: [], models: [] });
     assert.equal(lines[2], "Escalation: after 2 tries on a desk's model, to b", "aso desks shows it under the roles");
+  });
+
+  it("shows each trial: its model, share, data so far and spending", () => {
+    const t = { model: "openai/gpt-6.1-terra", share: 0.1, budgetUsd: 5, since: "x", samples: 3, needed: 10, spentUsd: 0.8 };
+    assert.deepEqual(trialLines({ challengers: { desks: t, reviewer: { ...t, model: "openai/gpt-6.1-sol", samples: 10, ended: "enough data" } } }), [
+      "On trial for the desks: openai/gpt-6.1-terra, 10% of the work, 3 of 10 settled tasks, $0.80 of $5",
+      "On trial for the reviewer: openai/gpt-6.1-sol, 10% of the work, 10 of 10 met verdicts, $0.80 of $5 (ended: enough data)",
+    ]);
+    assert.deepEqual(trialLines({}), [], "an older Hub, or no trials");
   });
 });
