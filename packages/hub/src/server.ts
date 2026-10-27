@@ -5,7 +5,8 @@ import path from "node:path";
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import type { WSEvents } from "hono/ws";
 import { serve, type ServerType } from "@hono/node-server";
-import { createGatewayApp, PUBLIC_API_PATHS, requestAddress } from "./gateway.js";
+import { createGatewayApp, PUBLIC_API_PATHS, PUBLIC_STATS_PATH, requestAddress } from "./gateway.js";
+import { PUBLIC_STATS_CACHE_SEC, publicStatsFor } from "./public-stats.js";
 import { budgetSpent, mayUseProject, projectOfGitPath, REFUSE_ALL, refuseJob, type KeyScope } from "./worker-scope.js";
 import type { JobOutcome } from "./track-record.js";
 import { trackRecords } from "./job-report.js";
@@ -54,6 +55,8 @@ import {
   SyncBodySchema,
   type AgentMessage,
   TrackRecordQuerySchema,
+  type PublicStats,
+  type PublicStatsShare,
 } from "@aso/shared";
 import { API_DOC_VERSION, openApiDocument } from "./api/openapi.js";
 import { syncApiCopies } from "./api-sync.js";
@@ -120,6 +123,12 @@ export interface HubOptions {
    * place). Settings, keys, transcripts and screenshots stay in files. Ignored with `stateDir: null`.
    */
   databaseUrl?: string;
+  /**
+   * Share the swarm's track record publicly at `GET /api/public-stats` (on the worker gateway too,
+   * so a README can show it): totals always, per model and costs when listed. `projects` limits
+   * it to those projects' work. Off (404) unless set.
+   */
+  publicStats?: PublicStatsShare;
   port?: number;
   host?: string;
   /**
@@ -801,6 +810,16 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     return c.json({ removed: id });
   });
   app.get("/api/desks", (c) => c.json(deskModels.view(adapter?.model ?? null, defaultAgentModel())));
+  /** Made at most once per PUBLIC_STATS_CACHE_SEC: the address is public, so asking often costs nothing. */
+  let shared: { at: number; stats: PublicStats } | undefined;
+  app.get(PUBLIC_STATS_PATH, (c) => {
+    if (!opts.publicStats) return c.json({ error: "this Hub doesn't share its stats (start it with --public-stats)" }, 404);
+    if (!shared || Date.now() - shared.at > PUBLIC_STATS_CACHE_SEC * 1000) {
+      shared = { at: Date.now(), stats: publicStatsFor(tasks.list(), plans.list(), opts.publicStats, new Date().toISOString()) };
+    }
+    c.header("Cache-Control", `public, max-age=${PUBLIC_STATS_CACHE_SEC}`);
+    return c.json(shared.stats);
+  });
   app.get("/api/track-records", (c) => {
     const query = TrackRecordQuerySchema.safeParse(c.req.query());
     if (!query.success) return c.json({ error: query.error.issues.map((i) => `${i.path.join(".") || "query"}: ${i.message}`).join("; ") }, 400);

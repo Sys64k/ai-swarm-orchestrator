@@ -21,6 +21,10 @@ Git. LLM access goes only through the Hub, so workers never hold API credentials
    └────────────┘ └────────────┘ └────────────┘
 ```
 
+<!-- swarm-stats:start -->
+**Built by its own swarm.** The swarm's track record appears here once it has finished its first tasks.
+<!-- swarm-stats:end -->
+
 ## What it does
 
 - **Plans with you.** Describe a requirement; the Architect explores the project, asks what it

@@ -786,3 +786,71 @@ export const TrackRecordsSchema = z
   })
   .describe("Track records: how models, machines, desks, roles or projects have done with their jobs");
 export type TrackRecords = z.infer<typeof TrackRecordsSchema>;
+
+export const PUBLIC_STATS_PARTS = ["models", "costs"] as const;
+export type PublicStatsPart = (typeof PUBLIC_STATS_PARTS)[number];
+/** `--public-stats totals`: the totals only, no part. */
+export const PUBLIC_STATS_TOTALS = "totals";
+
+/** What a Hub shares publicly: the parts beyond the totals, and whose work (all projects when absent). */
+export interface PublicStatsShare {
+  parts: readonly PublicStatsPart[];
+  projects?: readonly string[];
+}
+
+/**
+ * `--public-stats totals|models,costs` (and `--public-stats-projects a,b`) → what to share;
+ * undefined: nothing. Throws on an unknown part.
+ */
+export function parsePublicStats(value: string | undefined, projects: string | undefined): PublicStatsShare | undefined {
+  const list = (v: string | undefined) => (v ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  const parts = list(value);
+  if (!parts.length) return undefined;
+  const unknown = parts.filter((p) => p !== PUBLIC_STATS_TOTALS && !(PUBLIC_STATS_PARTS as readonly string[]).includes(p));
+  if (unknown.length) throw new Error(`--public-stats: unknown ${unknown.join(", ")} (use ${PUBLIC_STATS_TOTALS}, or any of ${PUBLIC_STATS_PARTS.join(", ")})`);
+  const only = list(projects);
+  return { parts: parts.filter((p): p is PublicStatsPart => p !== PUBLIC_STATS_TOTALS), ...(only.length ? { projects: only } : {}) };
+}
+
+export const PublicStatsSchema = z
+  .object({
+    since: z.string().nullable().describe("When the oldest job counted started"),
+    at: Timestamp.describe("When these numbers were made"),
+    tasks: z.object({
+      finished: z.number().int().describe("Merged tasks"),
+      firstTry: z.number().int().describe("Of those, merged after a single build"),
+      tookOver: z.number().int().describe("Of those, finished by a model that took over from another"),
+    }),
+    plans: z.object({ proposed: z.number().int(), approved: z.number().int() }),
+    costs: z
+      .object({
+        totalUsd: z.number().describe("Estimated model cost of the builds, plans and acceptance checks counted"),
+        perTaskUsd: z.number().optional().describe("That per task finished"),
+      })
+      .optional()
+      .describe("Only when the Hub shares costs"),
+    models: z
+      .array(
+        z.object({
+          model: z.string(),
+          finished: z.number().int(),
+          firstTry: z.number().int(),
+          tookOver: z.number().int(),
+          builds: z.number().int(),
+          qaPassed: z.number().int(),
+          qaFailed: z.number().int(),
+          accepted: z.number().int(),
+          unmet: z.number().int(),
+          plansProposed: z.number().int(),
+          plansApproved: z.number().int(),
+          checks: z.number().int().describe("Acceptance checks it made as the reviewer"),
+          checksMet: z.number().int(),
+          costUsd: z.number().optional().describe("Its builds, plans and checks (only when the Hub shares costs)"),
+          costPerTaskUsd: z.number().optional().describe("Its builds' cost per task it finished (only when the Hub shares costs)"),
+        }),
+      )
+      .optional()
+      .describe("Per model, only when the Hub shares models"),
+  })
+  .describe("The swarm's track record as the Hub shares it publicly: totals, and per model and costs if it chose to; never machines, people or task titles");
+export type PublicStats = z.infer<typeof PublicStatsSchema>;

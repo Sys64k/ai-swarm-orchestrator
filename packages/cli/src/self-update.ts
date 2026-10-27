@@ -53,6 +53,21 @@ export function isBuildOf(version: string, sha: string): boolean {
   return /^[0-9a-f]{7,40}$/.test(build) && sha.startsWith(build);
 }
 
+/**
+ * Whether a changed file is documentation only, which never needs a new Hub: Markdown, the docs
+ * folder (but not the API description, which code generates), GitHub's workflows and settings
+ * (they run on GitHub, not in the Hub), the licence.
+ */
+export function isDocumentation(file: string): boolean {
+  if (file === "docs/openapi.json") return false;
+  return /\.md$/i.test(file) || file.startsWith("docs/") || file.startsWith(".github/") || file === "LICENSE";
+}
+
+/** Whether a range of commits changed only documentation (nothing at all doesn't count). */
+export function onlyDocumentation(changedFiles: readonly string[]): boolean {
+  return changedFiles.length > 0 && changedFiles.every(isDocumentation);
+}
+
 /** Whether a restart would interrupt nothing: no task at work, no deploy running, no plan being made. */
 export function swarmIdle(
   tasks: ReadonlyArray<{ state: TaskState }>,
@@ -182,6 +197,13 @@ export class HubUpdater {
   private readonly branch: string;
   private timer?: NodeJS.Timeout;
   private stopped = false;
+  /** The commit the updater's clone was last fetched for. */
+  private fetched?: string;
+  /**
+   * A main found to differ from the running version in documentation only (logged once). Never
+   * reset: a newer main is another commit, and gets its own look.
+   */
+  private docsOnly?: string;
 
   constructor(private readonly opts: UpdaterOptions) {
     this.exec = opts.exec ?? execCommand;
@@ -244,6 +266,10 @@ export class HubUpdater {
       return;
     }
     if (await this.state.givenUp(sha)) return; // reported when it failed; the next commit on main is tried
+    if (await this.documentationOnly(sha)) {
+      await this.report({ state: "current" });
+      return;
+    }
     const fromDir = await this.versions.current();
     if (!fromDir) return this.fail(sha, "this Hub was not installed with `aso hub-service install --update-from`, so there is no version to roll back to", true);
 
@@ -300,20 +326,50 @@ export class HubUpdater {
     return sha;
   }
 
+  /**
+   * Whether main differs from the running version in documentation only (a README or a guide):
+   * then there is nothing to build or restart for. Unsure (no clone, an unknown commit): no.
+   */
+  private async documentationOnly(sha: string): Promise<boolean> {
+    if (this.docsOnly === sha) return true;
+    const running = buildOf(this.opts.current);
+    if (!/^[0-9a-f]{7,40}$/.test(running)) return false;
+    try {
+      const src = await this.fetchSource(sha);
+      const changed = (await this.exec("git", ["diff", "--name-only", running, sha], { cwd: src })).split("\n").map((f) => f.trim()).filter(Boolean);
+      if (!onlyDocumentation(changed)) return false;
+    } catch (err) {
+      log.debug(`could not tell what changed since ${running}: ${(err as Error).message}`);
+      return false;
+    }
+    this.docsOnly = sha;
+    log.info(`main is at ${sha.slice(0, 7)}: only documentation changed since ${running}, so the Hub stays as it is`);
+    return true;
+  }
+
+  /** The updater's own clone (made when missing), fetched up to `sha` (once per commit). */
+  private async fetchSource(sha: string): Promise<string> {
+    const src = path.join(this.opts.paths.work, "src");
+    const cloned = existsSync(path.join(src, ".git"));
+    if (cloned && this.fetched === sha) return src;
+    if (!cloned) {
+      await rm(src, { recursive: true, force: true });
+      await this.exec("git", ["clone", "--quiet", this.opts.repo, src], { timeoutMs: CLONE_TIMEOUT_MS });
+    }
+    await this.exec("git", ["fetch", "--quiet", "origin", this.branch], { cwd: src, timeoutMs: CLONE_TIMEOUT_MS });
+    this.fetched = sha;
+    return src;
+  }
+
   private buildEnv(): NodeJS.ProcessEnv {
     return buildEnv(path.join(this.opts.paths.work, "home"));
   }
 
   /** Check out `sha` in the updater's own clone, test it and package it as `next.tgz`; returns its version. */
   private async build(sha: string): Promise<string> {
-    const src = path.join(this.opts.paths.work, "src");
     const env = this.buildEnv();
     await mkdir(env.HOME!, { recursive: true });
-    if (!existsSync(path.join(src, ".git"))) {
-      await rm(src, { recursive: true, force: true });
-      await this.exec("git", ["clone", "--quiet", this.opts.repo, src], { timeoutMs: CLONE_TIMEOUT_MS });
-    }
-    await this.exec("git", ["fetch", "--quiet", "origin", this.branch], { cwd: src, timeoutMs: CLONE_TIMEOUT_MS });
+    const src = await this.fetchSource(sha);
     await this.exec("git", ["checkout", "--quiet", "--force", "--detach", sha], { cwd: src });
     await this.exec("git", ["clean", "-fdxq"], { cwd: src });
     await this.exec("npm", ["ci", "--no-audit", "--no-fund"], { cwd: src, timeoutMs: NPM_CI_TIMEOUT_MS, env });

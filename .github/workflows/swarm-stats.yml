@@ -1,0 +1,34 @@
+# Refreshes the swarm's stats in the README once a day, from the Hub's public stats
+# (`aso start-hub --public-stats models,costs`, served on the worker gateway). Set the address
+# as the repository variable SWARM_STATS_URL, e.g. https://<hub>.ts.net:10000/api/public-stats.
+# It commits only when the numbers changed; an unreachable Hub skips the day. A commit that
+# changes only the README doesn't make the Hub update itself.
+name: Swarm stats
+
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  readme:
+    runs-on: ubuntu-latest
+    if: ${{ vars.SWARM_STATS_URL != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node scripts/readme-stats.mjs "$SWARM_STATS_URL" README.md
+        env:
+          SWARM_STATS_URL: ${{ vars.SWARM_STATS_URL }}
+      - name: Commit the new numbers
+        run: |
+          git diff --quiet README.md && exit 0
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "docs: the swarm's stats" README.md
+          git push

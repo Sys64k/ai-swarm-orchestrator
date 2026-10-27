@@ -15,6 +15,7 @@ import {
   PricesSchema,
   DesksSchema,
   TrackRecordsSchema,
+  PublicStatsSchema,
   ModelsSchema,
   DiscoveryProofSchema,
   DeployNextSchema,
@@ -113,6 +114,7 @@ export const ANSWER_SCHEMAS = {
   Models: ModelsSchema,
   Desks: DesksSchema,
   TrackRecords: TrackRecordsSchema,
+  PublicStats: PublicStatsSchema,
   Provider: ProviderViewSchema,
   ProviderRemoved: ProviderRemovedSchema,
   Price: PriceSchema,
@@ -159,6 +161,11 @@ const noProject = { 400: err("Several projects and none named"), ...notFound("pr
 
 const HUB: ApiOperation[] = [
   { method: "get", path: "/api/version", tag: "Hub", public: true, summary: "The aso build this Hub serves to other machines", responses: { 200: ok("Version") } },
+  {
+    method: "get", path: "/api/public-stats", tag: "Hub", public: true,
+    summary: "The swarm's track record as this Hub shares it publicly (totals; per model and costs if it chose to)",
+    responses: { 200: ok("PublicStats"), 404: err("This Hub doesn't share its stats") },
+  },
   { method: "get", path: "/api/hub/update", tag: "Hub", summary: "Where the Hub's own update from its repository stands", responses: { 200: ok("HubUpdate") } },
   {
     method: "post", path: "/api/hub/update", tag: "Hub", summary: "For the updater on the Hub machine: report where the Hub's update stands", body: "HubUpdateReport",

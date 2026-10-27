@@ -65,6 +65,9 @@ services:
       ASO_GATEWAY_HOST: "0.0.0.0"
       ASO_GATEWAY_URL: "${ASO_GATEWAY_URL:-}"
       ASO_AUTO_MERGE_SYNCS: "${ASO_AUTO_MERGE_SYNCS:-1}"
+      # Share the swarm's track record publicly (--public-stats); empty: not shared.
+      ASO_PUBLIC_STATS: "${ASO_PUBLIC_STATS:-}"
+      ASO_PUBLIC_STATS_PROJECTS: "${ASO_PUBLIC_STATS_PROJECTS:-}"
       # The db service above, unless the CLI was given a database of its own (--database-url).
       ASO_DATABASE_URL: "${ASO_DATABASE_URL:-postgres://aso:${ASO_DB_PASSWORD}@db:5432/aso}"
       # Read from the environment of `aso start-hub --docker`; never baked into the image.

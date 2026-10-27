@@ -33,6 +33,8 @@ Every `aso` command and its options.
 | `--no-discovery` | | Don't answer LAN discovery: workers then need `--hub` |
 | `--gateway-port <port>` | off | Also listen here for workers coming from the internet through a TLS tunnel: only the worker connection, Git, the package and joining, worker keys only. See [Workers anywhere](installation.md#workers-anywhere) |
 | `--gateway-host <host>` | `127.0.0.1` | Interface the worker gateway listens on (the tunnel connects locally) |
+| `--public-stats <parts>` | `ASO_PUBLIC_STATS` | Share the swarm's track record at `/api/public-stats`, for anyone (also on the worker gateway): `totals`, or `models` and/or `costs`. Off by default. See [Sharing them publicly](models.md#sharing-them-publicly-a-readme) |
+| `--public-stats-projects <names>` | `ASO_PUBLIC_STATS_PROJECTS` | Count only these projects' work in the public stats (default: all) |
 | `--database-url <url>` | `ASO_DATABASE_URL` | Keep tasks, plans, conversations and the model usage totals in this PostgreSQL database. With `--docker` and no URL, a database container of its own; without either, files. See [The database](installation.md#the-database) |
 | `--no-auto-merge-syncs` | | Leave API sync pull requests for a person even when QA, every acceptance criterion and CI pass. See [the API sync](installation.md#projects-that-keep-a-copy-of-the-hub-api) |
 | `--no-docker-cleanup` | | Don't tidy Docker after Hub updates and deploys. By default, with `--docker`, at most once an hour: build cache older than a day, dangling images, and all but the three newest images of each project's repository (named like the project, never one in use; other repositories are left alone) |

@@ -31,6 +31,7 @@ Answers can gain fields over time: clients should ignore fields they don't know.
 | `GET` | `/api/worker-keys` | The worker keys: name, connected, last used, revoked |
 | `POST` | `/api/worker-keys/{id}/revoke` | Revoke a key: its machine is disconnected and can't come back with it |
 | `GET` | `/api/models` | The models desks can use, and the Architect's and default ones |
+| `GET` | `/api/public-stats` | The swarm's track record as the Hub shares it, for anyone (404 unless started with `--public-stats`) |
 | `GET` | `/api/track-records` | How models, machines, desks, roles or projects have done with their jobs (`?by=`, `project`, `role`, `since`) |
 | `GET` | `/api/desks` | Each desk with a model of its own, and each such model's calls at once and load |
 | `POST` | `/api/desks` | Put a desk (`<host>#<slot>`) or a machine (`<host>`) on a model, or back on `default` |

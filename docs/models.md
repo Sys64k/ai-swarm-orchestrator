@@ -249,6 +249,27 @@ claude-opus-5-5          3         0        3          3       3/3        3/3   
 - Jobs are recorded from when the Hub started recording them; older tasks don't count. The
   core console shows the same under *Track records*, and `GET /api/track-records` serves it.
 
+#### Sharing them publicly (a README)
+
+`aso start-hub --public-stats models,costs` makes the Hub answer `GET /api/public-stats` for
+anyone, on its own port and on the worker gateway (so through Tailscale Funnel too):
+
+- **Always:** tasks merged, how many on the first try or taken over, plans proposed and
+  approved.
+- **`models`:** the same per model, with QA and acceptance rates and the acceptance checks it
+  made; **`costs`:** model costs in total, per task, and per model. `totals` shares neither.
+- **Never** machines, desks, people, projects or task titles. A machine's own model is only
+  "a machine's own model". `--public-stats-projects aso-ui` counts only those projects' work.
+- **It does show when:** the oldest job counted and the time of the answer, so how active the
+  swarm has been can be read from it.
+
+This repository's README shows them: `.github/workflows/swarm-stats.yml` runs
+`scripts/readme-stats.mjs` once a day, which reads the address in the repository variable
+`SWARM_STATS_URL` (e.g. `https://<hub>.ts.net:10000/api/public-stats`) and rewrites the section
+between `<!-- swarm-stats:start -->` and `<!-- swarm-stats:end -->`, committing only when the
+numbers changed. Any project can do the same with those two files. A commit that changes only the
+README doesn't make the Hub update itself.
+
 ### A machine's own model (volunteer GPUs)
 
 A worker machine with its own model server (Ollama, vLLM, LM Studio) can serve the model calls
