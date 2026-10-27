@@ -1635,7 +1635,11 @@ different from it:
    that branch (`startTask` resumes an existing task branch).
 3. **Queue the task** (`syncTaskSpec`, role `frontend`): what changed per `apiChanges`
    (operations as `METHOD /path` and `schema Name`, at most 40 of each named), regenerate and
-   fix, no new features, keep the copy as it is.
+   fix, no new features, keep the copy as it is. The seeded commit becomes the task's
+   `diffBase`, so the acceptance check reads only the agent's work after it
+   (`HubRepository.diff(commit, from)`; the pull request still shows both). Judged against
+   `main` instead, the Hub's own commit looked like the agent changing the copy: an escalated
+   agent once reverted it to "fix" that, and the task failed.
 
 The task id is `sync-hub-api-<hash of project id and description>`, so each project gets one
 task per version of the description, and a cancelled one is not queued again. Failures are
