@@ -1552,7 +1552,10 @@ manager's `ReviewGate`, over `GitHubApi` (`git/github.ts`, a few REST calls on `
 - **Open.** After QA passes, the task goes to `awaiting_review`. The Hub force-pushes
   `task/<id>` to GitHub (`GitSync.pushBranch`, with the same token header as main pushes) and
   opens a PR, or updates the open one: new body and a "passed QA, ready again" comment. A
-  failure is kept in `task.review.error` and the next check tries again.
+  failure is kept in `task.review.error` and the next check tries again. One opening runs per
+  task at a time (`OnePerKey`, by commit): a second call for the same commit (the check, or a
+  second release) waits for the first, since GitHub's list of open PRs can lag behind a new one
+  and the second would open another; one for a newer commit runs after it.
 - **Check.** Every 30 s (and on `POST /api/sync`), each `awaiting_review` task's PR is read:
   - *merged:* `GitSync.catchUp` fast-forwards the Hub's `main` to GitHub's (or merges and
     pushes when the Hub has commits of its own, such as a dependency change). Only then is the

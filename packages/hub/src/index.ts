@@ -67,3 +67,4 @@ export { PUBLIC_STATS_CACHE_SEC, publicModelName, publicStats, publicStatsFor } 
 export { addBuildUsage, endJob, failedBuildResult, JOBS_LIMIT, lastBuild, markAcceptance, markOverturned, markQa, markVerified, openJob, startJob, type Desk, type JobKind } from "./jobs.js";
 export { budgetSpent, describeScope, mayUseProject, projectOfGitPath, REFUSE_ALL, refuseJob, type KeyScope, type WorkerJob } from "./worker-scope.js";
 export { MACHINE_PREFIX, MachineModels } from "./llm/machine-models.js";
+export { OnePerKey } from "./one-per-key.js";
