@@ -62,8 +62,14 @@ export function publicStats(byModel: TrackRecords, parts: PublicStatsShare["part
   };
 }
 
-/** The public stats of the projects shared (all, unless `share.projects` names some). */
+/**
+ * The public stats of the projects shared (all, unless `share.projects` names some), over one
+ * period: from the oldest recorded job. Plans are older than job records (a Hub that ran before
+ * them has months of plans and none of their tasks' jobs), so without that the costs per task
+ * would count plans whose tasks aren't counted.
+ */
 export function publicStatsFor(tasks: readonly ReportTask[], plans: readonly ReportPlan[], share: PublicStatsShare, at: string): PublicStats {
   const inScope = <T extends { project: string }>(list: readonly T[]) => (share.projects?.length ? list.filter((x) => share.projects!.includes(x.project)) : list);
-  return publicStats(trackRecords(inScope(tasks), inScope(plans), { by: "model" }), share.parts, at);
+  const firstJob = trackRecords(inScope(tasks), [], { by: "model" }).since;
+  return publicStats(trackRecords(inScope(tasks), firstJob ? inScope(plans) : [], { by: "model", ...(firstJob ? { since: firstJob } : {}) }), share.parts, at);
 }
