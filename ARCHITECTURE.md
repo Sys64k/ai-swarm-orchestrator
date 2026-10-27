@@ -1184,7 +1184,11 @@ the container. API answers carry
 (`<provider>/<model>`). The roles default to the Hub's `--model` (the reviewer to the
 Architect's); `ConversationManager.architectRoute` and the server's `reviewerOf` ask for them
 at each plan conversation and check, so a change applies at once, and fall back to `--model`
-when the chosen one can't be used. `POST /api/models/roles` sets them; `GET /api/desks` shows
+when the chosen one can't be used. Before a role or a ladder step goes on a model, `DeskModels`
+runs its `ToolCheck` (`checkToolUse` in `llm/tool-check.ts`: one call with a tool) and refuses a
+model whose API rejects it. The `AcceptanceChecker` gets its models in order (the reviewer's, the
+Architect's, `--model`) and moves to the next only when a call fails, not when an answer is
+unreadable; the verdict names the model that gave it. `POST /api/models/roles` sets them; `GET /api/desks` shows
 both and `roles` (the explicit choices). Desks map with
 optional per-model settings (calls at once, base URL, vision), in
 `<state>/models.json` (mode 600, no secrets; settings of models no desk uses are dropped). Each

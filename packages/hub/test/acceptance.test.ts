@@ -12,7 +12,7 @@ import {
   type LlmRequest,
 } from "@aso/hub";
 import { createMessage, type AgentMessage, type TaskDiff } from "@aso/shared";
-import { git, gitAsync, postTask, pushTaskBranch, reply, tempDir, toolUse, waitFor, withHub, worker, writeFiles, type HubContext, type TestClient } from "./helpers.ts";
+import { git, gitAsync, postTask, pushTaskBranch, reply, tempDir, text, toolUse, waitFor, withHub, worker, writeFiles, type HubContext, type TestClient } from "./helpers.ts";
 
 const TASK = {
   spec: { title: "Mock Hub: /api/llm", description: "Serve GET /api/llm from the mock Hub.", acceptanceCriteria: ["GET /api/llm answers the status", "The llm-none scenario answers 404"] },
@@ -26,9 +26,9 @@ const DIFF: TaskDiff = {
 };
 
 /** A model that answers every request with `answer`, and remembers the requests. */
-function model(answer: () => ReturnType<typeof reply>): LlmAdapter & { requests: LlmRequest[] } {
+function model(answer: () => ReturnType<typeof reply>, name = "claude-opus-5-5"): LlmAdapter & { requests: LlmRequest[] } {
   const requests: LlmRequest[] = [];
-  return { name: "scripted", model: "claude-opus-5-5", requests, complete: async (r) => (requests.push(r), answer()) };
+  return { name: "scripted", model: name, requests, complete: async (r) => (requests.push(r), answer()) };
 }
 const verdictCall = (criteria: Array<{ index: number; verdict: string; reason: string }>, summary = "ok") =>
   reply([toolUse("v1", "report_acceptance", { criteria, summary })], "tool_use");
@@ -60,18 +60,39 @@ describe("acceptance check", () => {
   });
 
   it("decides met, unmet or undecided, and never blocks on its own failure", async () => {
-    const met = await new AcceptanceChecker(async () => (model(() => verdictCall([{ index: 1, verdict: "met", reason: "a" }, { index: 2, verdict: "unclear", reason: "outside the diff" }])))).check(TASK, DIFF);
+    const met = await new AcceptanceChecker(async () => [model(() => verdictCall([{ index: 1, verdict: "met", reason: "a" }, { index: 2, verdict: "unclear", reason: "outside the diff" }]))]).check(TASK, DIFF);
     assert.equal(met.result, "met", "unclear doesn't block");
     const scripted = model(() => verdictCall([{ index: 1, verdict: "met", reason: "a" }, { index: 2, verdict: "unmet", reason: "no llm-none scenario" }]));
-    const unmet = await new AcceptanceChecker(async () => (scripted)).check(TASK, DIFF);
+    const unmet = await new AcceptanceChecker(async () => [scripted]).check(TASK, DIFF);
     assert.equal(unmet.result, "unmet");
     assert.equal(scripted.requests[0].tools[0].name, "report_acceptance");
     assert.ok(unmet.result !== "undecided" && unmet.usage.inputTokens > 0, "its cost is counted");
 
     const failing: LlmAdapter = { name: "x", model: "m", complete: async () => { throw new Error("overloaded"); } };
-    assert.deepEqual(await new AcceptanceChecker(async () => (failing)).check(TASK, DIFF), { result: "undecided", reason: "the model failed: overloaded", model: "m" });
-    assert.equal((await new AcceptanceChecker(async () => (undefined)).check(TASK, DIFF)).result, "undecided");
-    assert.equal((await new AcceptanceChecker(async () => (scripted)).check(TASK, { ...DIFF, files: [] })).result, "undecided");
+    assert.deepEqual(await new AcceptanceChecker(async () => [failing]).check(TASK, DIFF), { result: "undecided", reason: "the model failed: overloaded", model: "m" });
+    assert.equal((await new AcceptanceChecker(async () => [undefined]).check(TASK, DIFF)).result, "undecided");
+    assert.equal((await new AcceptanceChecker(async () => [scripted]).check(TASK, { ...DIFF, files: [] })).result, "undecided");
+  });
+
+  it("hands the check to the next model when the reviewer's call fails, not when its answer is unreadable", async () => {
+    const refused: LlmAdapter = { name: "x", model: "gpt-6.1-sol", complete: async () => { throw new Error("bad request (400): Function tools with reasoning_effort are not supported"); } };
+    const opus = model(() => verdictCall([{ index: 1, verdict: "met", reason: "a" }, { index: 2, verdict: "met", reason: "b" }]));
+    const fell = await new AcceptanceChecker(async () => [refused, undefined, opus]).check(TASK, DIFF);
+    assert.equal(fell.result, "met");
+    assert.equal(fell.model, opus.model, "the verdict counts for the model that gave it");
+
+    const down: LlmAdapter = { ...refused, model: "other", complete: async () => { throw new Error("overloaded"); } };
+    const both = await new AcceptanceChecker(async () => [refused, down]).check(TASK, DIFF);
+    assert.equal(both.result, "undecided");
+    assert.match(both.result === "undecided" ? both.reason : "", /^every model failed: gpt-6\.1-sol: bad request .*; other: overloaded$/);
+
+    const once = model(() => verdictCall([{ index: 1, verdict: "met", reason: "a" }, { index: 2, verdict: "met", reason: "b" }]));
+    await new AcceptanceChecker(async () => [once, once]).check(TASK, DIFF);
+    assert.equal(once.requests.length, 1, "the same model isn't asked twice");
+
+    const garbled = model(() => reply([text("I think it's fine")], "end_turn"));
+    const spare = model(() => assert.fail("an answer, however bad, isn't a failed call"), "spare");
+    assert.equal((await new AcceptanceChecker(async () => [garbled, spare]).check(TASK, DIFF)).result, "undecided");
   });
 
   it("tells the agent what's missing, and the reviewer what was checked", () => {

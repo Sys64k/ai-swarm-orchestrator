@@ -3,7 +3,7 @@ import http from "node:http";
 import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
-import { DEFAULT_JUNIOR_TRIES, DeskModels, desksOf, modelConcurrency, type LlmAdapter } from "@aso/hub";
+import { checkToolUse, DEFAULT_JUNIOR_TRIES, DeskModels, desksOf, modelConcurrency, type LlmAdapter } from "@aso/hub";
 import { createMessage, type AgentMessage, type AvailableModel } from "@aso/shared";
 import { postTask, pushTaskBranch, reply, ScriptedModel, tempDir, text, TOKEN, waitFor, withHub, worker } from "./helpers.ts";
 
@@ -120,6 +120,17 @@ describe("desk models", () => {
     assert.deepEqual(models.escalationChoice(), { ladder: ["anthropic/claude-sonnet-5-5"], juniorTries: 2 }, "unchanged");
   });
 
+  it("refuses a role or a ladder step on a model that can't take requests with tools, and changes nothing", async () => {
+    const noTools = (spec: string): LlmAdapter => ({ name: "fake", model: spec, complete: async () => { throw new Error("bad request (400): Function tools are not supported"); } });
+    const models = await DeskModels.open(undefined, (spec) => (spec === "openai/gpt-6.1-sol" ? noTools(spec) : fakeAdapter(spec)), 4, isLocal, checkToolUse);
+    await assert.rejects(models.assignRole("reviewer", "openai/gpt-6.1-sol"), /gpt-6\.1-sol can't take the Hub's requests with tools: bad request \(400\)/);
+    assert.equal(models.roleModel("reviewer"), undefined);
+    await assert.rejects(models.setEscalation({ ladder: ["anthropic/claude-sonnet-5-5", "openai/gpt-6.1-sol"] }), /can't take the Hub's requests with tools/);
+    assert.deepEqual(models.escalationChoice(), {});
+    await models.assignRole("reviewer", "openai/gpt-6.1-terra");
+    assert.equal(models.roleModel("reviewer"), "openai/gpt-6.1-terra", "a model that takes tools goes on");
+  });
+
   it("gives a local model one call at once unless told otherwise; Claude gets the Hub's limit", async () => {
     assert.equal(modelConcurrency({}, true, 4), 1, "a local server");
     assert.equal(modelConcurrency({ concurrency: 3 }, true, 4), 3);
@@ -221,7 +232,7 @@ describe("desks on their own models (Hub)", () => {
           qa.send(createMessage("FEEDBACK_LOOP", "qa", { taskId: "greet", commit, outcome: "pass", summary: "ok" }));
           await waitFor(() => ctx.hub.tasks.get("greet")?.jobs?.[0]?.acceptance !== undefined, 10_000, "the acceptance check");
           assert.equal(ctx.hub.tasks.get("greet")!.jobs![0].acceptanceModel, "local-model", "checked on the reviewer's model");
-          assert.equal(provider.calls(), 1);
+          assert.equal(provider.calls(), 2, "one call to check it takes tools, one for the check");
           assert.equal(hubModel.requests.length, 0, "not on --model");
 
           await call(ctx.port, "/api/models/roles", { role: "architect", model: "local-model" });
