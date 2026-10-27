@@ -287,6 +287,7 @@ export class ProjectSet {
     isPlanning: (nodeId: string, planId: string): boolean => !!this.planOwner(planId)?.plans.isPlanning(nodeId, planId),
     spentSinceReply: (planId: string): number => this.planOwner(planId)?.plans.spentSinceReply(planId) ?? 0,
     recordLlmUsage: (planId: string, usage: LlmUsage): void => this.planOwner(planId)?.plans.recordLlmUsage(planId, usage),
+    recordModel: (planId: string, model: string): void => this.planOwner(planId)?.plans.recordModel(planId, model),
     recordAgentTurn: (planId: string, turn: Omit<AgentTurn, "at">): void => this.planOwner(planId)?.plans.recordAgentTurn(planId, turn),
     recordEvent: (planId: string, event: string): void => this.planOwner(planId)?.plans.recordEvent(planId, event),
   };

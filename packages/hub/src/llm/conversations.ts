@@ -265,6 +265,7 @@ export class ConversationManager {
       firstPrompt: () => planPrompt(this.plans.get(id)!),
       active: () => this.plans.isPlanning(nodeId, id),
       recordUsage: (u) => this.plans.recordLlmUsage(id, u),
+      recordModel: (m) => this.plans.recordModel(id, m),
       recordTurn: (t) => this.plans.recordAgentTurn(id, t),
       recordEvent: (e) => this.plans.recordEvent(id, e),
     };

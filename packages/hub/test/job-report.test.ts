@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { trackRecords, type ReportTask } from "@aso/hub";
+import { trackRecords, type ReportPlan, type ReportTask } from "@aso/hub";
 import { COUNTED_BUILD_RESULTS, TrackRecordRowSchema, type JobRecord } from "@aso/shared";
 
 let clock = Date.parse("2026-10-27T10:00:00.000Z");
@@ -34,7 +34,7 @@ describe("track records", () => {
   ];
 
   it("counts each model's builds, what came of them, and the tasks it finished", () => {
-    const r = trackRecords(tasks, { by: "model" });
+    const r = trackRecords(tasks, [], { by: "model" });
     assert.deepEqual(r.rows.map((x) => x.key), ["gemini", "opus", "haiku"], "most tasks finished first");
     const gemini = r.rows[0];
     assert.deepEqual(gemini.builds, { jobs: 5, built: 3, unverified: 0, failed: 0, outOfTurns: 2, modelRefused: 0, dropped: 0, cancelled: 0, qaPassed: 2, qaFailed: 1, accepted: 1, unmet: 0 });
@@ -50,25 +50,25 @@ describe("track records", () => {
   });
 
   it("counts machines' QA runs, and groups by desk, role and project", () => {
-    const hosts = trackRecords(tasks, { by: "host" });
+    const hosts = trackRecords(tasks, [], { by: "host" });
     const canfod = hosts.rows.find((x) => x.key === "canfod")!;
     assert.deepEqual(canfod.qaRuns, { runs: 3, passed: 2, failed: 1, errors: 0, dropped: 0 });
     assert.equal(canfod.builds.jobs, 0);
     const avalon = hosts.rows.find((x) => x.key === "avalon")!;
     assert.deepEqual([avalon.builds.jobs, avalon.qaRuns.runs, avalon.tasks.finished, avalon.tasks.tookOver], [7, 1, 3, 0], "one machine built them all");
-    assert.deepEqual(trackRecords(tasks, { by: "desk" }).rows.map((x) => x.key).sort(), ["avalon #1", "canfod #1"]);
-    assert.deepEqual(trackRecords(tasks, { by: "role" }).rows.map((x) => [x.key, x.tasks.finished]), [["frontend", 2], ["backend", 1]]);
-    assert.deepEqual(trackRecords(tasks, { by: "project" }).rows.map((x) => x.key), ["shop", "blog"]);
+    assert.deepEqual(trackRecords(tasks, [], { by: "desk" }).rows.map((x) => x.key).sort(), ["avalon #1", "canfod #1"]);
+    assert.deepEqual(trackRecords(tasks, [], { by: "role" }).rows.map((x) => [x.key, x.tasks.finished]), [["frontend", 2], ["backend", 1]]);
+    assert.deepEqual(trackRecords(tasks, [], { by: "project" }).rows.map((x) => x.key), ["shop", "blog"]);
   });
 
   it("filters by project, role and time", () => {
-    assert.deepEqual(trackRecords(tasks, { by: "model", project: "blog" }).rows.map((x) => [x.key, x.builds.jobs]), [["gemini", 2]]);
-    assert.deepEqual(trackRecords(tasks, { by: "model", role: "backend" }).rows.map((x) => x.key), ["gemini"]);
+    assert.deepEqual(trackRecords(tasks, [], { by: "model", project: "blog" }).rows.map((x) => [x.key, x.builds.jobs]), [["gemini", 2]]);
+    assert.deepEqual(trackRecords(tasks, [], { by: "model", role: "backend" }).rows.map((x) => x.key), ["gemini"]);
     const late = tasks[1].jobs![2].startedAt; // Opus's build
-    const since = trackRecords(tasks, { by: "model", since: late });
+    const since = trackRecords(tasks, [], { by: "model", since: late });
     assert.ok(!since.rows.some((x) => x.key === "opus" && x.builds.jobs === 0));
     assert.ok(since.rows.every((x) => x.key !== "gemini" || x.tasks.worked === 1), "Gemini's earlier jobs aren't counted");
-    assert.deepEqual(trackRecords([], { by: "model" }), { by: "model", since: null, rows: [] });
+    assert.deepEqual(trackRecords([], [], { by: "model" }), { by: "model", since: null, rows: [] });
   });
 });
 
@@ -81,8 +81,55 @@ describe("track records, in step and over time", () => {
   it("doesn't call a reworked task a first try because its earlier builds fall before --since", () => {
     const reworked = task([build("gemini", "built", { qa: "failed" }), build("gemini", "built", { round: 1, qa: "passed" })]);
     const since = reworked.jobs![1].startedAt;
-    const gemini = trackRecords([reworked], { by: "model", since }).rows[0];
+    const gemini = trackRecords([reworked], [], { by: "model", since }).rows[0];
     assert.deepEqual([gemini.builds.jobs, gemini.tasks.finished, gemini.tasks.firstTry], [1, 1, 0]);
-    assert.deepEqual(trackRecords([reworked], { by: "model", since: at() }).rows, [], "finished before --since: not counted");
+    assert.deepEqual(trackRecords([reworked], [], { by: "model", since: at() }).rows, [], "finished before --since: not counted");
+  });
+});
+
+describe("track records of plans and acceptance checks", () => {
+  const plan = (model: string | undefined, state: ReportPlan["state"], kinds: string[] = [], extra: Partial<ReportPlan> = {}): ReportPlan => ({
+    project: "shop",
+    state,
+    ...(model ? { model } : {}),
+    dialogue: kinds.map((kind) => ({ kind })),
+    llm: { costUsd: 0.4 },
+    createdAt: at(),
+    ...extra,
+  });
+  const plans = [
+    plan("opus", "approved", ["questions", "reply", "proposal"]),
+    plan("opus", "rejected", ["proposal"]),
+    plan("opus", "awaiting_input", ["questions"]),
+    plan("gemini", "failed"),
+    plan(undefined, "pending"), // not planned yet: counts for nobody
+    plan("opus", "approved", ["proposal"], { project: "blog" }),
+  ];
+  const reviewed = [
+    task([
+      build("gemini", "built", { acceptance: "unmet", acceptanceModel: "opus", acceptanceCostUsd: 0.05 }),
+      build("gemini", "built", { round: 1, acceptance: "met", acceptanceModel: "opus", acceptanceCostUsd: 0.06 }),
+    ]),
+    task([build("haiku", "built", { acceptance: "undecided", acceptanceModel: "haiku", acceptanceCostUsd: 0.01 })], { project: "blog" }),
+  ];
+
+  it("counts each Architect model's plans and each reviewer model's acceptance checks", () => {
+    const rows = trackRecords(reviewed, plans, { by: "model" }).rows;
+    const opus = rows.find((r) => r.key === "opus")!;
+    assert.deepEqual(opus.plans, { planned: 4, proposed: 3, approved: 2, rejected: 1, failed: 0, withQuestions: 2, costUsd: 1.6 });
+    assert.deepEqual(opus.reviews, { checks: 2, met: 1, unmet: 1, undecided: 0, costUsd: 0.11 });
+    assert.equal(opus.builds.jobs, 0, "Opus only planned and reviewed here");
+    assert.deepEqual(rows.find((r) => r.key === "gemini")!.plans, { planned: 1, proposed: 0, approved: 0, rejected: 0, failed: 1, withQuestions: 0, costUsd: 0.4 });
+    assert.deepEqual(rows.find((r) => r.key === "haiku")!.reviews.undecided, 1, "a model can review its own kind's work");
+  });
+
+  it("counts them per project too, and never per machine, desk or role", () => {
+    const shop = trackRecords(reviewed, plans, { by: "project" }).rows.find((r) => r.key === "shop")!;
+    assert.deepEqual([shop.plans.planned, shop.reviews.checks], [4, 2]);
+    for (const by of ["host", "desk", "role"] as const) {
+      assert.ok(trackRecords(reviewed, plans, { by }).rows.every((r) => r.plans.planned === 0 && r.reviews.checks === 0), by);
+    }
+    assert.equal(trackRecords(reviewed, plans, { by: "model", role: "frontend" }).rows.find((r) => r.key === "opus")!.plans.planned, 0, "plans have no role");
+    assert.equal(trackRecords(reviewed, plans, { by: "model", project: "blog" }).rows.find((r) => r.key === "opus")!.plans.planned, 1);
   });
 });

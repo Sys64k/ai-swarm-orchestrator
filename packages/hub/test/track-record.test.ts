@@ -139,6 +139,39 @@ describe("job records and the track-records report (Hub)", () => {
     );
   });
 
+  it("records which model judged a build's work in the acceptance check, and what that cost", async () => {
+    const acceptanceCheck = {
+      check: async (t: { spec: { acceptanceCriteria: string[] } }) => ({
+        result: "met" as const,
+        criteria: t.spec.acceptanceCriteria.map((criterion) => ({ criterion, verdict: "met" as const, reason: "r" })),
+        summary: "",
+        model: "reviewer-model",
+        usage: { inputTokens: 100, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0.03 },
+      }),
+    };
+    await withHub(
+      async (ctx) => {
+        const builder = await worker(ctx.port, "builder", { hostname: "avalon" });
+        await postTask(ctx.port, { taskId: "greet", role: "backend", title: "Greet", description: "d", acceptanceCriteria: ["it greets"] });
+        payloadOf(await builder.next(), "TASK_ASSIGNMENT");
+        const tester = await worker(ctx.port, "tester", { hostname: "canfod" });
+        builder.send(createMessage("STATUS_UPDATE", "builder", { state: "in_progress", taskId: "greet", slot: 1 }));
+        const commit = await pushTaskBranch(ctx.gitUrl, "greet", { "greet.txt": "hi" });
+        builder.send(createMessage("STATUS_UPDATE", "builder", { state: "completed", taskId: "greet", commit }));
+        payloadOf(await tester.next(), "TEST_EXECUTION");
+        tester.send(createMessage("FEEDBACK_LOOP", "tester", { taskId: "greet", commit, outcome: "pass", summary: "ok" }));
+        await waitFor(() => ctx.hub.tasks.get("greet")?.state === "merged");
+        const build = ctx.hub.tasks.get("greet")!.jobs![0];
+        assert.deepEqual([build.acceptance, build.acceptanceModel, build.acceptanceCostUsd], ["met", "reviewer-model", 0.03]);
+        const reviewer = (await call(ctx.port, "/api/track-records?by=model")).body.rows.find((r: { key: string }) => r.key === "reviewer-model");
+        assert.deepEqual(reviewer.reviews, { checks: 1, met: 1, unmet: 0, undecided: 0, costUsd: 0.03 });
+        builder.ws.close();
+        tester.ws.close();
+      },
+      { llm, acceptanceCheck },
+    );
+  });
+
   it("ends a job when its agent gives up, when the task is cancelled, and when its machine drops off", async () => {
     await withHub(
       async (ctx) => {

@@ -804,7 +804,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   app.get("/api/track-records", (c) => {
     const query = TrackRecordQuerySchema.safeParse(c.req.query());
     if (!query.success) return c.json({ error: query.error.issues.map((i) => `${i.path.join(".") || "query"}: ${i.message}`).join("; ") }, 400);
-    return c.json(trackRecords(tasks.list(), query.data));
+    return c.json(trackRecords(tasks.list(), plans.list(), query.data));
   });
   app.post("/api/desks", async (c) => {
     const req = await parsed(c, DeskAssignmentBodySchema);

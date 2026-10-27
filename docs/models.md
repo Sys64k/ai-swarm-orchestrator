@@ -242,6 +242,9 @@ claude-opus-5-5          3         0        3          3       3/3        3/3   
 - **QA passed, accepted:** the verdicts on its builds' work, as good out of all.
 - **Out of turns, failed:** builds whose agent ran out of turns or gave up.
 - **Cost, per task:** its builds' estimated model cost, and that divided by the tasks it finished.
+- **Plans and acceptance checks** (by model and by project), in a second table: the plans each
+  model made as the Architect (proposed, approved, rejected, how many asked questions first, and
+  their cost), and the acceptance checks it made as the reviewer (met, unmet, undecided, cost).
 - Also by **role** (frontend, backend, …) and **project**; `--role` and `--since` narrow it.
 - Jobs are recorded from when the Hub started recording them; older tasks don't count. The
   core console shows the same under *Track records*, and `GET /api/track-records` serves it.

@@ -926,7 +926,7 @@ export class TaskManager {
     if (task.state !== "verifying" || task.commit !== commit || task.acceptance?.result !== "checking") return;
     if (verdict.usage) this.recordLlmUsage(task.spec.taskId, verdict.usage);
     const at = new Date().toISOString();
-    markAcceptance(task.jobs, verdict.result);
+    markAcceptance(task.jobs, verdict.result, { model: verdict.model, costUsd: verdict.usage?.costUsd });
     if (verdict.result === "undecided") {
       task.acceptance = { result: "undecided", commit, at, reason: verdict.reason, ...(verdict.model ? { model: verdict.model } : {}) };
       this.note(task, `acceptance check undecided (${verdict.reason}); going on`);

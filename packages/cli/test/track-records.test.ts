@@ -9,6 +9,8 @@ const row = (key: string, extra: { finished?: number; qaPassed?: number; qaFaile
   tasks: { worked: 3, finished: extra.finished ?? 2, firstTry: 1, tookOver: 0 },
   costUsd: extra.cost ?? 0.5,
   ...(extra.finished === 0 ? {} : { costPerFinishedUsd: (extra.cost ?? 0.5) / (extra.finished ?? 2) }),
+  plans: { planned: 0, proposed: 0, approved: 0, rejected: 0, failed: 0, withQuestions: 0, costUsd: 0 },
+  reviews: { checks: 0, met: 0, unmet: 0, undecided: 0, costUsd: 0 },
 });
 
 describe("aso track-records", () => {
@@ -33,5 +35,15 @@ describe("aso track-records", () => {
     assert.match(lines[2], /QA RUNS PASSED/);
     assert.match(lines[3], /\b3\/4\b.*\$0\.50/, "a run that couldn't run the tests reached no verdict");
     assert.match(trackRecordLines({ by: "model", since: null, rows: [] })[0], /^No jobs recorded yet/);
+  });
+
+  it("adds a table of plans and acceptance checks, for models that planned or reviewed", () => {
+    const opus = { ...row("claude-opus-5-5", { finished: 0 }), builds: { ...row("x").builds, jobs: 0 }, tasks: { worked: 0, finished: 0, firstTry: 0, tookOver: 0 }, plans: { planned: 4, proposed: 3, approved: 2, rejected: 1, failed: 0, withQuestions: 2, costUsd: 1.6 }, reviews: { checks: 9, met: 7, unmet: 1, undecided: 1, costUsd: 0.45 } };
+    const lines = trackRecordLines({ by: "model", since: null, rows: [row("gemini"), opus] });
+    const work = lines.indexOf(lines.find((l) => l.startsWith("MODEL  "))!);
+    assert.ok(!lines[work + 2]?.startsWith("claude-opus-5-5"), "a model that only planned and reviewed isn't in the work table");
+    const plansHeader = lines.findIndex((l) => /^MODEL\s+PLANS\s+PROPOSED/.test(l));
+    assert.ok(plansHeader > work);
+    assert.match(lines[plansHeader + 1], /^claude-opus-5-5\s+4\s+3\s+2\s+1\s+2\s+\$1\.60\s+9\s+7\s+1\s+1\s+\$0\.45$/);
   });
 });

@@ -1889,7 +1889,7 @@ rebuilt from the records, so it covers every machine, desk and model.
 | `completed` | `pushed`; `verify` turns it into `built` or `unverified` |
 | `failed` | `failedBuildResult`: `modelRefused` (`switchingModel`), `outOfTurns` (the task's `outOfTurns` mark) or `failed` |
 | QA's verdict | the QA run ends `passed` / `qaFailed`, and the last build gets `qa` |
-| The acceptance check | the last build gets `acceptance` |
+| The acceptance check | the last build gets `acceptance`, `acceptanceModel` (by the name the Hub calls it, like a build's `model`) and `acceptanceCostUsd` |
 | A drop (`requeue` of a started job), a cancel, a task failing | `dropped`, `cancelled`, `failed` |
 
 `trackRecords(tasks, query)` is pure: it groups ended jobs by model, host, desk, role or
@@ -1897,7 +1897,11 @@ project and counts builds by result (`COUNTED_BUILD_RESULTS`), the verdicts on t
 (not by model: tests run without one) and cost. A merged task counts as finished for whoever
 made its last `built` build (`finishedBy`): `firstTry` when that was its only build, `tookOver`
 when an earlier build was someone else's. That is judged over all the task's builds, so
-`since` can't make a reworked task look like a first try. `GET /api/track-records`, `aso track-records` (`trackRecordLines`) and the console's
+`since` can't make a reworked task look like a first try. By model and by project it also
+counts `plans` (a plan's `model` is the Architect's, recorded by `PlanManager.recordModel` when
+its conversation starts; plans have no role, so `role` leaves them out) and `reviews` (the
+builds' acceptance verdicts, by `acceptanceModel`; checks from before it was recorded count
+only by project). `GET /api/track-records`, `aso track-records` (`trackRecordLines`) and the console's
 *Track records* page (`trackRecordLine`) serve it.
 
 ### A machine's own model (`llm/machine-models.ts`)

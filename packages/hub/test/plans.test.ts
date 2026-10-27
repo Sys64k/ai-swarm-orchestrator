@@ -229,8 +229,11 @@ describe("talking with the Architect", () => {
           assert.deepEqual(revised.dialogue!.map((d) => d.kind), ["questions", "reply", "proposal", "reply"]);
           assert.ok(revised.budgetBaseUsd! > 0, "each round gets its own budget");
 
+          assert.equal(revised.model, "claude-opus-5-5", "the Architect's model is recorded");
           const ids = (await api(ctx, `/api/plans/${planId}/approve`, { method: "POST" })).body.taskIds;
           assert.deepEqual(Object.keys(ids).sort(), ["api", "storage"]);
+          const planner = (await api(ctx, "/api/track-records?by=model")).body.rows.find((r: { key: string }) => r.key === "claude-opus-5-5");
+          assert.deepEqual(planner.plans, { planned: 1, proposed: 1, approved: 1, rejected: 0, failed: 0, withQuestions: 1, costUsd: planner.plans.costUsd });
           assert.equal((await replyTo(planId, "more")).status, 409, "approved plans are final");
         } finally {
           architect.stop();

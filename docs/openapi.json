@@ -1531,6 +1531,14 @@
                     "undecided"
                   ]
                 },
+                "acceptanceModel": {
+                  "description": "The model that judged it",
+                  "type": "string"
+                },
+                "acceptanceCostUsd": {
+                  "description": "What that check cost (estimated)",
+                  "type": "number"
+                },
                 "calls": {
                   "type": "integer",
                   "minimum": -9007199254740991,
@@ -1948,6 +1956,10 @@
             ]
           },
           "architectNodeId": {
+            "type": "string"
+          },
+          "model": {
+            "description": "The model the Architect planned it on (its latest round's)",
             "type": "string"
           },
           "summary": {
@@ -3296,6 +3308,98 @@
                 "costPerFinishedUsd": {
                   "description": "costUsd divided by tasks finished",
                   "type": "number"
+                },
+                "plans": {
+                  "type": "object",
+                  "properties": {
+                    "planned": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "Plans the Architect worked on with it"
+                    },
+                    "proposed": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "Of those, plans that reached a proposal"
+                    },
+                    "approved": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "rejected": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "failed": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "withQuestions": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "Plans where the Architect asked questions first"
+                    },
+                    "costUsd": {
+                      "type": "number",
+                      "description": "Their estimated model cost"
+                    }
+                  },
+                  "required": [
+                    "planned",
+                    "proposed",
+                    "approved",
+                    "rejected",
+                    "failed",
+                    "withQuestions",
+                    "costUsd"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Plans made with it (by model and project only)"
+                },
+                "reviews": {
+                  "type": "object",
+                  "properties": {
+                    "checks": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "Acceptance checks it made"
+                    },
+                    "met": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "unmet": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "undecided": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "costUsd": {
+                      "type": "number",
+                      "description": "Their estimated model cost"
+                    }
+                  },
+                  "required": [
+                    "checks",
+                    "met",
+                    "unmet",
+                    "undecided",
+                    "costUsd"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Acceptance checks it made on builds' work (by model and project only)"
                 }
               },
               "required": [
@@ -3303,7 +3407,9 @@
                 "builds",
                 "qaRuns",
                 "tasks",
-                "costUsd"
+                "costUsd",
+                "plans",
+                "reviews"
               ],
               "additionalProperties": false,
               "description": "One model's, machine's, desk's, role's or project's track record"
