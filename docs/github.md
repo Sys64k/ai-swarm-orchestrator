@@ -62,7 +62,8 @@ the result next to the diff:
    `dark`), `width`, `height`, `selector` (shoot one element) and `state` (the project's own name
    for the data a page needs, e.g. a mock scenario). A change that lists no views (a server route,
    a test, a library function) gets no screenshots, so a pull request never shows pictures that
-   have nothing to do with it. Run by hand without the variable, the script takes its default
+   have nothing to do with it. Neither does an API sync task (`sync-hub-api-…`), whatever views
+   its agent lists: it only regenerates types. Run by hand without the variable, the script takes its default
    views. The shots come from the tested commit, not from the agent. The Architect plans
    a screenshots script for a project with a UI that has none.
 3. **Limits.** QA keeps up to 12 PNG, JPEG, GIF or WebP files from the top of that folder, in

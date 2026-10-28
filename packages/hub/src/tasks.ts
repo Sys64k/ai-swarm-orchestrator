@@ -30,6 +30,7 @@ import type { WorkerJob } from "./worker-scope.js";
 import type { JobOutcome } from "./track-record.js";
 import { addBuildUsage, endJob, failedBuildResult, markAcceptance, markOverturned, markQa, markVerified, openJob, startJob, type JobKind } from "./jobs.js";
 import { OnePerKey } from "./one-per-key.js";
+import { SYNC_TASK_PREFIX } from "./api-sync.js";
 
 const log = createLogger("tasks");
 
@@ -683,8 +684,9 @@ export class TaskManager {
         task.conflicts = undefined;
         task.state = "verifying";
         task.commit = update.commit;
-        // Each finish lists the views anew: a rework's change may show elsewhere.
-        task.screenshotTargets = update.screenshotTargets;
+        // Each finish lists the views anew: a rework's change may show elsewhere. An API sync
+        // only regenerates types, so whatever views its agent lists, there is nothing to see.
+        task.screenshotTargets = task.spec.taskId.startsWith(SYNC_TASK_PREFIX) ? undefined : update.screenshotTargets;
         task.summary = update.detail;
         this.note(task, `pushed ${update.commit!.slice(0, 8)}${update.detail ? `: ${update.detail}` : ""}`);
         void this.verify(task, update.commit!);
