@@ -1,8 +1,9 @@
 # Refreshes the swarm's stats in the README once a day, from the Hub's public stats
 # (`aso start-hub --public-stats models,costs`, served on the worker gateway). Set the address
 # as the repository variable SWARM_STATS_URL, e.g. https://<hub>.ts.net:10000/api/public-stats.
-# It commits only when the numbers changed; an unreachable Hub skips the day. A commit that
-# changes only the README doesn't make the Hub update itself.
+# It also keeps each day's stats in docs/stats/history.jsonl (a JSON line per day), for charts.
+# It commits only when something changed; an unreachable Hub skips the day. A commit that
+# changes only the README and docs/ doesn't make the Hub update itself.
 name: Swarm stats
 
 on:
@@ -22,13 +23,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - run: node scripts/readme-stats.mjs "$SWARM_STATS_URL" README.md
+      - run: node scripts/readme-stats.mjs "$SWARM_STATS_URL" README.md docs/stats/history.jsonl
         env:
           SWARM_STATS_URL: ${{ vars.SWARM_STATS_URL }}
       - name: Commit the new numbers
         run: |
-          git diff --quiet README.md && exit 0
+          git add README.md docs/stats/history.jsonl
+          git diff --cached --quiet && exit 0
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "docs: the swarm's stats" README.md
+          git commit -m "docs: the swarm's stats"
           git push
