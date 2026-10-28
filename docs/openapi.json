@@ -6267,6 +6267,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "description": "Only jobs started before this time (ISO 8601): with since, one period of a trend",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {

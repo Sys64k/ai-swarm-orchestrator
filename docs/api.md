@@ -32,7 +32,7 @@ Answers can gain fields over time: clients should ignore fields they don't know.
 | `POST` | `/api/worker-keys/{id}/revoke` | Revoke a key: its machine is disconnected and can't come back with it |
 | `GET` | `/api/models` | The models desks can use, and the Architect's and default ones |
 | `GET` | `/api/public-stats` | The swarm's track record as the Hub shares it, for anyone (404 unless started with `--public-stats`) |
-| `GET` | `/api/track-records` | How models, machines, desks, roles or projects have done with their jobs (`?by=`, `project`, `role`, `model`: only that model's work, `since`) |
+| `GET` | `/api/track-records` | How models, machines, desks, roles or projects have done with their jobs (`?by=`, `project`, `role`, `model`: only that model's work, `since`, `until`: one period of a trend) |
 | `GET` | `/api/model-suggestions` | Which model each role would do as well on for less, or clearly better on (`?since=`, default the last 30 days) |
 | `POST` | `/api/models/roles` | Put the Architect or the reviewer (the acceptance check) on a model (`{ role, model }`), or back on `default` |
 | `POST` | `/api/models/challengers` | Put a model on trial for the desks or the reviewer (`{ role, model, share?, budgetUsd? }`), end one (`end: true`), or all with `model: "none"` |

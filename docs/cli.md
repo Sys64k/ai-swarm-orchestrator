@@ -227,7 +227,7 @@ they ran out of turns or failed, and their cost per task finished; by model and 
 the plans made as the Architect and the acceptance checks made as the reviewer. `--by
 model|host|desk|role|project` (default `model`), `--project`, `--role`, `--model <name>` (only
 that model's work, e.g. `--by project --model gpt-6.1-terra`: how it did on each project),
-`--since <date>`, `--json`. See [Track records](models.md#track-records-how-each-model-has-done).
+`--since <date>`, `--until <date>` (with `--since`, one period, e.g. a week), `--json`. See [Track records](models.md#track-records-how-each-model-has-done).
 
 ## `aso find-hub`
 

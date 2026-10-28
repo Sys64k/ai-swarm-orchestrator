@@ -244,6 +244,7 @@ const TASKS: ApiOperation[] = [
       role: "Only tasks of this role",
       model: "Only this model's work, by its name as the records keep it: its builds, the tasks it started and finished, its plans and acceptance checks (no QA runs)",
       since: "Only jobs started at or after this time (ISO 8601)",
+      until: "Only jobs started before this time (ISO 8601): with since, one period of a trend",
     },
     responses: { 200: ok("TrackRecords"), 400: err("A bad grouping or time") },
   },

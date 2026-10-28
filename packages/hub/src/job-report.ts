@@ -74,7 +74,9 @@ function keyOf(job: JobRecord, task: ReportTask, by: TrackRecordQuery["by"]): st
 
 /** A job that has ended (a build still being checked, `pushed`, hasn't). */
 const ended = (j: JobRecord) => !!j.endedAt && !!j.result && j.result !== "pushed";
-const startedSince = (j: Pick<JobRecord, "startedAt">, since: string | undefined) => !since || Date.parse(j.startedAt) >= Date.parse(since);
+/** Whether a job (or plan) started in the query's period: at or after `since`, before `until`. */
+const inPeriod = (j: Pick<JobRecord, "startedAt">, query: Pick<TrackRecordQuery, "since" | "until">) =>
+  (!query.since || Date.parse(j.startedAt) >= Date.parse(query.since)) && (!query.until || Date.parse(j.startedAt) < Date.parse(query.until));
 
 function countBuild(row: TrackRecordRow, job: JobRecord): void {
   const b = row.builds;
@@ -142,11 +144,11 @@ function countPlan(row: TrackRecordRow, plan: ReportPlan): void {
   p.costUsd += plan.llm.costUsd;
 }
 
-/** The plans a query covers: its project and model, from its `since`; none with a role filter (plans have no role). */
+/** The plans a query covers: its project and model, in its period; none with a role filter (plans have no role). */
 function plansInScope(plans: readonly ReportPlan[], query: TrackRecordQuery): ReportPlan[] {
   if (query.role) return [];
   return plans.filter(
-    (p) => (!query.project || p.project === query.project) && ofModel(query, p.model ?? UNKNOWN_MODEL) && startedSince({ startedAt: p.createdAt }, query.since),
+    (p) => (!query.project || p.project === query.project) && ofModel(query, p.model ?? UNKNOWN_MODEL) && inPeriod({ startedAt: p.createdAt }, query),
   );
 }
 
@@ -192,15 +194,15 @@ function planShares(tasks: readonly ReportTask[], plans: readonly ReportPlan[]):
 /**
  * Where a settled task started, and all it cost: its first build's key (a task's own role or
  * project for those groupings), and every build on any model, their acceptance checks and its
- * share of its plan. Undefined: not settled, never built, or first built before `since` or on
- * another model than the query's.
+ * share of its plan. Undefined: not settled, never built, or first built outside the query's
+ * period or on another model than its.
  */
 function startedBy(task: ReportTask, query: TrackRecordQuery, planShare: number): { key: string; costUsd: number } | undefined {
   if (!settled(task)) return undefined;
   const builds = endedBuilds(task);
   const first = builds[0];
   const key = first && keyOf(first, task, query.by);
-  if (!first || key === undefined || !startedSince(first, query.since) || !ofModel(query, buildModel(first))) return undefined;
+  if (!first || key === undefined || !inPeriod(first, query) || !ofModel(query, buildModel(first))) return undefined;
   return { key, costUsd: builds.reduce((sum, j) => sum + j.costUsd + (j.acceptanceCostUsd ?? 0), planShare) };
 }
 
@@ -230,7 +232,7 @@ export function trackRecords(tasks: readonly ReportTask[], plans: readonly Repor
     if (query.role && task.spec.role !== query.role) continue;
     const started = startedBy(task, query, planShareOf(task));
     if (started) countStarted(rowOf(started.key), task, started.costUsd);
-    for (const job of (task.jobs ?? []).filter((j) => ended(j) && startedSince(j, query.since))) {
+    for (const job of (task.jobs ?? []).filter((j) => ended(j) && inPeriod(j, query))) {
       const key = keyOf(job, task, query.by);
       if (key === undefined) continue;
       const counted = () => {
@@ -253,7 +255,7 @@ export function trackRecords(tasks: readonly ReportTask[], plans: readonly Repor
       }
     }
     const finished = finishedBy(task, query.by);
-    if (!finished || !startedSince(finished.build, query.since) || !ofModel(query, buildModel(finished.build))) continue;
+    if (!finished || !inPeriod(finished.build, query) || !ofModel(query, buildModel(finished.build))) continue;
     const t = rowOf(finished.key).tasks;
     t.finished++;
     if (finished.firstTry) t.firstTry++;
