@@ -274,6 +274,7 @@ answers which model to put where:
 aso track-records                    # by model
 aso track-records --by host          # by machine (with their QA runs for others)
 aso track-records --by desk --project aso-ui --since 2026-11-01
+aso track-records --by project --model gpt-6.1-terra   # one model's work, per project
 ```
 
 It prints, for example:
@@ -321,7 +322,10 @@ deploy. Compare reviewers on overturned out of met: few overturns at a low cost 
 keep. Public stats share it per model (`checksOverturned`), and the README shows how much of each
 reviewer's met held up.
 - Jobs are recorded from when the Hub started recording them; older tasks don't count. The
-  core console shows the same under *Track records*, and `GET /api/track-records` serves it.
+  core console shows the same under *Track records*, filtered by project, model, role and period,
+  and `GET /api/track-records` serves it. With a model filter, only that model's work counts: its
+  builds, the tasks it started and finished, its plans and acceptance checks, but no QA runs,
+  which have no model.
 
 #### Suggestions: the cheapest mix that holds up
 

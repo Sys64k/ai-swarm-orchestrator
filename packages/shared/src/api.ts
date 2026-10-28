@@ -865,6 +865,10 @@ export const TrackRecordQuerySchema = z.object({
   by: z.enum(TRACK_RECORD_KEYS).default("model").describe("Group by the model, the machine, the desk (machine #slot), the task's role, or its project"),
   project: z.string().optional().describe("Only this project's tasks"),
   role: z.string().optional().describe("Only tasks of this role"),
+  model: z
+    .string()
+    .optional()
+    .describe("Only this model's work, by its name as the records keep it (e.g. gemini-3.8-flash): its builds and the tasks it started and finished, its plans and acceptance checks; no QA runs, which have no model"),
   since: z
     .string()
     .refine((v) => !Number.isNaN(Date.parse(v)), "a date or time, e.g. 2026-10-01 or 2026-10-01T12:00:00Z")

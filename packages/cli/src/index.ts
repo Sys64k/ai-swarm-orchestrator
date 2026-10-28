@@ -455,6 +455,7 @@ program
   .addOption(new Option("--by <key>", "group by").choices([...TRACK_RECORD_KEYS]).default("model"))
   .option("--project <name>", "only this project's tasks")
   .option("--role <role>", "only tasks of this role (frontend, backend, ...)")
+  .option("--model <name>", "only this model's work (its name as track records show it, e.g. gemini-3.8-flash), grouped --by machine, project, ...")
   .option("--since <time>", "only jobs started at or after this time (ISO 8601, e.g. 2026-10-01)")
   .option("--json", "print the Hub's answer as JSON")
   .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")

@@ -6251,6 +6251,15 @@
             }
           },
           {
+            "name": "model",
+            "in": "query",
+            "required": false,
+            "description": "Only this model's work, by its name as the records keep it: its builds, the tasks it started and finished, its plans and acceptance checks (no QA runs)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "since",
             "in": "query",
             "required": false,
