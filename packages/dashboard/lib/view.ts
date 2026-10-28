@@ -1084,10 +1084,35 @@ export function trackRecordGroupLabel(by: TrackRecordKey): string {
 }
 
 /** The Hub path for the track records page. */
-export function trackRecordsPath(by: TrackRecordKey, project?: string): string {
+export function trackRecordsPath(by: TrackRecordKey, filters: TrackRecordFilters = {}): string {
   const q = new URLSearchParams({ by });
-  if (project) q.set("project", project);
+  for (const k of ["project", "role", "model", "since"] as const) if (filters[k]) q.set(k, filters[k]);
   return `track-records?${q.toString()}`;
+}
+
+/** What the track records page narrows to; empty: everything. */
+export interface TrackRecordFilters {
+  project?: string;
+  role?: string;
+  /** A model's name as the records keep it: only its work. */
+  model?: string;
+  since?: string;
+}
+
+/** The roles a task can have, for the track records' role filter (the Hub's worker roles). */
+export const TASK_ROLES = ["frontend", "backend", "qa", "devops"] as const;
+
+/** The track records' periods: the last N days, or everything. */
+export const TRACK_RECORD_PERIODS = [
+  { days: 0, label: "All time" },
+  { days: 7, label: "Last 7 days" },
+  { days: 30, label: "Last 30 days" },
+  { days: 90, label: "Last 90 days" },
+] as const;
+
+/** The `since` of the last `days` days, as a date (so it stays the same all day); undefined: all time. */
+export function sinceDaysAgo(days: number, now: Date): string | undefined {
+  return days > 0 ? new Date(now.getTime() - days * 86_400_000).toISOString().slice(0, 10) : undefined;
 }
 
 /** "label 3 of 4", or nothing when there were none. */

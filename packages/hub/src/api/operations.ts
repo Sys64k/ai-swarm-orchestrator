@@ -242,6 +242,7 @@ const TASKS: ApiOperation[] = [
       by: "Group by model (default), host, desk, role or project",
       project: "Only this project's tasks",
       role: "Only tasks of this role",
+      model: "Only this model's work, by its name as the records keep it: its builds, the tasks it started and finished, its plans and acceptance checks (no QA runs)",
       since: "Only jobs started at or after this time (ISO 8601)",
     },
     responses: { 200: ok("TrackRecords"), 400: err("A bad grouping or time") },

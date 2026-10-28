@@ -5,14 +5,21 @@ import { usePoll } from "./use-poll.ts";
 import { Banner, Section, TopBar } from "./ui.tsx";
 import { ModelSuggestions } from "./model-suggestions.tsx";
 import type { Project, TrackRecordKey, TrackRecords } from "../lib/types.ts";
-import { TRACK_RECORD_GROUPS, trackRecordGroupLabel, trackRecordLine, trackRecordsPath } from "../lib/view.ts";
+import { sinceDaysAgo, TASK_ROLES, TRACK_RECORD_GROUPS, TRACK_RECORD_PERIODS, trackRecordGroupLabel, trackRecordLine, trackRecordsPath } from "../lib/view.ts";
 
 /** How models, machines, desks, roles and projects have done with their jobs. */
 export function TrackRecordsPage() {
   const [by, setBy] = useState<TrackRecordKey>("model");
   const [project, setProject] = useState("");
-  const records = usePoll<TrackRecords>(trackRecordsPath(by, project || undefined), 60_000);
+  const [role, setRole] = useState("");
+  const [model, setModel] = useState("");
+  const [days, setDays] = useState(0);
+  const since = sinceDaysAgo(days, new Date());
+  const records = usePoll<TrackRecords>(trackRecordsPath(by, { project, role, model, since }), 60_000);
+  // Every model with a record, whatever the other filters, to choose from.
+  const models = usePoll<TrackRecords>(trackRecordsPath("model"), 60_000);
   const projects = usePoll<Project[]>("projects", 60_000);
+  const filtered = !!(project || role || model || days);
 
   return (
     <>
@@ -45,10 +52,43 @@ export function TrackRecordsPage() {
             ))}
           </select>
         </label>
+        <label className="field">
+          <span className="field-label">Model</span>
+          <select className="input" value={model} onChange={(e) => setModel(e.target.value)}>
+            <option value="">All models</option>
+            {models.data?.rows.map((r) => (
+              <option key={r.key} value={r.key}>
+                {r.key}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span className="field-label">Role</span>
+          <select className="input" value={role} onChange={(e) => setRole(e.target.value)}>
+            <option value="">All roles</option>
+            {TASK_ROLES.map((r) => (
+              <option key={r} value={r}>
+                {r}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span className="field-label">Period</span>
+          <select className="input" value={days} onChange={(e) => setDays(Number(e.target.value))}>
+            {TRACK_RECORD_PERIODS.map((p) => (
+              <option key={p.days} value={p.days}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        {model && <p className="muted small">Only {model}&apos;s work: its builds, the tasks it started and finished, its plans and acceptance checks. QA runs have no model.</p>}
         <ModelSuggestions />
         {records.error && <Banner tone="bad">{records.error}</Banner>}
         <Section title={trackRecordGroupLabel(by)} count={records.data?.rows.length}>
-          {records.data?.rows.length === 0 && <p className="muted">No jobs recorded yet.</p>}
+          {records.data?.rows.length === 0 && <p className="muted">{filtered ? "Nothing recorded with these filters." : "No jobs recorded yet."}</p>}
           <div className="card-list">
             {records.data?.rows.map((r) => (
               <div key={r.key} className="row">

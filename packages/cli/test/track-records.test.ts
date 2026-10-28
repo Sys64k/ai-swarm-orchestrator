@@ -18,6 +18,7 @@ describe("aso track-records", () => {
   it("asks for what was given", () => {
     assert.equal(trackRecordsPath({ by: "model" }), "/api/track-records?by=model");
     assert.equal(trackRecordsPath({ by: "host", project: "aso-ui", since: "2026-10-01" }), "/api/track-records?by=host&project=aso-ui&since=2026-10-01");
+    assert.equal(trackRecordsPath({ by: "project", model: "gpt-6.1-terra" }), "/api/track-records?by=project&model=gpt-6.1-terra");
   });
 
   it("prints one aligned row each, with rates as good out of all", () => {

@@ -123,6 +123,28 @@ describe("track records of plans and acceptance checks", () => {
     assert.deepEqual(rows.find((r) => r.key === "haiku")!.reviews.undecided, 1, "a model can review its own kind's work");
   });
 
+  it("shows one model's work only: its builds, tasks, plans and checks, grouped any way", () => {
+    const work = [
+      ...reviewed,
+      // Gemini starts, Opus takes over and finishes: Opus finished it, Gemini started it.
+      task([build("gemini", "outOfTurns"), build("opus", "built", { round: 1, acceptance: "met", acceptanceModel: "sol" }), qaRun("canfod", "passed")], { project: "blog" }),
+    ];
+    const opus = trackRecords(work, plans, { by: "model", model: "opus" });
+    assert.deepEqual(opus.rows.map((r) => r.key), ["opus"]);
+    assert.deepEqual(
+      [opus.rows[0].builds.jobs, opus.rows[0].tasks.finished, opus.rows[0].started.settled, opus.rows[0].plans.planned, opus.rows[0].reviews.checks],
+      [1, 1, 0, 4, 2],
+      "it started none: Gemini did",
+    );
+    const byProject = trackRecords(work, plans, { by: "project", model: "gemini" }).rows;
+    assert.deepEqual(
+      byProject.map((r) => [r.key, r.builds.jobs, r.started.settled, r.tasks.finished, r.reviews.checks, r.plans.planned, r.qaRuns.runs]),
+      [["shop", 2, 1, 1, 0, 1, 0], ["blog", 1, 1, 0, 0, 0, 0]],
+      "Gemini's builds and plans per project; its tasks Opus checked and finished don't count; no QA runs",
+    );
+    assert.deepEqual(trackRecords(work, plans, { by: "host", model: "nobody" }), { by: "host", since: null, rows: [] });
+  });
+
   it("counts a reviewer's met verdicts that proved wrong later", () => {
     const overturned = [
       task([build("gemini", "built", { acceptance: "met", acceptanceModel: "sol", overturned: "changesRequested" })]),

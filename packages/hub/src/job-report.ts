@@ -31,6 +31,12 @@ export interface ReportPlan {
 /** A build or plan whose model wasn't recorded (from before models were). */
 const UNKNOWN_MODEL = "unknown model";
 
+/** The model a build ran on, by its name. */
+const buildModel = (job: JobRecord) => job.model ?? UNKNOWN_MODEL;
+
+/** Whether `model` passes the query's model filter (none: everything does). */
+const ofModel = (query: TrackRecordQuery, model: string | undefined) => !query.model || model === query.model;
+
 /** Plans and acceptance checks count by model and by project: they have no machine, desk or role. */
 const countsPlansAndReviews = (by: TrackRecordQuery["by"]) => by === "model" || by === "project";
 
@@ -136,10 +142,12 @@ function countPlan(row: TrackRecordRow, plan: ReportPlan): void {
   p.costUsd += plan.llm.costUsd;
 }
 
-/** The plans a query covers: its project, from its `since`; none with a role filter (plans have no role). */
+/** The plans a query covers: its project and model, from its `since`; none with a role filter (plans have no role). */
 function plansInScope(plans: readonly ReportPlan[], query: TrackRecordQuery): ReportPlan[] {
   if (query.role) return [];
-  return plans.filter((p) => (!query.project || p.project === query.project) && startedSince({ startedAt: p.createdAt }, query.since));
+  return plans.filter(
+    (p) => (!query.project || p.project === query.project) && ofModel(query, p.model ?? UNKNOWN_MODEL) && startedSince({ startedAt: p.createdAt }, query.since),
+  );
 }
 
 /** A task's builds that have ended, oldest first. */
@@ -184,14 +192,15 @@ function planShares(tasks: readonly ReportTask[], plans: readonly ReportPlan[]):
 /**
  * Where a settled task started, and all it cost: its first build's key (a task's own role or
  * project for those groupings), and every build on any model, their acceptance checks and its
- * share of its plan. Undefined: not settled, never built, or first built before `since`.
+ * share of its plan. Undefined: not settled, never built, or first built before `since` or on
+ * another model than the query's.
  */
-function startedBy(task: ReportTask, by: TrackRecordQuery["by"], since: string | undefined, planShare: number): { key: string; costUsd: number } | undefined {
+function startedBy(task: ReportTask, query: TrackRecordQuery, planShare: number): { key: string; costUsd: number } | undefined {
   if (!settled(task)) return undefined;
   const builds = endedBuilds(task);
   const first = builds[0];
-  const key = first && keyOf(first, task, by);
-  if (!first || key === undefined || !startedSince(first, since)) return undefined;
+  const key = first && keyOf(first, task, query.by);
+  if (!first || key === undefined || !startedSince(first, query.since) || !ofModel(query, buildModel(first))) return undefined;
   return { key, costUsd: builds.reduce((sum, j) => sum + j.costUsd + (j.acceptanceCostUsd ?? 0), planShare) };
 }
 
@@ -206,6 +215,7 @@ function countStarted(row: TrackRecordRow, task: ReportTask, costUsd: number): v
  * Track records: per model, machine, desk, role or project, what came of its ended builds and
  * QA runs, the tasks it built on and finished, and their cost. By model and by project also the
  * plans made (the Architect's model) and the acceptance checks made (the reviewer's model).
+ * With a model filter, only that model's work: by machine, say, how it did on each.
  */
 export function trackRecords(tasks: readonly ReportTask[], plans: readonly ReportPlan[], query: TrackRecordQuery): TrackRecords {
   const rows = new Map<string, TrackRecordRow>();
@@ -218,23 +228,32 @@ export function trackRecords(tasks: readonly ReportTask[], plans: readonly Repor
   for (const task of tasks) {
     if (query.project && task.project !== query.project) continue;
     if (query.role && task.spec.role !== query.role) continue;
-    const started = startedBy(task, query.by, query.since, planShareOf(task));
+    const started = startedBy(task, query, planShareOf(task));
     if (started) countStarted(rowOf(started.key), task, started.costUsd);
     for (const job of (task.jobs ?? []).filter((j) => ended(j) && startedSince(j, query.since))) {
       const key = keyOf(job, task, query.by);
       if (key === undefined) continue;
-      if (!since || job.startedAt < since) since = job.startedAt;
+      const counted = () => {
+        if (!since || job.startedAt < since) since = job.startedAt;
+      };
       if (job.job === "implement") {
-        countBuild(rowOf(key), job);
-        workedOn(key).add(task);
+        if (ofModel(query, buildModel(job))) {
+          countBuild(rowOf(key), job);
+          workedOn(key).add(task);
+          counted();
+        }
         const reviewer = reviewerKey(job, task, query.by);
-        if (reviewer !== undefined) countReview(rowOf(reviewer), job);
-      } else {
+        if (reviewer !== undefined && ofModel(query, job.acceptanceModel)) {
+          countReview(rowOf(reviewer), job);
+          counted();
+        }
+      } else if (!query.model) {
         countQaRun(rowOf(key), job);
+        counted();
       }
     }
     const finished = finishedBy(task, query.by);
-    if (!finished || !startedSince(finished.build, query.since)) continue;
+    if (!finished || !startedSince(finished.build, query.since) || !ofModel(query, buildModel(finished.build))) continue;
     const t = rowOf(finished.key).tasks;
     t.finished++;
     if (finished.firstTry) t.firstTry++;

@@ -225,8 +225,9 @@ How models, machines, desks, roles or projects have done with their jobs: tasks 
 the first try, or taking over from another), their builds' QA and acceptance verdicts, how often
 they ran out of turns or failed, and their cost per task finished; by model and by project also
 the plans made as the Architect and the acceptance checks made as the reviewer. `--by
-model|host|desk|role|project` (default `model`), `--project`, `--role`, `--since <date>`,
-`--json`. See [Track records](models.md#track-records-how-each-model-has-done).
+model|host|desk|role|project` (default `model`), `--project`, `--role`, `--model <name>` (only
+that model's work, e.g. `--by project --model gpt-6.1-terra`: how it did on each project),
+`--since <date>`, `--json`. See [Track records](models.md#track-records-how-each-model-has-done).
 
 ## `aso find-hub`
 

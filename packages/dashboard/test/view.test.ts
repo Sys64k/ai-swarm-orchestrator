@@ -22,6 +22,7 @@ import {
   plansSummary,
   trackRecordLine,
   trackRecordsPath,
+  sinceDaysAgo,
   homeView,
   isLive,
   isQuiet,
@@ -716,7 +717,15 @@ describe("track records page", () => {
 
   it("asks the Hub for the grouping and project chosen, through an allowed route", () => {
     assert.equal(trackRecordsPath("model"), "track-records?by=model");
-    assert.equal(trackRecordsPath("host", "aso-ui"), "track-records?by=host&project=aso-ui");
+    assert.equal(trackRecordsPath("host", { project: "aso-ui" }), "track-records?by=host&project=aso-ui");
+    assert.equal(
+      trackRecordsPath("project", { project: "", role: "frontend", model: "gpt-6.1-terra", since: "2026-10-21" }),
+      "track-records?by=project&role=frontend&model=gpt-6.1-terra&since=2026-10-21",
+      "empty filters are left out",
+    );
+    const now = new Date("2026-10-28T23:30:00.000Z");
+    assert.equal(sinceDaysAgo(0, now), undefined, "all time");
+    assert.equal(sinceDaysAgo(7, now), "2026-10-21");
     assert.equal(hubPath("GET", ["track-records"]), "/api/track-records");
     assert.equal(hubPath("POST", ["track-records"]), undefined);
   });
