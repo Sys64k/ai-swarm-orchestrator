@@ -8,6 +8,7 @@ export interface TrackRecordsOptions {
   role?: string;
   model?: string;
   since?: string;
+  until?: string;
   json?: boolean;
 }
 
@@ -16,9 +17,9 @@ const usd = (n: number | undefined) => (n === undefined ? "-" : `$${n.toFixed(2)
 const ofTotal = (good: number, bad: number) => (good + bad ? `${good}/${good + bad}` : "-");
 
 /** The query string for `GET /api/track-records`. */
-export function trackRecordsPath(opts: Pick<TrackRecordsOptions, "by" | "project" | "role" | "model" | "since">): string {
+export function trackRecordsPath(opts: Pick<TrackRecordsOptions, "by" | "project" | "role" | "model" | "since" | "until">): string {
   const q = new URLSearchParams({ by: opts.by });
-  for (const k of ["project", "role", "model", "since"] as const) if (opts[k]) q.set(k, opts[k]);
+  for (const k of ["project", "role", "model", "since", "until"] as const) if (opts[k]) q.set(k, opts[k]);
   return `/api/track-records?${q.toString()}`;
 }
 

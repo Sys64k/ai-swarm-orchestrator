@@ -70,6 +70,15 @@ describe("track records", () => {
     assert.ok(since.rows.every((x) => x.key !== "gemini" || x.tasks.worked === 1), "Gemini's earlier jobs aren't counted");
     assert.deepEqual(trackRecords([], [], { by: "model" }), { by: "model", since: null, rows: [] });
   });
+
+  it("counts only a period's jobs between since and until, for trends", () => {
+    const opusAt = tasks[1].jobs![2].startedAt; // Opus's build, after Gemini's first two there
+    const before = trackRecords(tasks, [], { by: "model", until: opusAt });
+    assert.ok(!before.rows.some((x) => x.key === "opus"), "until is exclusive: Opus started then");
+    assert.equal(before.rows.find((x) => x.key === "gemini")!.builds.jobs, 3, "Gemini's builds in the first two tasks");
+    const week = trackRecords(tasks, [], { by: "model", since: opusAt, until: new Date(Date.parse(opusAt) + 1).toISOString() });
+    assert.deepEqual(week.rows.map((x) => [x.key, x.builds.jobs, x.tasks.finished]), [["opus", 1, 1]]);
+  });
 });
 
 describe("track records, in step and over time", () => {

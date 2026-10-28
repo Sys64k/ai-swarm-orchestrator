@@ -874,6 +874,11 @@ export const TrackRecordQuerySchema = z.object({
     .refine((v) => !Number.isNaN(Date.parse(v)), "a date or time, e.g. 2026-10-01 or 2026-10-01T12:00:00Z")
     .optional()
     .describe("Only jobs started at or after this date or time"),
+  until: z
+    .string()
+    .refine((v) => !Number.isNaN(Date.parse(v)), "a date or time, e.g. 2026-10-08 or 2026-10-08T12:00:00Z")
+    .optional()
+    .describe("Only jobs started before this date or time: with since, one period of a trend (e.g. a week)"),
 });
 export type TrackRecordQuery = z.infer<typeof TrackRecordQuerySchema>;
 
