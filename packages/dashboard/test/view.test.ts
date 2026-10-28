@@ -53,6 +53,7 @@ import {
   buildOf,
   mergeNote,
   crewLine,
+  modelLine,
   agentRows,
   linkParts,
   reviewLink,
@@ -231,6 +232,14 @@ describe("agents", () => {
     assert.equal(crewLine(task("t", "merged", { crew: done })), "Built by avalon #2 · tested by canfod #1");
     const reworked = [...done, member("implement", "canfod", 2), member("test", "avalon", 1), member("test", "avalon", 1)];
     assert.equal(crewLine(task("t", "awaiting_review", { crew: reworked })), "Built by avalon #2, then canfod #2 · tested by canfod #1, then avalon #1");
+  });
+
+  it("says which models built a task, the one on trial marked", () => {
+    assert.equal(modelLine(task("t", "pending")), undefined);
+    assert.equal(modelLine(task("t", "in_progress", { jobs: [{ job: "implement" }] })), undefined, "an older Hub");
+    const reworked: Task["jobs"] = [{ job: "implement", model: "gemini" }, { job: "test" }, { job: "implement", model: "gemini" }];
+    assert.equal(modelLine(task("t", "testing", { jobs: reworked })), "Model: gemini");
+    assert.equal(modelLine(task("t", "merged", { challenger: "openai/terra", jobs: [{ job: "implement", model: "terra" }, { job: "implement", model: "opus" }] })), "Models: terra (on trial), then opus");
   });
 
   it("lists every desk of a machine as an agent, with its work now and last", () => {

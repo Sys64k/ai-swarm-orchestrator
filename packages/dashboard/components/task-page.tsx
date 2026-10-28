@@ -7,7 +7,7 @@ import { ChangesView, ReviewPanel } from "./review-panel.tsx";
 import { Terminal } from "./terminal.tsx";
 import { ActionButton, Badge, Banner, LoadingPage, Section, TopBar } from "./ui.tsx";
 import type { Task } from "../lib/types.ts";
-import { canReview, crewLine, currentTab, formatUsd, hasChanges, isLive, reviewLink, reviewView, screenshotList, taskActions, taskBadge, timeAgo, type TaskTab } from "../lib/view.ts";
+import { canReview, crewLine, currentTab, formatUsd, hasChanges, isLive, modelLine, reviewLink, reviewView, screenshotList, taskActions, taskBadge, timeAgo, type TaskTab } from "../lib/view.ts";
 
 export function TaskPage({ id }: { id: string }) {
   const { data: task, error, refresh } = usePoll<Task>(`tasks/${id}`);
@@ -23,7 +23,7 @@ export function TaskPage({ id }: { id: string }) {
   const can = taskActions(task);
   const review = reviewView(task);
   const pr = reviewLink(task);
-  const crew = crewLine(task);
+  const crew = [crewLine(task), modelLine(task)].filter(Boolean).join(" · ");
   const shots = screenshotList(task);
   const act = (action: "cancel" | "retry") => async () => {
     const err = await hubAction(`tasks/${id}/${action}`);

@@ -98,7 +98,10 @@ rework rounds, and an event history.
 An **agent** is one job slot of a worker machine, named after both: `avalon #2` is desk 2 on
 avalon. Unlike a worker's node id, which changes each time it restarts, the name stays. Each
 task keeps its `crew`: the agents that implemented and tested it, including those after a
-rework. The console's task page says "Built by avalon #2 · tested by canfod #1", and a
+rework. The console's task page says "Built by avalon #2 · tested by canfod #1 · Model:
+gemini-3.8-flash" (with a rework on a stronger model, "Models: gemini-3.8-flash, then
+claude-opus-5-5"; a model on trial is marked "(on trial)"), and the pull request says the same
+on its **Built on** line. A
 worker's page lists its agents, one per desk: what each is building or testing now, or what it
 worked on last. `/api/nodes` lists each worker's `jobs` with
 their desk.

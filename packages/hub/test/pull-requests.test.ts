@@ -3,7 +3,7 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, describe, it } from "node:test";
-import { autoMergeBlock, changesRequested, lastBuild, checkState, GitHubError, mergeBlock, parseDiff, parseGitHubRemote, parseGitHubRepo, pullRequestBody, reviewFeedback, startHub, summarizeChecks, type TaskRecord } from "@aso/hub";
+import { autoMergeBlock, builtOnNote, changesRequested, lastBuild, checkState, GitHubError, mergeBlock, parseDiff, parseGitHubRemote, parseGitHubRepo, pullRequestBody, reviewFeedback, startHub, summarizeChecks, type TaskRecord } from "@aso/hub";
 import { createMessage } from "@aso/shared";
 import { git, gitAsync, makeTargetRepo, postTask, pushTaskBranch, tempDir, TOKEN, waitFor, withHub, worker, writeFiles, type HubContext, type TestClient } from "./helpers.ts";
 
@@ -951,6 +951,14 @@ describe("pull request helpers", () => {
     assert.equal(f.summary, "ana asked for changes on GitHub: see the comments on the code");
     assert.equal(f.details, "Review by ana:\n(no summary)\n\nComments on the code:\n- a.ts:3: no\n- b.ts: rename");
     assert.ok(reviewFeedback({ ...review, body: "x".repeat(10_000) }, []).summary.length <= 4000);
+  });
+
+  it("says which models built the task, the one on trial marked", () => {
+    const build = (model?: string, job: "implement" | "test" = "implement") => ({ job, round: 0, host: "h", slot: 1, nodeId: "n", startedAt: "", calls: 1, costUsd: 0, ...(model ? { model } : {}) });
+    assert.deepEqual(builtOnNote({ jobs: [] }), [], "not built yet");
+    assert.deepEqual(builtOnNote({ jobs: [build()] }), [], "a build from before models were recorded");
+    assert.deepEqual(builtOnNote({ jobs: [build("gemini"), build(undefined, "test"), build("gemini")] }), ["**Built on:** `gemini`"], "a rework on the same model");
+    assert.deepEqual(builtOnNote({ challenger: "openai/terra", jobs: [build("terra"), build("opus")] }), ["**Built on:** `terra` (on trial), then `opus`"]);
   });
 
   it("describes the task in the pull request", () => {
