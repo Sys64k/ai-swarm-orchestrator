@@ -22,14 +22,20 @@ Git. LLM access goes only through the Hub, so workers never hold API credentials
 ```
 
 <!-- swarm-stats:start -->
-**Built by its own swarm.** Since 27 Oct 2026, the swarm has merged **5 tasks**, **20%** on the first try (2 finished by a stronger model taking over), at about **$1.29 per task** in model costs.
+**Built by its own swarm.** Since 27 Oct 2026, the swarm has merged **17 tasks**, **29%** on the first try (9 finished by a stronger model taking over), from **1 of 1** proposed plans approved, at about **$1.90 per task** in model costs.
 
-| Model | Tasks finished | First try | QA passed | Acceptance met | Plans approved | Checks it made: met | Cost per task |
-|---|---|---|---|---|---|---|---|
-| `gemini-3.8-flash` | 3 | 33% | 5 of 5 | 3 of 5 | – | – | $1.43 |
-| `claude-opus-5-5` | 2 | 0% | 3 of 3 | 3 of 3 | – | 3 of 5 | $0.92 |
+| Model | Tasks finished | First try | QA passed | Acceptance met | Plans approved | Checks it made: met | Its met held up | Cost per task started on it |
+|---|---|---|---|---|---|---|---|---|
+| `claude-opus-5-5` | 9 | 0% | 13 of 13 | 10 of 13 | 1 of 1 | 4 of 6 | 4 of 4 | – |
+| `gemini-3.8-flash` | 7 | 57% | 17 of 18 | 7 of 15 | – | – | – | $1.94 |
+| `gpt-6.1-terra` | 1 | 100% | 1 of 1 | 1 of 1 | – | – | – | $0.46 |
+| `gpt-6.1-sol` | 0 | – | – | – | – | 11 of 22 | 11 of 11 | – |
 
-<sub>From the Hub's public track record, updated daily (last: 27 Oct 2026). See [Track records](docs/models.md#track-records-how-each-model-has-done).</sub>
+<sub>Its met held up: of the work it passed as the reviewer, how much no person sent back or closed and whose deploy didn't fail.</sub>
+
+<sub>Cost per task started on it: all in, from a task's first build to its end (every model it escalated to, its acceptance checks, a share of its plan), and failed tasks too.</sub>
+
+<sub>From the Hub's public track record, updated daily (last: 28 Oct 2026). See [Track records](docs/models.md#track-records-how-each-model-has-done).</sub>
 <!-- swarm-stats:end -->
 
 ## What it does
