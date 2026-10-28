@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { END, looksLikeStats, modelLabel, renderStats, replaceSection, START } from "./readme-stats.mjs";
+import { END, looksLikeStats, modelLabel, renderStats, replaceSection, START, withSnapshot } from "./readme-stats.mjs";
 
 const stats = {
   since: "2026-10-27T12:10:00.000Z",
@@ -55,5 +55,16 @@ describe("the swarm's stats in the README", () => {
     assert.equal(modelLabel("|`"), "a model");
     assert.ok(looksLikeStats(stats));
     for (const bad of [null, {}, { at: "t" }, { at: "t", tasks: { finished: "1" }, plans: { proposed: 0 } }, { ...stats, models: "x" }]) assert.equal(looksLikeStats(bad), false, JSON.stringify(bad));
+  });
+
+  it("keeps a line per day in the history: the day's latest, oldest first, past broken lines", () => {
+    const day = (at, finished) => ({ ...stats, at, tasks: { ...stats.tasks, finished } });
+    const first = withSnapshot("", day("2026-11-03T05:00:00.000Z", 42));
+    assert.equal(first, `${JSON.stringify(day("2026-11-03T05:00:00.000Z", 42))}\n`);
+    const again = withSnapshot(first, day("2026-11-03T09:00:00.000Z", 43));
+    assert.deepEqual(again.trim().split("\n").map((l) => JSON.parse(l).tasks.finished), [43], "a rerun the same day replaces it");
+    const older = `${JSON.stringify(day("2026-11-01T05:00:00.000Z", 40))}\nnot json\n{"at":"x"}\n`;
+    const all = withSnapshot(older + again, day("2026-11-04T05:00:00.000Z", 45));
+    assert.deepEqual(all.trim().split("\n").map((l) => JSON.parse(l).at.slice(0, 10)), ["2026-11-01", "2026-11-03", "2026-11-04"]);
   });
 });

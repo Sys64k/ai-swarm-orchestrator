@@ -3,10 +3,12 @@
  * Refreshes the swarm's stats in the README from a Hub's public stats (`aso start-hub
  * --public-stats …`, served at `/api/public-stats`): the text between the two markers below.
  * Run by .github/workflows/swarm-stats.yml once a day:
- *   node scripts/readme-stats.mjs https://<hub>/api/public-stats [README.md]
+ *   node scripts/readme-stats.mjs https://<hub>/api/public-stats [README.md] [history.jsonl]
+ * With a history file, it also keeps the day's stats there, a JSON line per day, for charts.
  * An unreachable Hub leaves the README as it is (and exits 0): the next run tries again.
  */
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const START = "<!-- swarm-stats:start -->";
@@ -83,9 +85,29 @@ export function replaceSection(readme, markdown) {
   return `${readme.slice(0, start + START.length)}\n${markdown}\n${readme.slice(end)}`;
 }
 
+/**
+ * The stats history (a JSON line per day, oldest first) with `stats` as its day's line: added,
+ * or in place of an earlier one from the same day (UTC). Lines that aren't stats are dropped.
+ */
+export function withSnapshot(history, stats) {
+  const day = (s) => s.at.slice(0, 10);
+  const byDay = new Map();
+  for (const line of history.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const s = JSON.parse(line);
+      if (looksLikeStats(s)) byDay.set(day(s), s);
+    } catch {
+      // A broken line is skipped; the rest of the history stays.
+    }
+  }
+  byDay.set(day(stats), stats);
+  return [...byDay.keys()].sort().map((d) => `${JSON.stringify(byDay.get(d))}\n`).join("");
+}
+
 async function main() {
-  const [url, file = "README.md"] = process.argv.slice(2);
-  if (!url) throw new Error("usage: node scripts/readme-stats.mjs <public stats URL> [README.md]");
+  const [url, file = "README.md", historyFile] = process.argv.slice(2);
+  if (!url) throw new Error("usage: node scripts/readme-stats.mjs <public stats URL> [README.md] [history.jsonl]");
   let stats;
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
@@ -95,6 +117,10 @@ async function main() {
   } catch (err) {
     console.log(`the Hub's stats couldn't be read (${err.message}); the README stays as it is`);
     return;
+  }
+  if (historyFile) {
+    mkdirSync(path.dirname(historyFile), { recursive: true });
+    writeFileSync(historyFile, withSnapshot(existsSync(historyFile) ? readFileSync(historyFile, "utf8") : "", stats));
   }
   const readme = readFileSync(file, "utf8");
   const next = replaceSection(readme, renderStats(stats));

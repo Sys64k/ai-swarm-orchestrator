@@ -431,8 +431,10 @@ This repository's README shows them: `.github/workflows/swarm-stats.yml` runs
 `scripts/readme-stats.mjs` once a day, which reads the address in the repository variable
 `SWARM_STATS_URL` (e.g. `https://<hub>.ts.net:10000/api/public-stats`) and rewrites the section
 between `<!-- swarm-stats:start -->` and `<!-- swarm-stats:end -->`, committing only when the
-numbers changed. Any project can do the same with those two files. A commit that changes only the
-README doesn't make the Hub update itself.
+numbers changed. It also keeps each day's stats in `docs/stats/history.jsonl`, a JSON line per day
+(the day's latest run), so a page can later chart how they changed. Any project can do the same
+with those two files. A commit that changes only the README and `docs/` doesn't make the Hub update
+itself.
 
 ### A machine's own model (volunteer GPUs)
 
