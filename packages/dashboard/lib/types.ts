@@ -61,6 +61,10 @@ export interface Task {
   screenshots?: { commit: string; at: string; files: Array<{ name: string; mediaType: string; bytes: number }> };
   /** The agents (machine and desk) that implemented and tested it, oldest first. */
   crew?: Array<{ job: "implement" | "test"; host: string; slot: number; nodeId: string; at: string }>;
+  /** Its jobs, oldest first; a build's `model` is the model its agent ran on (absent on an older Hub). */
+  jobs?: Array<{ job: "implement" | "test"; model?: string }>;
+  /** The model on trial it started on (aso challenger), instead of its desk's. */
+  challenger?: string;
   /** The task's pull request on GitHub (Hubs with pull requests on). */
   review?: { pr?: { number: number; url: string }; error?: string; rounds: number };
   waitingReason?: string;

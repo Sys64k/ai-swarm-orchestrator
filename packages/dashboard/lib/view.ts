@@ -565,6 +565,18 @@ export function crewLine(task: Pick<Task, "state" | "crew">): string | undefined
   return parts.join(" · ");
 }
 
+/**
+ * The models the task's builds ran on, oldest first and each once in a row, the one on trial
+ * marked: "Model: gemini", "Models: terra (on trial), then opus". Undefined before its first build.
+ */
+export function modelLine(task: Pick<Task, "jobs" | "challenger">): string | undefined {
+  const models = (task.jobs ?? []).flatMap((j) => (j.job === "implement" && j.model ? [j.model] : []));
+  const runs = models.filter((m, i) => m !== models[i - 1]);
+  if (!runs.length) return undefined;
+  if (task.challenger) runs[0] += " (on trial)";
+  return `${runs.length === 1 ? "Model" : "Models"}: ${runs.join(", then ")}`;
+}
+
 /** Where a project's QA-approved work goes, for its page. */
 export function mergeNote(project: Pick<Project, "pullRequests">): string | undefined {
   const pr = project.pullRequests;
