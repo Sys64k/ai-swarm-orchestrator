@@ -360,8 +360,8 @@ writeFileSync(path.join(dir, "notes.txt"), "not an image");
           { name: "page-broken", path: "/broken" },
         ];
         const executor: TaskExecutor = {
-          async implement(_t, { repoDir }) {
-            writeFiles(repoDir, { "page.txt": "a page\n" });
+          async implement(t, { repoDir }) {
+            writeFiles(repoDir, { [`${t.taskId}.txt`]: "a page\n" });
             return { commitMessage: "feat: page", screenshotTargets: targets };
           },
         };
@@ -379,6 +379,11 @@ writeFileSync(path.join(dir, "notes.txt"), "not an image");
           // The script saved one image per view, named after it: it got the list.
           assert.deepEqual(record.screenshots?.files.map((f) => f.name), ["page-dark.png", "page-phone.png"]);
           assert.equal(record.qaSummary, "`npm test` passed; 2 screenshots, views not saved (1 of 3): page-broken");
+
+          // An API sync only regenerates types: the views its agent lists are ignored.
+          await postTask(ctx.port, task("sync-hub-api-0123456789ab"));
+          const sync = await waitFor(() => ["merged", "failed"].includes(ctx.hub.tasks.get("sync-hub-api-0123456789ab")!.state) && ctx.hub.tasks.get("sync-hub-api-0123456789ab")!, 30_000, "sync to finish");
+          assert.deepEqual([sync.state, sync.screenshotTargets, sync.screenshots, sync.qaSummary], ["merged", undefined, undefined, "`npm test` passed"]);
         } finally {
           dev.stop();
           qa.stop();
