@@ -80,7 +80,8 @@ export class LlmTaskExecutor implements TaskExecutor {
         if (parsed.success && results.every((r) => !r.isError) && !refused) {
           log.info(`task ${task.taskId} finished: ${parsed.data.summary.split("\n")[0]}`);
           ctx.report(`finished: ${parsed.data.summary.slice(0, 500)}`);
-          return { commitMessage: parsed.data.commit_message, summary: parsed.data.summary, screenshotTargets: parsed.data.screenshots };
+          const screenshotTargets = parsed.data.screenshots?.length ? parsed.data.screenshots : undefined;
+          return { commitMessage: parsed.data.commit_message, summary: parsed.data.summary, screenshotTargets };
         }
         // Refuse a premature finish: the model sees why and continues.
         results.push({

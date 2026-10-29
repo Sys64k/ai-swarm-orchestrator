@@ -634,6 +634,23 @@ console.log("greeting ok");\n`;
     );
   });
 
+  it("takes a finish with an empty screenshots list as none, as models send it", () => {
+    const model = new ScriptedModel((req) =>
+      req.messages.length === 1
+        ? reply([toolUse("t1", "write_file", { path: "greeting.txt", content: "hello\n" })])
+        : reply([toolUse("t2", "finish", { summary: "wrote greeting", commit_message: "feat: add greeting", screenshots: [] })]),
+    );
+    return withHub(
+      async (ctx) => {
+        const record = await runGreet(ctx);
+        assert.equal(record.state, "merged", record.history.map((h) => h.event).join("\n"));
+        assert.equal(model.requests.length, 2, "the finish was accepted the first time");
+        assert.equal(record.screenshotTargets, undefined, "no views to screenshot");
+      },
+      { qa: { enabled: false }, llm: { adapter: model } },
+    );
+  });
+
   it("reminds an agent that stops without finish, and merges once it finishes", () => {
     const model = new ScriptedModel((req) => {
       switch (req.messages.length) {

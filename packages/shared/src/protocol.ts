@@ -286,11 +286,19 @@ export const ScreenshotTargetSchema = z.strictObject({
 });
 export type ScreenshotTarget = z.infer<typeof ScreenshotTargetSchema>;
 
+const uniqueNames = (list: ScreenshotTarget[]) => new Set(list.map((t) => t.name)).size === list.length;
+
 export const ScreenshotTargetsSchema = z
   .array(ScreenshotTargetSchema)
   .min(1)
   .max(QA_SCREENSHOTS_MAX)
-  .refine((list) => new Set(list.map((t) => t.name)).size === list.length, { message: "screenshot names must be unique" });
+  .refine(uniqueNames, { message: "screenshot names must be unique" });
+
+/** The views an agent's finish lists: an empty list is the same as none (models send one for "no screenshots"). */
+export const FinishScreenshotsSchema = z
+  .array(ScreenshotTargetSchema)
+  .max(QA_SCREENSHOTS_MAX)
+  .refine(uniqueNames, { message: "screenshot names must be unique" });
 
 const TestExecutionPayload = z.strictObject({
   taskId: TaskIdSchema,
