@@ -94,6 +94,7 @@ The full setup, with options, updates and remote access, is in
 | [Hub API](docs/api.md) | The HTTP endpoints ([OpenAPI](docs/openapi.json)) |
 | [Development](docs/development.md) | Building and testing ASO itself |
 | [Status](docs/status.md) | What's built, phase by phase |
+| [The local-model experiment](docs/local-model-experiment.md) | How simple tasks must be for a free local model, what we found, and what it changed |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | The design, diagrams and protocol |
 | [SECURITY.md](SECURITY.md) | Credentials, what protects what, reporting a vulnerability |
 
