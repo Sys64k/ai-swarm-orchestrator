@@ -61,7 +61,9 @@ aso plan --file requirements.md        # longer requirements
 1. **Exploration.** The Architect explores a read-only checkout of `main` and calls Claude
    through the Hub.
 2. **Proposal.** It proposes tasks with roles, acceptance criteria and dependencies, and
-   `aso plan` streams its progress and shows the plan.
+   `aso plan` streams its progress and shows the plan. It marks logic whose correctness lives
+   in edge cases **tests first** (see [Tests first](#tests-first)), and where the code already
+   has what a task needs, it names it with a criterion to reuse it rather than copy it.
 3. **Questions.** When the requirement leaves open something that changes the plan (what
    the feature should do, which data it keeps, which approach), the Architect asks up to five
    questions instead of guessing. Answer them in the console or at the `aso plan` prompt.
@@ -95,8 +97,8 @@ rework rounds, and an event history.
 
 ### Tests first
 
-With `"testsFirst": true`, a strong model decides what "done" means before a cheaper one builds
-it. Use it where a careless implementation goes wrong at the edges: merging, limits, parsing,
+With `"testsFirst": true` (or the Architect marking a planned task so), a strong model decides
+what "done" means before a cheaper one builds it. Use it where a careless implementation goes wrong at the edges: merging, limits, parsing,
 cutting text.
 
 1. **The test writer** runs on the Architect's model, in the `qa` role, so it can change test

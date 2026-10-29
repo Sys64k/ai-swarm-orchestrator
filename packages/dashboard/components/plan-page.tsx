@@ -84,6 +84,7 @@ export function PlanPage({ id }: { id: string }) {
                     </span>
                     <span className="chips">
                       <span className="chip">{t.role}</span>
+                      {t.testsFirst && <span className="chip">tests first</span>}
                       {t.dependsOn.length > 0 && <span className="chip">after {t.dependsOn.join(", ")}</span>}
                     </span>
                     {!task && (

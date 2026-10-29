@@ -122,7 +122,7 @@ describe("plans (fake Architect)", () => {
           planId,
           outcome: "proposed",
           summary: "API first, then UI and tests",
-          tasks: [planned("ui", { role: "frontend", dependsOn: ["api"] }), planned("api"), planned("tests", { role: "qa", dependsOn: ["api", "ui"] })],
+          tasks: [planned("ui", { role: "frontend", dependsOn: ["api"] }), planned("api", { testsFirst: true }), planned("tests", { role: "qa", dependsOn: ["api", "ui"] })],
         }),
       );
       await waitFor(() => ctx.hub.plans.get(planId)?.state === "proposed");
@@ -136,6 +136,8 @@ describe("plans (fake Architect)", () => {
       assert.deepEqual(ctx.hub.tasks.get(ids.ui)!.spec.dependsOn, [ids.api]);
       assert.deepEqual(ctx.hub.tasks.get(ids.tests)!.spec.dependsOn.sort(), [ids.api, ids.ui].sort());
       assert.equal(ctx.hub.tasks.get(ids.api)!.planId, planId);
+      assert.deepEqual([ctx.hub.tasks.get(ids.api)!.spec.testsFirst, ctx.hub.tasks.get(ids.ui)!.spec.testsFirst], [true, undefined], "a task the Architect marked goes tests first");
+      assert.equal(ctx.hub.tasks.get(ids.api)!.testsFirst?.phase, "tests");
       assert.equal((await api(ctx, `/api/plans/${planId}/approve`, { method: "POST" })).status, 409);
       arch.ws.close();
     }));

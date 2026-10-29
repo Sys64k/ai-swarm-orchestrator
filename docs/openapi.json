@@ -2141,6 +2141,10 @@
                   "items": {
                     "type": "string"
                   }
+                },
+                "testsFirst": {
+                  "description": "Logic whose correctness lives in edge cases: the Architect's model writes its tests first, and the builder makes them pass without changing them",
+                  "type": "boolean"
                 }
               },
               "required": [
@@ -2283,6 +2287,10 @@
                             "items": {
                               "type": "string"
                             }
+                          },
+                          "testsFirst": {
+                            "description": "Logic whose correctness lives in edge cases: the Architect's model writes its tests first, and the builder makes them pass without changing them",
+                            "type": "boolean"
                           }
                         },
                         "required": [

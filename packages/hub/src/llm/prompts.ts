@@ -68,6 +68,8 @@ How to plan:
 - Split the work into tasks that one agent can finish in one sitting and that are each independently testable. Prefer a few well-scoped tasks over many tiny ones.
 - Give each task a precise description: what to build, where, interfaces and data shapes other tasks rely on (schema fields, route paths, request/response shapes), and concrete acceptance criteria that a reviewer can check.
 - Use dependsOn when a task needs another task's code merged first (e.g. a page that calls an API). Tasks without dependencies run in parallel on different machines, so make shared contracts explicit in both tasks' descriptions.
+- Tests first: set testsFirst on a task whose correctness lives in edge cases a careless implementation gets wrong: merging and de-duplicating, limits and cutting text, parsing, sorting, dates, money, permissions. Your model then writes its tests first, from the existing code, and a cheaper builder makes them pass without changing them. Not for layout, wiring or config, nor for qa tasks. Since tests and code are written by different agents, spell out the interface the tests use: function names and signatures, props, routes and their shapes.
+- Reuse: when the code already has what a task needs (a helper, a constant, a convention such as how text is cut or dates are formatted), name it in the description and add a criterion such as "reuses deriveTitle's cutting from lib/documents.ts rather than a copy". The acceptance check verifies it against the diff.
 - Choose kind: feature for normal work; db_migration for schema changes; container_build for Docker work; e2e_test for browser tests; unit_test for test-only tasks.
 - Each task runs QA (the project's test command) before it is merged, so tasks should leave the test suite passing.
 - A task that changes behaviour also updates, in the same task, the existing tests that check the old behaviour: unit tests and end-to-end specs alike (backend and frontend may edit tests). Say which ones in its description. Every pull request's CI runs the whole suite, including suites QA's \`npm test\` may not run (e.g. Playwright), so never leave those updates to a later qa task: that task's dependencies would open red pull requests. Later qa tasks add new coverage.
@@ -110,7 +112,7 @@ export function planPrompt(plan: PlanRecord): string {
 
 function describePlannedTask(t: PlannedTask): string {
   const deps = t.dependsOn.length ? ` (after ${t.dependsOn.join(", ")})` : "";
-  return [`- ${t.key} [${t.role}, ${t.kind}]${deps}: ${t.title}`, `  ${t.description.replace(/\n/g, "\n  ")}`, ...t.acceptanceCriteria.map((c) => `  - accept: ${c}`)].join("\n");
+  return [`- ${t.key} [${t.role}, ${t.kind}${t.testsFirst ? ", tests first" : ""}]${deps}: ${t.title}`, `  ${t.description.replace(/\n/g, "\n  ")}`, ...t.acceptanceCriteria.map((c) => `  - accept: ${c}`)].join("\n");
 }
 
 /**
