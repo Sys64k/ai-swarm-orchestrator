@@ -14,6 +14,7 @@ import {
 import type { PlanRecord } from "../plans.js";
 import { DEFAULT_MAX_TOKENS } from "./adapter.js";
 import type { TaskRecord } from "../tasks.js";
+import { buildingToPassTests, writingTests } from "../tests-first.js";
 
 const ROLE_FOCUS: Record<WorkerRole, string> = {
   backend: `You are the backend engineer. Your area is data models, database logic and API routes. The team's preferred stack is Prisma schemas on PostgreSQL and Hono API routes in TypeScript; if the project already uses something else, follow the project.`,
@@ -122,10 +123,39 @@ export const CONTINUE_PROMPT =
   "explanation of what blocks you and call no tool: your work so far is kept, nothing goes to QA, and the task comes back " +
   "as a rework round with your explanation (it fails once its rework rounds are used up).";
 
+/** What a tests-first task's test writer does: the tests that define done, before any code. */
+const TEST_WRITER_BRIEF = `## Your job: write the tests that define done
+You write this task's tests before anyone writes its code. A builder then makes them pass and can't change them, so they decide what "done" means.
+- Read the code the task touches first, and its existing tests. Match their conventions: names, helpers, and how the code already treats limits and edge cases.
+- Cover every acceptance criterion, and the edge cases a careless implementation would get wrong (empty input, limits, off-by-one, ordering, errors).
+- Test behaviour through the interface the task describes (function names, props, routes). Where it doesn't say, choose the smallest interface that fits the code around it, and say so in your summary.
+- Don't write the feature. Run the tests: they must fail because the feature is missing, never because a test is broken (a typo, a wrong path, a wrong helper).
+- Finish with a summary that lists each test file and what it checks: the builder reads it.`;
+
+/** What the test writer is told when the builder disputes its tests. */
+export function disputeReason(detail: string | undefined): string {
+  return `The builder gave up on the tests you wrote first: ${detail ?? "no explanation"}. If it's right, fix the tests. If they're right, keep them and say why in your summary: the builder reads it. This happens only once.`;
+}
+
+/** What a tests-first task's builder is told about the tests written first. */
+function testsFirstBrief(t: NonNullable<TaskRecord["testsFirst"]>): string[] {
+  return [
+    "## Tests written first",
+    "A test writer wrote this task's tests before you. They define done: write the code that makes them pass. You can't change them (a push that does is refused).",
+    ...t.files.map((f) => `- ${f}`),
+    ...(t.notes ? ["", "The test writer's notes:", t.notes] : []),
+    "",
+    t.disputed
+      ? "They already went back to their writer once after a builder said one was wrong, and this is the result: make them pass."
+      : "If you are sure a test is wrong (it contradicts the task or the existing code), say which and why, and stop without calling a tool: the tests go back to their writer, once.",
+  ];
+}
+
 /** First user message: the task as the Hub knows it, including feedback from a failed attempt. */
 export function taskPrompt(task: TaskRecord): string {
   const { spec, rework } = task;
-  const parts = [`# Task ${spec.taskId}: ${spec.title}`, "", spec.description];
+  const writer = writingTests(task);
+  const parts = [writer ? `# Tests first for task ${spec.taskId}: ${spec.title}` : `# Task ${spec.taskId}: ${spec.title}`, "", spec.description];
   if (spec.acceptanceCriteria.length) {
     parts.push("", "## Acceptance criteria", ...spec.acceptanceCriteria.map((c) => `- ${c}`));
   }
@@ -133,6 +163,8 @@ export function taskPrompt(task: TaskRecord): string {
   if (spec.dependsOn.length) {
     parts.push("", `## Builds on`, `These tasks are already merged into your branch's base: ${spec.dependsOn.join(", ")}.`);
   }
+  if (writer) parts.push("", TEST_WRITER_BRIEF);
+  else if (buildingToPassTests(task)) parts.push("", ...testsFirstBrief(task.testsFirst));
   if (rework) {
     parts.push(
       "",

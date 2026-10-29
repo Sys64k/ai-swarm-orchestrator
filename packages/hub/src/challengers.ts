@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { ChallengerRole, JobRecord, TaskState, Trial } from "@aso/shared";
 import { ROLE_RULES } from "./model-suggestions.js";
+import { isBuild } from "./jobs.js";
 
 /**
  * Challengers: a model on trial in a role takes a share of its work, so it gathers the data
@@ -30,7 +31,7 @@ export function takesTask(role: ChallengerRole, ch: Challenger, trial: Pick<Tria
 
 /** Whether a task hasn't been built yet, so it may still start on a model on trial. */
 export function isFresh(task: { challenger?: string; reworkRound: number; jobs?: readonly JobRecord[] }): boolean {
-  return !task.challenger && task.reworkRound === 0 && !task.jobs?.some((j) => j.job === "implement" && j.endedAt);
+  return !task.challenger && task.reworkRound === 0 && !task.jobs?.some((j) => isBuild(j) && j.endedAt);
 }
 
 /** A key's place from 0 to 1: a stable FNV-1a hash of it. */
@@ -59,7 +60,7 @@ export function trialStatus(role: ChallengerRole, ch: Challenger, name: string, 
   if (role === "desks") {
     for (const t of tasks) {
       // Tasks it took in this trial: started on it since then (a task not built yet counts already).
-      const first = t.jobs?.find((j) => j.job === "implement");
+      const first = t.jobs?.find(isBuild);
       if (t.challenger !== ch.spec || (first && first.startedAt < ch.since)) continue;
       spentUsd += t.llm.costUsd;
       if (t.state === "merged" || t.state === "failed") samples++;

@@ -1097,6 +1097,9 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 200
+              },
+              "testsFirst": {
+                "type": "boolean"
               }
             },
             "required": [
@@ -1361,6 +1364,44 @@
             "additionalProperties": false,
             "description": "The check of the work against the task's acceptance criteria, after QA passed"
           },
+          "testsFirst": {
+            "type": "object",
+            "properties": {
+              "phase": {
+                "type": "string",
+                "enum": [
+                  "tests",
+                  "build"
+                ],
+                "description": "tests: the test writer (the Architect's model) writes them; build: the builder makes them pass"
+              },
+              "commit": {
+                "description": "The test writer's last commit",
+                "type": "string"
+              },
+              "files": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The tests it wrote: a builder's push that changes them is refused"
+              },
+              "notes": {
+                "description": "The test writer's summary, for the builder",
+                "type": "string"
+              },
+              "disputed": {
+                "description": "The builder said a test was wrong, and the tests went back to their writer (once)",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "phase",
+              "files"
+            ],
+            "additionalProperties": false,
+            "description": "A tests-first task's phases"
+          },
           "screenshots": {
             "description": "What the project's screenshots script saved in the last passing QA run; GET /api/tasks/{id}/screenshots/{name} serves each",
             "type": "object",
@@ -1591,6 +1632,10 @@
                   "type": "integer",
                   "minimum": -9007199254740991,
                   "maximum": 9007199254740991
+                },
+                "writesTests": {
+                  "description": "The test writer's job on a tests-first task, not a build: track records leave it out",
+                  "type": "boolean"
                 },
                 "overturned": {
                   "description": "Work the acceptance check passed (met) that proved wrong later: a person asked for changes, closed its pull request, or the deploy of its merge failed",
@@ -4616,6 +4661,9 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 200
+          },
+          "testsFirst": {
+            "type": "boolean"
           },
           "project": {
             "type": "string",

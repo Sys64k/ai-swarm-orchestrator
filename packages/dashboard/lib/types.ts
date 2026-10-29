@@ -62,7 +62,9 @@ export interface Task {
   /** The agents (machine and desk) that implemented and tested it, oldest first. */
   crew?: Array<{ job: "implement" | "test"; host: string; slot: number; nodeId: string; at: string }>;
   /** Its jobs, oldest first; a build's `model` is the model its agent ran on (absent on an older Hub). */
-  jobs?: Array<{ job: "implement" | "test"; model?: string }>;
+  jobs?: Array<{ job: "implement" | "test"; model?: string; writesTests?: boolean }>;
+  /** A tests-first task's phase: the test writer's, then the builder's against its tests. */
+  testsFirst?: { phase: "tests" | "build"; commit?: string; files: string[]; notes?: string; disputed?: boolean };
   /** The model on trial it started on (aso challenger), instead of its desk's. */
   challenger?: string;
   /** The task's pull request on GitHub (Hubs with pull requests on). */

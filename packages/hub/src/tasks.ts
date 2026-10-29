@@ -15,9 +15,11 @@ import {
   type ReviewChecks,
   type Acceptance,
   type JobRecord,
+  type TestsFirst,
   type JobResult,
 } from "@aso/shared";
 import { mergeBlock } from "./git/pull-requests.js";
+import { canDispute, lockedTests, roleOf, writingTests } from "./tests-first.js";
 import type { z } from "zod";
 import type { PullRef } from "./git/github.js";
 import type { HubRepository } from "./git/hub-repo.js";
@@ -26,6 +28,7 @@ import { DEFAULT_ROUTING_POLICIES, selectNode, type RoutingPolicies } from "./ro
 import type { TranscriptInput } from "./transcripts.js";
 import type { Screenshots, ScreenshotSet } from "./screenshots.js";
 import { acceptanceCounts, qualityNotesSuffix, unmetReason, type AcceptanceChecker } from "./llm/acceptance.js";
+import { disputeReason } from "./llm/prompts.js";
 import type { WorkerJob } from "./worker-scope.js";
 import type { JobOutcome } from "./track-record.js";
 import { addBuildUsage, endJob, failedBuildResult, markAcceptance, markOverturned, markQa, markVerified, openJob, startJob, type JobKind } from "./jobs.js";
@@ -76,6 +79,8 @@ export interface TaskRecord {
   qaSummary?: string;
   /** The check of the work against the acceptance criteria, after QA passed. */
   acceptance?: Acceptance;
+  /** A tests-first task's phase: the test writer's, then the builder's against the tests it wrote. */
+  testsFirst?: TestsFirst;
   /** What the project's screenshots script saved in the last passing QA run. */
   screenshots?: ScreenshotSet;
   /** The views the developer agent listed at its last finish, for QA's screenshots script. */
@@ -468,12 +473,13 @@ export class TaskManager {
       planId: origin.planId,
       ...(origin.diffBase ? { diffBase: origin.diffBase } : {}),
       ...(origin.autoMerge ? { autoMerge: true } : {}),
+      ...(spec.testsFirst ? { testsFirst: { phase: "tests" as const, files: [] } } : {}),
       createdAt: now,
       updatedAt: now,
       history: [],
     };
     this.tasks.set(spec.taskId, task);
-    this.note(task, `queued (${spec.role}/${spec.kind})`);
+    this.note(task, `queued (${spec.role}/${spec.kind}${spec.testsFirst ? ", tests first" : ""})`);
     this.kick();
     return task;
   }
@@ -506,7 +512,7 @@ export class TaskManager {
     task.waitingReason = undefined;
     task.routing = { nodeId: decision.nodeId, score: decision.score, reasons: decision.reasons };
     this.note(task, `assigned to ${decision.nodeId} (${decision.reasons.join(", ")})`);
-    this.registry.send(decision.nodeId, "TASK_ASSIGNMENT", { ...task.spec, project: this.project, rework: task.rework });
+    this.registry.send(decision.nodeId, "TASK_ASSIGNMENT", { ...task.spec, role: roleOf(task), project: this.project, rework: task.rework });
   }
 
   private dispatchQa(task: TaskRecord): void {
@@ -706,6 +712,10 @@ export class TaskManager {
             task,
             "The agent used all its turns before finishing. Its work so far is on this branch: continue from it, and spend your turns finishing what's left (checking the branch's diff first) rather than exploring the whole project again.",
           );
+        } else if (canDispute(task, update.gaveUp)) {
+          // The builder says a test is wrong: once, the tests go back to their writer with why.
+          task.testsFirst = { ...task.testsFirst!, phase: "tests", disputed: true };
+          this.sendBack(task, { reason: disputeReason(update.detail), failures: [] }, "back to the test writer");
         } else if (update.gaveUp) {
           // Like running out of turns: a rework round, so the task gets another try (and escalates).
           this.note(task, `the agent gave up on ${nodeId}: ${update.detail ?? "no detail"}`);
@@ -880,6 +890,7 @@ export class TaskManager {
     const reg = this.registry.get(nodeId)?.registration;
     if (reg?.nodeKind !== "worker") return;
     task.jobs = startJob(task.jobs, kind, { host: reg.hardware.hostname, slot, nodeId }, task.reworkRound + (task.review?.rounds ?? 0), now());
+    if (kind === "implement" && writingTests(task)) openJob(task.jobs, "implement")!.writesTests = true;
   }
 
   /** End whatever job is under way (the task is cancelled, or fails). */
@@ -905,7 +916,7 @@ export class TaskManager {
   private async verify(task: TaskRecord, commit: string): Promise<void> {
     let problem: string | undefined;
     try {
-      problem = await this.repo.verifyTaskCommit(task.spec.taskId, commit, task.spec.role);
+      problem = await this.repo.verifyTaskCommit(task.spec.taskId, commit, roleOf(task), lockedTests(task));
     } catch (err) {
       problem = `verification error: ${(err as Error).message}`;
     }
@@ -914,6 +925,7 @@ export class TaskManager {
     if (problem) return this.rework(task, `push verification failed: ${problem}`);
     // A build counts once its push checks out (the builder is still task.nodeId).
     if (task.nodeId) this.onOutcome?.(task.nodeId, "built");
+    if (writingTests(task)) return this.testsWritten(task, commit);
 
     if (!this.qa.enabled) {
       this.note(task, "verified; QA disabled");
@@ -924,6 +936,25 @@ export class TaskManager {
     task.qaAttempts = 0;
     task.state = "awaiting_qa";
     this.note(task, "verified; awaiting QA");
+    this.kick();
+  }
+
+  /**
+   * The test writer's tests are in: they fail until the feature is built, so no QA. The task goes
+   * to a builder, who must make them pass without changing them (push verification refuses that).
+   */
+  private async testsWritten(task: TaskRecord, commit: string): Promise<void> {
+    const before = task.testsFirst!;
+    // The files this round of the test writer changed; after a dispute, added to those it wrote before.
+    const diff = await this.repo.diff(commit, before.commit ?? task.diffBase).catch(() => undefined);
+    if (task.state !== "verifying" || task.commit !== commit) return;
+    const files = [...new Set([...before.files, ...(diff?.files.map((f) => f.path) ?? [])])].sort();
+    task.testsFirst = { phase: "build", commit, files, ...(task.summary ? { notes: task.summary } : {}), ...(before.disputed ? { disputed: true } : {}) };
+    task.rework = undefined;
+    task.state = "pending";
+    task.nodeId = undefined;
+    task.commit = undefined;
+    this.note(task, `tests written first (${files.join(", ") || "no files"}); a builder makes them pass without changing them`);
     this.kick();
   }
 
@@ -1152,7 +1183,7 @@ export class TaskManager {
   /** Queue the task for an agent again, with why. Review rounds come here directly: they have no limit. */
   private sendBack(task: TaskRecord, rework: Omit<Rework, "round">, label: string): void {
     // The agent sees one running count of every time its work came back.
-    task.rework = { round: task.reworkRound + (task.review?.rounds ?? 0), ...rework };
+    task.rework = { round: Math.max(1, task.reworkRound + (task.review?.rounds ?? 0)), ...rework };
     task.conflicts = undefined; // the next round reports its own
     task.state = "pending";
     task.nodeId = undefined;
@@ -1203,3 +1234,4 @@ export class TaskManager {
 function jobOwner(task: TaskRecord): string | undefined {
   return task.state === "testing" ? task.qaNodeId : task.nodeId;
 }
+

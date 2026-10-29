@@ -7,7 +7,7 @@ import { ChangesView, ReviewPanel } from "./review-panel.tsx";
 import { Terminal } from "./terminal.tsx";
 import { ActionButton, Badge, Banner, LoadingPage, Section, TopBar } from "./ui.tsx";
 import type { Task } from "../lib/types.ts";
-import { acceptanceView, canReview, crewLine, currentTab, formatUsd, hasChanges, isLive, modelLine, reviewLink, reviewView, screenshotList, taskActions, taskBadge, timeAgo, type TaskTab } from "../lib/view.ts";
+import { acceptanceView, canReview, crewLine, currentTab, formatUsd, hasChanges, isLive, modelLine, reviewLink, reviewView, screenshotList, taskActions, taskBadge, testsFirstLine, timeAgo, type TaskTab } from "../lib/view.ts";
 
 export function TaskPage({ id }: { id: string }) {
   const { data: task, error, refresh } = usePoll<Task>(`tasks/${id}`);
@@ -24,6 +24,7 @@ export function TaskPage({ id }: { id: string }) {
   const review = reviewView(task);
   const pr = reviewLink(task);
   const crew = [crewLine(task), modelLine(task)].filter(Boolean).join(" · ");
+  const testsFirst = testsFirstLine(task);
   const shots = screenshotList(task);
   const act = (action: "cancel" | "retry") => async () => {
     const err = await hubAction(`tasks/${id}/${action}`);
@@ -54,6 +55,7 @@ export function TaskPage({ id }: { id: string }) {
             </p>
           )}
           {crew && <p className="small">{crew}</p>}
+          {testsFirst && <p className="small">{testsFirst}</p>}
           {task.state === "pending" && task.waitingReason && <p className="muted small">{task.waitingReason}</p>}
           {review && (
             <p className="muted small">

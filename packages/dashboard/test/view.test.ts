@@ -3,6 +3,7 @@ import { hubPath } from "../lib/hub-routes.ts";
 import { describe, it } from "node:test";
 import {
   acceptanceView,
+  testsFirstLine,
   formatUsd,
   escalationBody,
   escalationChoices,
@@ -669,6 +670,22 @@ describe("worker machines and their keys", () => {
     assert.equal(workerAccess({ workerKey: { id: "k", name: "avalon" } }), 'key "avalon"');
     assert.equal(workerAccess({ workerKey: null }), "the Hub's main token");
     assert.equal(workerAccess({}), undefined, "an older Hub");
+  });
+});
+
+describe("tests-first tasks on the task page", () => {
+  const writer = { job: "implement" as const, model: "claude-opus-5-5", writesTests: true };
+  it("says who writes the tests, and which the builder can't change", () => {
+    assert.equal(testsFirstLine({ jobs: [writer], testsFirst: { phase: "tests", files: [] } }), "Tests first: the test writer (claude-opus-5-5) is writing them");
+    assert.equal(
+      testsFirstLine({ jobs: [writer], testsFirst: { phase: "build", files: ["a.test.ts"], disputed: true } }),
+      "Tests first, by claude-opus-5-5: a.test.ts; the builder can't change them (back to their writer once)",
+    );
+    assert.equal(testsFirstLine({}), undefined);
+  });
+
+  it("leaves the test writer out of the models that built it", () => {
+    assert.equal(modelLine({ jobs: [writer, { job: "implement", model: "qwen" }] }), "Model: qwen");
   });
 });
 

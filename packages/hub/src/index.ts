@@ -29,7 +29,7 @@ export { PlanError, PlanManager, type PlanRecord, type PlanState } from "./plans
 export { GitSync, sanitizeUrl, type SyncStatus } from "./git/sync.js";
 export { API_DOC_VERSION, API_OPERATIONS, openApiDocument, operationId, type ApiOperation } from "./api/openapi.js";
 export { GitHubApi, GitHubError, parseGitHubRemote, parseGitHubRepo, type CheckRun, type CommitStatus, type PullRef, type RepoSlug } from "./git/github.js";
-export { autoMergeBlock, builtOnNote, changesRequested, checkState, acceptanceNote, pullRequestBody, PullRequests, mergeBlock, qualityNoteLines, reviewFeedback, summarizeChecks, type PullRequestStatus } from "./git/pull-requests.js";
+export { autoMergeBlock, builtOnNote, testsFirstNote, changesRequested, checkState, acceptanceNote, pullRequestBody, PullRequests, mergeBlock, qualityNoteLines, reviewFeedback, summarizeChecks, type PullRequestStatus } from "./git/pull-requests.js";
 export { MAX_FILE_PATCH, MAX_TOTAL_PATCH, parseDiff } from "./git/diff.js";
 export { StateStore, type HubStateStore, type ProjectStateStore, type Snapshot } from "./state-store.js";
 export { Database, describeDatabaseUrl, hubStateStore, projectStateStore } from "./postgres-store.js";
@@ -68,3 +68,4 @@ export { addBuildUsage, endJob, failedBuildResult, JOBS_LIMIT, lastBuild, markAc
 export { budgetSpent, describeScope, mayUseProject, projectOfGitPath, REFUSE_ALL, refuseJob, type KeyScope, type WorkerJob } from "./worker-scope.js";
 export { MACHINE_PREFIX, MachineModels } from "./llm/machine-models.js";
 export { OnePerKey } from "./one-per-key.js";
+export { buildingToPassTests, canDispute, lockedTests, roleOf, writingTests, type LockedTests } from "./tests-first.js";

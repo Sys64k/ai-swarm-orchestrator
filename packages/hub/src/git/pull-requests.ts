@@ -1,6 +1,7 @@
 import { createLogger, QUALITY_NOTE_LABEL, taskBranchName, type ChecksOverall, type CheckState, type QualityNote, type ReviewChecks } from "@aso/shared";
 import { acceptanceCounts } from "../llm/acceptance.js";
 import type { ReviewGate, ReviewOutcome, TaskManager, TaskRecord } from "../tasks.js";
+import { isBuild, testWriterModel } from "../jobs.js";
 import {
   GitHubApi,
   GitHubError,
@@ -317,6 +318,7 @@ export function pullRequestBody(task: TaskRecord, consoleUrl?: string): string {
     "",
     `**QA:** ${task.qaSummary ?? "not run"}`,
     ...builtOnNote(task),
+    ...testsFirstNote(task),
     ...acceptanceNote(task),
     ...screenshotsNote(task, consoleUrl),
     `**Task:** \`${s.taskId}\` (${s.role}, ${s.kind})${rounds ? `, after ${rounds}` : ""}; model cost about $${task.llm.costUsd.toFixed(2)}`,
@@ -351,11 +353,20 @@ export function qualityNoteLines(notes: readonly QualityNote[]): string[] {
  * `b`". The first is on trial when the task started on a challenger (aso challenger).
  */
 export function builtOnNote(task: Pick<TaskRecord, "jobs" | "challenger">): string[] {
-  const models = (task.jobs ?? []).filter((j) => j.job === "implement" && j.model).map((j) => j.model!);
+  const models = (task.jobs ?? []).filter((j) => isBuild(j) && j.model).map((j) => j.model!);
   const runs = models.filter((m, i) => m !== models[i - 1]).map((m) => `\`${m}\``);
   if (!runs.length) return [];
   if (task.challenger) runs[0] += " (on trial)";
   return [`**Built on:** ${runs.join(", then ")}`];
+}
+
+/** On a tests-first task: who wrote the tests the builder had to pass, and which. */
+export function testsFirstNote(task: Pick<TaskRecord, "jobs" | "testsFirst">): string[] {
+  const t = task.testsFirst;
+  if (t?.phase !== "build") return [];
+  const writer = testWriterModel(task.jobs);
+  const files = t.files.map((f) => `\`${f}\``).join(", ");
+  return [`**Tests written first**${writer ? ` by \`${writer}\`` : ""}: ${files || "no files"}${t.disputed ? " (back to their writer once after the builder disputed them)" : ""}; the builder couldn't change them`];
 }
 
 /** Where to see the screenshots QA took; GitHub can't show them, as they stay on the Hub. */
