@@ -18,6 +18,19 @@ import { makeTargetRepo, TOKEN } from "./helpers.ts";
 const TOOL = { name: "read_file", description: "Read a file", input_schema: { type: "object" as const, properties: { path: { type: "string" } }, required: ["path"] } };
 
 describe("OpenAI-compatible models: translation", () => {
+  it("leaves out an assistant turn with nothing in it: Ollama refuses content null without tool calls", () => {
+    const messages = toChatMessages(
+      "s",
+      [
+        { role: "user", content: "Go." },
+        { role: "assistant", content: [{ type: "thinking", thinking: "only thinking", signature: "" }] },
+        { role: "user", content: "You ended your turn without calling finish." },
+      ],
+      { vision: false },
+    );
+    assert.deepEqual(messages.map((m) => m.role), ["system", "user", "user"]);
+  });
+
   it("turns the Hub's conversation into Chat Completions messages", () => {
     const messages = toChatMessages(
       "You are a builder.",

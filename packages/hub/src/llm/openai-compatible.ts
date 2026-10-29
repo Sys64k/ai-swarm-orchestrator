@@ -43,7 +43,8 @@ export function toChatTools(tools: Anthropic.Beta.BetaTool[]): ChatTool[] {
 /**
  * The conversation as Chat Completions messages. Tool results become `tool` messages; an image a
  * tool returned follows as a user message (tool messages can't carry images), or as a note when
- * the model has no vision. Thinking blocks are dropped: they only mean something to their own model.
+ * the model has no vision. Thinking blocks are dropped: they only mean something to their own model, and an
+ * assistant turn left with nothing is dropped too.
  */
 export function toChatMessages(system: string, messages: Anthropic.Beta.BetaMessageParam[], opts: { vision: boolean }): ChatMessage[] {
   const out: ChatMessage[] = [{ role: "system", content: system }];
@@ -59,7 +60,9 @@ export function toChatMessages(system: string, messages: Anthropic.Beta.BetaMess
         const extra = (b as typeof b & { [PROVIDER_DATA]?: unknown })[PROVIDER_DATA];
         return [{ id: b.id, type: "function", function: { name: b.name, arguments: JSON.stringify(b.input ?? {}) }, ...(extra === undefined ? {} : { extra_content: extra }) }];
       });
-      out.push({ role: "assistant", content: text || null, ...(calls.length ? { tool_calls: calls } : {}) });
+      // A turn with nothing in it (a reasoning model's thinking only) is left out: Ollama refuses `content: null`
+      // without tool calls, and two user messages in a row are fine.
+      if (text || calls.length) out.push({ role: "assistant", content: text || null, ...(calls.length ? { tool_calls: calls } : {}) });
       continue;
     }
     const images: ChatContentPart[] = [];

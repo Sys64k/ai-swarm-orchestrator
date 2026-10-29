@@ -10,6 +10,8 @@ const log = createLogger("agent");
 const RETRY_DELAYS_MS = [2_000, 5_000, 15_000, 30_000, 60_000];
 /** How often to ask again while the Hub holds model calls (e.g. out of credit). */
 export const PAUSE_RETRY_MS = 60_000;
+/** Empty replies in a row (no text, no tool call) the agent is asked again after, before the task fails. */
+export const MAX_EMPTY_REPLIES = 3;
 /** Keep each turn's text results well under the Hub's frame limit (images have TURN_IMAGE_BUDGET). */
 const TURN_RESULTS_BUDGET = 1_200_000;
 
@@ -46,6 +48,8 @@ export class LlmTaskExecutor implements TaskExecutor {
     let results: ToolResult[] = [];
     // Set after the model ended a turn without finish; a second stop in a row fails the task.
     let reminded = false;
+    // An empty reply isn't a stop: giving up comes with an explanation (CONTINUE_PROMPT). Reasoning models send them.
+    let emptyReplies = 0;
 
     for (;;) {
       const reply = await callModelWithRetry((t) => ctx.callModel(t), { conversationId, turn, toolResults: results }, (m) => ctx.report(m), this.opts.retryDelaysMs);
@@ -78,6 +82,12 @@ export class LlmTaskExecutor implements TaskExecutor {
           isError: true,
         });
       } else if (reply.toolCalls.length === 0) {
+        if (!reply.text.trim() && emptyReplies < MAX_EMPTY_REPLIES) {
+          emptyReplies++;
+          log.info(`task ${task.taskId}: model replied with nothing; asking again (${emptyReplies} of ${MAX_EMPTY_REPLIES})`);
+          ctx.report("agent replied with nothing; asking it again");
+          continue;
+        }
         // Never hand in work the agent did not finish: remind it once, then give up.
         if (reminded) {
           throw new AgentStoppedError(`the agent stopped without calling finish: ${reply.text.slice(0, 1500) || "(no explanation)"}`);
@@ -88,6 +98,7 @@ export class LlmTaskExecutor implements TaskExecutor {
         continue;
       }
       reminded = false;
+      emptyReplies = 0;
       results = fitTurnResults(results);
     }
   }

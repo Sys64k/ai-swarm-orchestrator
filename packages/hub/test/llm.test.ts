@@ -653,6 +653,33 @@ console.log("greeting ok");\n`;
     );
   });
 
+  it("asks an agent again after an empty reply (a reasoning model's), and fails only after several in a row", async () => {
+    const recovers = new ScriptedModel((req) => {
+      const n = req.messages.length;
+      if (n === 1) return reply([toolUse("t1", "write_file", { path: "greeting.txt", content: "hello\n" })]);
+      if (n <= 5) return reply([], "end_turn"); // two empty replies
+      return reply([toolUse("t2", "finish", { summary: "wrote greeting", commit_message: "feat: add greeting" })]);
+    });
+    await withHub(
+      async (ctx) => {
+        const record = await runGreet(ctx);
+        assert.equal(record.state, "merged", record.history.map((h) => h.event).join("\n"));
+        assert.equal(recovers.requests.length, 4, "write, empty, empty, finish");
+      },
+      { qa: { enabled: false }, llm: { adapter: recovers } },
+    );
+    const silent = new ScriptedModel((req) => (req.messages.length === 1 ? reply([toolUse("t1", "write_file", { path: "greeting.txt", content: "x\n" })]) : reply([], "end_turn")));
+    await withHub(
+      async (ctx) => {
+        const record = await runGreet(ctx);
+        assert.equal(record.state, "failed");
+        assert.match(record.history.at(-1)!.event, /stopped without calling finish: \(no explanation\)/);
+        assert.equal(silent.requests.length, 6, "write, 3 empty replies asked again, then the reminder, then failed");
+      },
+      { qa: { enabled: false }, llm: { adapter: silent } },
+    );
+  });
+
   it("fails the task without QA when the agent stops twice without finish", () => {
     const model = new ScriptedModel((req) =>
       req.messages.length === 1
