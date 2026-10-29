@@ -31,6 +31,12 @@ function table(header: string[], rows: string[][]): string[] {
   return [line(header), ...rows.map(line)];
 }
 
+/** "3 in 5 checks": the quality notes on its builds' checked work; "-" with no checks (or from an older Hub). */
+function qualityNotes(b: TrackRecords["rows"][number]["builds"]): string {
+  const checks = b.accepted + b.unmet;
+  return checks && b.qualityNotes !== undefined ? `${b.qualityNotes} in ${checks}` : "-";
+}
+
 /** Builds, the tasks finished and QA runs: a row per key that built or tested anything. */
 function workLines(r: TrackRecords): string[] {
   const withQa = r.by !== "model";
@@ -38,7 +44,7 @@ function workLines(r: TrackRecords): string[] {
   const rows = r.rows.filter((x) => x.builds.jobs || x.qaRuns.runs || x.tasks.finished || x.started?.settled);
   if (!rows.length) return [];
   return table(
-    [r.by.toUpperCase(), "FINISHED", "1ST TRY", "TOOK OVER", "BUILDS", "QA PASSED", "ACCEPTED", "OUT OF TURNS", "FAILED", ...(withQa ? ["QA RUNS PASSED"] : []), "COST", "STARTED", "PER TASK"],
+    [r.by.toUpperCase(), "FINISHED", "1ST TRY", "TOOK OVER", "BUILDS", "QA PASSED", "ACCEPTED", "QUALITY NOTES", "OUT OF TURNS", "FAILED", ...(withQa ? ["QA RUNS PASSED"] : []), "COST", "STARTED", "PER TASK"],
     rows.map((x) => [
       x.key,
       String(x.tasks.finished),
@@ -47,6 +53,7 @@ function workLines(r: TrackRecords): string[] {
       String(x.builds.jobs),
       ofTotal(x.builds.qaPassed, x.builds.qaFailed),
       ofTotal(x.builds.accepted, x.builds.unmet),
+      qualityNotes(x.builds),
       String(x.builds.outOfTurns),
       String(x.builds.failed),
       ...(withQa ? [ofTotal(x.qaRuns.passed, x.qaRuns.failed)] : []),
@@ -96,6 +103,7 @@ export function trackRecordLines(r: TrackRecords): string[] {
       "",
       "FINISHED: merged tasks it made the last good build of; 1ST TRY: with no build before it; TOOK OVER: after another's builds.",
       "QA PASSED, ACCEPTED: the verdicts on its builds' work. QA RUNS PASSED: its own QA runs that reached a verdict.",
+      "QUALITY NOTES: what the acceptance check noted on its checked work (duplication, dead code, a misleading summary, weakened tests); they don't block.",
       "COST: its own builds' model cost. STARTED: tasks whose first build was its, finished out of all that ended.",
       "PER TASK: what such a finished task cost, all in (every model it escalated to, checks, its plan's share, failures).",
     );

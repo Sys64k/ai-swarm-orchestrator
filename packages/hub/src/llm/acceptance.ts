@@ -1,9 +1,13 @@
 import type Anthropic from "@anthropic-ai/sdk";
-import { createLogger, type LlmUsage, type TaskDiff } from "@aso/shared";
+import { createLogger, MAX_QUALITY_NOTES, QUALITY_NOTE_KINDS, type LlmUsage, type QualityNote, type QualityNoteKind, type TaskDiff } from "@aso/shared";
 import type { LlmAdapter } from "./adapter.js";
 import { priceUsage } from "./pricing.js";
 
 const log = createLogger("acceptance");
+
+/** Longest quality note and file name kept from a verdict. */
+const MAX_NOTE_CHARS = 500;
+const MAX_FILE_CHARS = 300;
 
 /** How much of the diff the reviewer reads; a larger diff is cut, and the verdict says so. */
 export const ACCEPTANCE_DIFF_LIMIT = 120_000;
@@ -16,7 +20,7 @@ export interface CriterionVerdict {
 }
 
 export type AcceptanceVerdict =
-  | { result: "met" | "unmet"; criteria: CriterionVerdict[]; summary: string; model: string; usage: LlmUsage }
+  | { result: "met" | "unmet"; criteria: CriterionVerdict[]; summary: string; qualityNotes?: QualityNote[]; model: string; usage: LlmUsage }
   /** The check couldn't decide (no model, a model error, an answer it couldn't read): the work goes on. */
   | { result: "undecided"; reason: string; model?: string; usage?: LlmUsage };
 
@@ -48,6 +52,19 @@ const TOOL: Anthropic.Beta.BetaTool = {
         },
       },
       summary: { type: "string", description: "One or two sentences for the reviewer" },
+      quality_notes: {
+        type: "array",
+        description: `Concrete quality problems in the diff besides the criteria, at most ${MAX_QUALITY_NOTES}; none is fine. They don't block the work.`,
+        items: {
+          type: "object",
+          properties: {
+            kind: { type: "string", enum: [...QUALITY_NOTE_KINDS] },
+            note: { type: "string", description: "One sentence: what and where" },
+            file: { type: "string", description: "The file, when it is one" },
+          },
+          required: ["kind", "note"],
+        },
+      },
     },
     required: ["criteria", "summary"],
   },
@@ -58,8 +75,12 @@ Judge each acceptance criterion against the diff only: what the change adds, rem
 - met: the diff clearly does it.
 - unmet: the diff doesn't do it, or does something else instead. Say what is missing.
 - unclear: the diff can't show it either way (for example, it depends on code outside the diff, or the diff is cut).
+A criterion that asks for tests, or for a file to be added or changed, is unmet when the diff has no such change: the diff does show that.
 The tests already passed, so don't re-check that the code runs; check that it does what was asked.
-Don't judge style or suggest improvements. Answer only by calling report_acceptance.`;
+Then note quality problems the diff shows, which never block the work: duplication (logic copied where existing code
+could be reused), dead-code (unused or unreachable code added), misleading-summary (the agent's summary claims what the
+diff doesn't do), tests-weakened (existing tests removed, skipped or loosened), other (a concrete defect risk). Only
+concrete problems you can point at; not style preferences or suggestions. Answer only by calling report_acceptance.`;
 
 /** The diff as the reviewer reads it, cut to `limit` characters. */
 export function diffText(diff: TaskDiff, limit = ACCEPTANCE_DIFF_LIMIT): { text: string; cut: boolean } {
@@ -94,10 +115,13 @@ export function acceptancePrompt(task: AcceptanceSubject, diff: TaskDiff): strin
 }
 
 /** The verdict from the model's answer, or a reason it can't be read. */
-export function readVerdict(content: Anthropic.Beta.BetaContentBlock[], criteria: string[]): { criteria: CriterionVerdict[]; summary: string } | { error: string } {
+export function readVerdict(
+  content: Anthropic.Beta.BetaContentBlock[],
+  criteria: string[],
+): { criteria: CriterionVerdict[]; summary: string; qualityNotes: QualityNote[] } | { error: string } {
   const call = content.find((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === "tool_use" && b.name === TOOL.name);
   if (!call) return { error: "the model didn't report a verdict" };
-  const input = call.input as { criteria?: unknown; summary?: unknown };
+  const input = call.input as { criteria?: unknown; summary?: unknown; quality_notes?: unknown };
   if (!Array.isArray(input.criteria)) return { error: "the verdict has no criteria" };
   const byIndex = new Map<number, { verdict: CriterionVerdict["verdict"]; reason: string }>();
   for (const entry of input.criteria as Array<{ index?: unknown; verdict?: unknown; reason?: unknown }>) {
@@ -110,7 +134,22 @@ export function readVerdict(content: Anthropic.Beta.BetaContentBlock[], criteria
     if (!found) return { error: `the verdict skips criterion ${i + 1}` };
     verdicts.push({ criterion, ...found });
   }
-  return { criteria: verdicts, summary: typeof input.summary === "string" ? input.summary.trim() : "" };
+  return { criteria: verdicts, summary: typeof input.summary === "string" ? input.summary.trim() : "", qualityNotes: readQualityNotes(input.quality_notes) };
+}
+
+const isQualityNoteKind = (kind: unknown): kind is QualityNoteKind => QUALITY_NOTE_KINDS.includes(kind as QualityNoteKind);
+
+/** The verdict's quality notes, dropping any it can't read, at most MAX_QUALITY_NOTES. */
+function readQualityNotes(raw: unknown): QualityNote[] {
+  if (!Array.isArray(raw)) return [];
+  const notes: QualityNote[] = [];
+  for (const entry of raw as Array<{ kind?: unknown; note?: unknown; file?: unknown }>) {
+    const note = typeof entry.note === "string" ? entry.note.trim().slice(0, MAX_NOTE_CHARS) : "";
+    if (!note || !isQualityNoteKind(entry.kind)) continue;
+    const file = typeof entry.file === "string" && entry.file.trim() ? entry.file.trim().slice(0, MAX_FILE_CHARS) : undefined;
+    notes.push({ kind: entry.kind, note, ...(file ? { file } : {}) });
+  }
+  return notes.slice(0, MAX_QUALITY_NOTES);
 }
 
 /**
@@ -165,6 +204,11 @@ export function unmetReason(criteria: CriterionVerdict[]): string {
     ...unmet.map((c) => `- ${c.criterion}\n  Missing: ${c.reason || "(no reason given)"}`),
     "Do these before finishing; the tests passing isn't enough.",
   ].join("\n");
+}
+
+/** "; 2 quality notes" for the task's history after the counts, or nothing without notes. */
+export function qualityNotesSuffix(notes: readonly QualityNote[]): string {
+  return notes.length ? `; ${notes.length} quality note${notes.length === 1 ? "" : "s"}` : "";
 }
 
 /** "2 of 3 criteria met, 1 unclear": the same counts in the task's history and its pull request. */

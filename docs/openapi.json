@@ -1320,6 +1320,37 @@
                   ],
                   "additionalProperties": false
                 }
+              },
+              "qualityNotes": {
+                "description": "Quality issues it saw besides the criteria; they never block",
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "duplication",
+                        "dead-code",
+                        "misleading-summary",
+                        "tests-weakened",
+                        "other"
+                      ]
+                    },
+                    "note": {
+                      "type": "string",
+                      "description": "What it is, in a sentence"
+                    },
+                    "file": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "note"
+                  ],
+                  "additionalProperties": false
+                }
               }
             },
             "required": [
@@ -1554,6 +1585,12 @@
                 "acceptanceCostUsd": {
                   "description": "What that check cost (estimated)",
                   "type": "number"
+                },
+                "qualityNotes": {
+                  "description": "Quality notes the check made on its work (they don't block)",
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
                 },
                 "overturned": {
                   "description": "Work the acceptance check passed (met) that proved wrong later: a person asked for changes, closed its pull request, or the deploy of its merge failed",
@@ -3425,6 +3462,12 @@
                       "minimum": -9007199254740991,
                       "maximum": 9007199254740991,
                       "description": "Builds whose work had criteria unmet"
+                    },
+                    "qualityNotes": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "Quality notes the acceptance check made on its builds' work (they don't block)"
                     }
                   },
                   "required": [
@@ -3439,7 +3482,8 @@
                     "qaPassed",
                     "qaFailed",
                     "accepted",
-                    "unmet"
+                    "unmet",
+                    "qualityNotes"
                   ],
                   "additionalProperties": false,
                   "description": "Its builds and what came of them"

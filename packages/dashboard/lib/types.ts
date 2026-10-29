@@ -67,6 +67,8 @@ export interface Task {
   challenger?: string;
   /** The task's pull request on GitHub (Hubs with pull requests on). */
   review?: { pr?: { number: number; url: string }; error?: string; rounds: number };
+  /** The check of its work against the acceptance criteria, after QA passed. */
+  acceptance?: Acceptance;
   waitingReason?: string;
   detail?: string;
   createdAt: string;
@@ -322,6 +324,20 @@ export interface Desks {
   models: Array<{ model: string; baseUrl?: string; concurrency: number; running: number; waiting: number }>;
 }
 
+export type QualityNoteKind = "duplication" | "dead-code" | "misleading-summary" | "tests-weakened" | "other";
+
+export interface Acceptance {
+  result: "checking" | "met" | "unmet" | "undecided";
+  commit: string;
+  model?: string;
+  summary?: string;
+  /** Why it was undecided. */
+  reason?: string;
+  criteria?: Array<{ criterion: string; verdict: "met" | "unmet" | "unclear"; reason: string }>;
+  /** Quality issues besides the criteria; they never block. */
+  qualityNotes?: Array<{ kind: QualityNoteKind; note: string; file?: string }>;
+}
+
 export type TrackRecordKey = "model" | "host" | "desk" | "role" | "project" | "level";
 
 /** One model's, machine's, desk's, role's or project's record (`GET /api/track-records`). */
@@ -340,6 +356,8 @@ export interface TrackRecordRow {
     qaFailed: number;
     accepted: number;
     unmet: number;
+    /** Absent from an older Hub. */
+    qualityNotes?: number;
   };
   qaRuns: { runs: number; passed: number; failed: number; errors: number; dropped: number };
   tasks: { worked: number; finished: number; firstTry: number; tookOver: number };

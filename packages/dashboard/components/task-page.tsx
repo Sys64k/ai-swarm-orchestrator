@@ -7,7 +7,7 @@ import { ChangesView, ReviewPanel } from "./review-panel.tsx";
 import { Terminal } from "./terminal.tsx";
 import { ActionButton, Badge, Banner, LoadingPage, Section, TopBar } from "./ui.tsx";
 import type { Task } from "../lib/types.ts";
-import { canReview, crewLine, currentTab, formatUsd, hasChanges, isLive, modelLine, reviewLink, reviewView, screenshotList, taskActions, taskBadge, timeAgo, type TaskTab } from "../lib/view.ts";
+import { acceptanceView, canReview, crewLine, currentTab, formatUsd, hasChanges, isLive, modelLine, reviewLink, reviewView, screenshotList, taskActions, taskBadge, timeAgo, type TaskTab } from "../lib/view.ts";
 
 export function TaskPage({ id }: { id: string }) {
   const { data: task, error, refresh } = usePoll<Task>(`tasks/${id}`);
@@ -124,6 +124,38 @@ function Screenshots({ shots, commit }: { shots: ReturnType<typeof screenshotLis
   );
 }
 
+function AcceptanceCheck({ task }: { task: Task }) {
+  const view = acceptanceView(task);
+  if (!view) return null;
+  return (
+    <Section title="Acceptance check">
+      <p className="prose">{view.headline}</p>
+      {view.criteria.length > 0 && (
+        <ul className="list">
+          {view.criteria.map((c) => (
+            <li key={c.criterion}>
+              <strong>{c.label}:</strong> {c.criterion}
+              {c.reason && <span className="muted"> ({c.reason})</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+      {view.notes.length > 0 && (
+        <>
+          <h3 className="subhead">Quality notes (they don&apos;t block)</h3>
+          <ul className="list">
+            {view.notes.map((n) => (
+              <li key={`${n.label}-${n.text}`}>
+                <strong>{n.label}:</strong> {n.text}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </Section>
+  );
+}
+
 function Details({ task }: { task: Task }) {
   return (
     <>
@@ -156,6 +188,7 @@ function Details({ task }: { task: Task }) {
           </p>
         )}
       </Section>
+      <AcceptanceCheck task={task} />
       {task.filesTouched.length > 0 && (
         <Section title="Files touched" count={task.filesTouched.length}>
           <ul className="list mono small">

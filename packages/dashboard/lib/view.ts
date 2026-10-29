@@ -5,7 +5,7 @@ import type {
   ModelSuggestion,
   ModelSuggestions,
   SuggestionRole,
-  Models, Price, Provider, ProviderPreset, CheckState, DeployStatus, DiffFile, HubNode, HubUpdate, WorkerKey, Plan, PlannedTask, Project, ReviewChecks, Task, TaskDiff, TaskState, TrackRecordKey, TrackRecordRow, TranscriptEntry } from "./types.ts";
+  Acceptance, Models, Price, Provider, ProviderPreset, CheckState, QualityNoteKind, DeployStatus, DiffFile, HubNode, HubUpdate, WorkerKey, Plan, PlannedTask, Project, ReviewChecks, Task, TaskDiff, TaskState, TrackRecordKey, TrackRecordRow, TranscriptEntry } from "./types.ts";
 
 import { PROVIDER_ID } from "./hub-routes.ts";
 
@@ -1071,6 +1071,45 @@ export function workerAccess(node: Pick<HubNode, "workerKey">): string | undefin
   return node.workerKey ? `key "${node.workerKey.name}"` : "the Hub's main token";
 }
 
+/** The acceptance check's quality note kinds, as people read them (the Hub's QUALITY_NOTE_LABEL). */
+export const QUALITY_NOTE_LABEL: Record<QualityNoteKind, string> = {
+  duplication: "Duplicated code",
+  "dead-code": "Dead code",
+  "misleading-summary": "Summary doesn't match the diff",
+  "tests-weakened": "Existing tests weakened or removed",
+  other: "Other",
+};
+
+const VERDICT_LABEL = { met: "Met", unmet: "Unmet", unclear: "Unclear" } as const;
+
+export interface AcceptanceView {
+  headline: string;
+  /** `reason`: why it isn't met; met ones need none. */
+  criteria: Array<{ criterion: string; verdict: "met" | "unmet" | "unclear"; label: string; reason?: string }>;
+  notes: Array<{ label: string; text: string }>;
+}
+
+/**
+ * The acceptance check of the task's current commit, for its page: a headline ("4 of 5 criteria
+ * met, 1 unclear (gpt-6.1-sol). …"), each criterion, and the quality notes. Undefined when there is
+ * none, or it judged an earlier commit.
+ */
+export function acceptanceView(task: { acceptance?: Acceptance; commit?: string }): AcceptanceView | undefined {
+  const a = task.acceptance;
+  if (!a || a.commit !== task.commit) return undefined;
+  if (a.result === "checking") return { headline: "Checking the work against its criteria…", criteria: [], notes: [] };
+  if (a.result === "undecided") return { headline: `Couldn't decide (${a.reason ?? "no reason"}): check the criteria yourself.`, criteria: [], notes: [] };
+  const criteria = a.criteria ?? [];
+  const n = (v: "met" | "unmet" | "unclear") => criteria.filter((c) => c.verdict === v).length;
+  const extra = [n("unmet") && `${n("unmet")} unmet`, n("unclear") && `${n("unclear")} unclear`].filter(Boolean).join(", ");
+  const counts = `${n("met")} of ${criteria.length} criteria met${extra ? `, ${extra}` : ""}`;
+  return {
+    headline: `${counts}${a.model ? ` (${a.model})` : ""}.${a.summary ? ` ${a.summary}` : ""}`,
+    criteria: criteria.map((c) => ({ criterion: c.criterion, verdict: c.verdict, label: VERDICT_LABEL[c.verdict], ...(c.verdict === "met" || !c.reason ? {} : { reason: c.reason }) })),
+    notes: (a.qualityNotes ?? []).map((q) => ({ label: QUALITY_NOTE_LABEL[q.kind] ?? q.kind, text: q.file ? `${q.file}: ${q.note}` : q.note })),
+  };
+}
+
 /** The groupings the track records page offers, with their labels. */
 export const TRACK_RECORD_GROUPS: ReadonlyArray<{ by: TrackRecordKey; label: string }> = [
   { by: "model", label: "Models" },
@@ -1164,6 +1203,7 @@ export function trackRecordLine(r: TrackRecordRow): string {
     b.jobs ? plural(b.jobs, "build") : undefined,
     goodOfTotal("QA passed", b.qaPassed, b.qaFailed),
     goodOfTotal("acceptance met", b.accepted, b.unmet),
+    b.qualityNotes ? plural(b.qualityNotes, "quality note") : undefined,
     b.outOfTurns ? `${b.outOfTurns} out of turns` : undefined,
     b.failed ? `${b.failed} failed` : undefined,
     b.dropped ? `${b.dropped} dropped` : undefined,

@@ -139,12 +139,13 @@ describe("job records and the track-records report (Hub)", () => {
     );
   });
 
-  it("records which model judged a build's work in the acceptance check, and what that cost", async () => {
+  it("records which model judged a build's work in the acceptance check, what that cost, and its quality notes", async () => {
     const acceptanceCheck = {
       check: async (t: { spec: { acceptanceCriteria: string[] } }) => ({
         result: "met" as const,
         criteria: t.spec.acceptanceCriteria.map((criterion) => ({ criterion, verdict: "met" as const, reason: "r" })),
         summary: "",
+        qualityNotes: [{ kind: "dead-code" as const, note: "an unused helper" }],
         model: "reviewer-model",
         usage: { inputTokens: 100, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0.03 },
       }),
@@ -162,7 +163,7 @@ describe("job records and the track-records report (Hub)", () => {
         tester.send(createMessage("FEEDBACK_LOOP", "tester", { taskId: "greet", commit, outcome: "pass", summary: "ok" }));
         await waitFor(() => ctx.hub.tasks.get("greet")?.state === "merged");
         const build = ctx.hub.tasks.get("greet")!.jobs![0];
-        assert.deepEqual([build.acceptance, build.acceptanceModel, build.acceptanceCostUsd], ["met", "reviewer-model", 0.03]);
+        assert.deepEqual([build.acceptance, build.acceptanceModel, build.acceptanceCostUsd, build.qualityNotes], ["met", "reviewer-model", 0.03, 1]);
         const reviewer = (await call(ctx.port, "/api/track-records?by=model")).body.rows.find((r: { key: string }) => r.key === "reviewer-model");
         assert.deepEqual(reviewer.reviews, { checks: 1, met: 1, overturned: 0, unmet: 0, undecided: 0, costUsd: 0.03 });
         builder.ws.close();

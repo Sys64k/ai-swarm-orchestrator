@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { hubPath } from "../lib/hub-routes.ts";
 import { describe, it } from "node:test";
 import {
+  acceptanceView,
   formatUsd,
   escalationBody,
   escalationChoices,
@@ -671,6 +672,38 @@ describe("worker machines and their keys", () => {
   });
 });
 
+describe("acceptance check on the task page", () => {
+  const acceptance = {
+    result: "met" as const,
+    commit: "c",
+    model: "gpt-6.1-sol",
+    summary: "Done.",
+    criteria: [
+      { criterion: "Titles are tidied", verdict: "met" as const, reason: "trims" },
+      { criterion: "Has tests", verdict: "unclear" as const, reason: "outside the diff" },
+    ],
+    qualityNotes: [{ kind: "duplication" as const, note: "copies the cutting", file: "lib/documents.ts" }],
+  };
+
+  it("shows the current commit's verdicts and quality notes", () => {
+    assert.deepEqual(acceptanceView({ commit: "c", acceptance }), {
+      headline: "1 of 2 criteria met, 1 unclear (gpt-6.1-sol). Done.",
+      criteria: [
+        { criterion: "Titles are tidied", verdict: "met", label: "Met" },
+        { criterion: "Has tests", verdict: "unclear", label: "Unclear", reason: "outside the diff" },
+      ],
+      notes: [{ label: "Duplicated code", text: "lib/documents.ts: copies the cutting" }],
+    });
+  });
+
+  it("shows nothing for an earlier commit's check, and says when it's checking or couldn't decide", () => {
+    assert.equal(acceptanceView({ commit: "newer", acceptance }), undefined);
+    assert.equal(acceptanceView({ commit: "c" }), undefined);
+    assert.match(acceptanceView({ commit: "c", acceptance: { result: "checking", commit: "c" } })!.headline, /^Checking/);
+    assert.equal(acceptanceView({ commit: "c", acceptance: { result: "undecided", commit: "c", reason: "no model" } })!.headline, "Couldn't decide (no model): check the criteria yourself.");
+  });
+});
+
 describe("track records page", () => {
   const row = {
     key: "models/gemini-3.8-flash",
@@ -693,6 +726,7 @@ describe("track records page", () => {
     assert.equal(startedSummary({ settled: 0, finished: 0, costUsd: 0 }), undefined);
     assert.equal(startedSummary(undefined), undefined, "an older Hub");
     const tester = { ...row, key: "canfod", builds: { ...row.builds, jobs: 0, built: 0, failed: 0, outOfTurns: 0, qaPassed: 0, qaFailed: 0, accepted: 0 }, qaRuns: { runs: 4, passed: 3, failed: 1, errors: 0, dropped: 0 }, tasks: { worked: 0, finished: 0, firstTry: 0, tookOver: 0 }, costUsd: 0, costPerFinishedUsd: undefined, started: undefined };
+    assert.match(trackRecordLine({ ...row, builds: { ...row.builds, qualityNotes: 3 } }), / · acceptance met 2 of 2 · 3 quality notes · /);
     assert.equal(trackRecordLine(tester), "4 QA runs (3 of 4 passed)");
     assert.equal(trackRecordLine({ ...tester, qaRuns: { runs: 1, passed: 0, failed: 0, errors: 1, dropped: 0 } }), "1 QA run", "no verdict, no rate");
     assert.match(trackRecordLine({ ...row, tasks: { ...row.tasks, finished: 0, firstTry: 0, tookOver: 0 }, costPerFinishedUsd: undefined, started: undefined }), /^no task finished yet · 5 builds .* · \$0\.50 on its builds$/);
