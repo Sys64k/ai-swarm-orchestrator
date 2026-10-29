@@ -248,8 +248,10 @@ Workers may never edit `package.json` or lockfiles. Agents ask the Hub instead:
 - **`request_dependencies`** adds up to 30 packages in one request
   (`{ packages: [{ name, version?, dev? }] }`). Agents are told to request everything they
   need at once.
-- **`set_package_scripts`** adds or updates npm scripts such as `test`, `build`, `dev` and
-  `lint`.
+- **`set_package_scripts`** adds npm scripts such as `test`, `build`, `dev` and `lint`. It
+  never changes one the project already has (setting the same value is fine): a change goes
+  straight to main for every task, and one agent's edit to `test` once broke QA for all of them.
+  To change an existing script, edit `package.json` yourself.
 
 **Empty projects work.** If the target has no `package.json` yet, the Hub creates a minimal one
 (`name` from the folder, `version: 0.1.0`, `private: true`) with the first change. QA runs

@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
-import { HubRepository, npmInstaller, type DependencyInstaller } from "@aso/hub";
+import { HubRepository, npmInstaller, type DependencyInstaller, scriptChangeRefusal } from "@aso/hub";
 import { createMessage, type AgentMessage } from "@aso/shared";
 import { DependencyRejectedError, startWorker, type TaskExecutor } from "@aso/worker";
 import {
@@ -243,6 +243,32 @@ describe("dependency requests (Hub)", () => {
         w.ws.close();
       },
       { dependencyInstaller: fakeInstaller() },
+    ));
+
+  it("lets an agent add scripts, or set one to the value it has, but not change one", () => {
+    const existing = { test: "vitest run", lint: "eslint ." };
+    assert.equal(scriptChangeRefusal(existing, { build: "tsc", test: "vitest run" }), undefined);
+    assert.equal(scriptChangeRefusal({}, { test: "node --test" }), undefined, "a project without scripts gets its first");
+    assert.equal(
+      scriptChangeRefusal(existing, { test: "vitest", lint: "eslint src", e2e: "playwright test" }),
+      'existing scripts can\'t be changed: test ("vitest run"), lint ("eslint ."). Use them as they are, or add a script under a new name.',
+    );
+  });
+
+  it("refuses to change a script the project has, adding none of the request", () =>
+    withHub(
+      async (ctx) => {
+        const w = await implementer(ctx, "dev", "feat");
+        const before = git(ctx.repoDir, "rev-parse", "main");
+        w.send(scriptsRequest("dev", "feat", { test: "node --test", build: "tsc" }));
+        const r = response(await w.next());
+        assert.equal(r.outcome, "rejected");
+        assert.match(r.outcome === "rejected" ? r.reason : "", /existing scripts can't be changed: test \("vitest run"\)\. Use them as they are, or add a script under a new name/);
+        assert.equal(git(ctx.repoDir, "rev-parse", "main"), before, "nothing committed, build included");
+        assert.equal(JSON.parse(git(ctx.repoDir, "show", "main:package.json")).scripts.test, "vitest run");
+        w.ws.close();
+      },
+      { files: { "package.json": JSON.stringify({ name: "target", version: "1.0.0", scripts: { test: "vitest run" } }, null, 2) + "\n" } },
     ));
 
   it("sets npm scripts, keeping other fields and formatting", () =>

@@ -4,6 +4,7 @@ export { TaskManager, TaskError, DEFAULT_QA, type QaOptions, type ReviewGate, ty
 export {
   HubRepository,
   HubRepoError,
+  scriptChangeRefusal,
   type DependencyInstaller,
   type DependencyResult,
   type DependencySpec,

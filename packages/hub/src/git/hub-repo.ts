@@ -331,7 +331,7 @@ export class HubRepository {
     log.info(`created package.json for ${name}`);
   }
 
-  /** Merge scripts into package.json, keeping its indentation and other fields as they are. */
+  /** Add scripts to package.json, keeping its indentation and other fields as they are; existing ones stay as they are. */
   private async setScripts(scripts: Record<string, string>): Promise<void> {
     const file = path.join(this.dir, "package.json");
     const text = await readFile(file, "utf8");
@@ -343,7 +343,10 @@ export class HubRepository {
     }
     if (typeof pkg !== "object" || pkg === null || Array.isArray(pkg)) throw new Error("package.json is not an object");
     const indent = /^\{\n(\s+)"/.exec(text)?.[1] ?? "  ";
-    pkg.scripts = { ...((pkg.scripts as Record<string, string>) ?? {}), ...scripts };
+    const existing = (pkg.scripts as Record<string, string>) ?? {};
+    const refusal = scriptChangeRefusal(existing, scripts);
+    if (refusal) throw new Error(refusal);
+    pkg.scripts = { ...existing, ...scripts };
     await writeFile(file, JSON.stringify(pkg, null, indent) + "\n");
   }
 
@@ -413,4 +416,16 @@ export class HubRepository {
     const out = await this.git.raw(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]).catch(() => "");
     return out.trim() || undefined;
   }
+}
+
+/**
+ * Why an agent may not set these scripts, or undefined: it may add new ones, never change one the
+ * project has (an agent once broke every task's QA by changing "test"). Setting one to the value
+ * it already has is fine.
+ */
+export function scriptChangeRefusal(existing: Readonly<Record<string, string>>, requested: Readonly<Record<string, string>>): string | undefined {
+  const changed = Object.entries(requested).filter(([name, command]) => Object.hasOwn(existing, name) && existing[name] !== command);
+  if (!changed.length) return undefined;
+  const list = changed.map(([name]) => `${name} ("${existing[name]}")`).join(", ");
+  return `existing scripts can't be changed: ${list}. Use them as they are, or add a script under a new name.`;
 }
