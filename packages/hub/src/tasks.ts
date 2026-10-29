@@ -706,6 +706,13 @@ export class TaskManager {
             task,
             "The agent used all its turns before finishing. Its work so far is on this branch: continue from it, and spend your turns finishing what's left (checking the branch's diff first) rather than exploring the whole project again.",
           );
+        } else if (update.gaveUp) {
+          // Like running out of turns: a rework round, so the task gets another try (and escalates).
+          this.note(task, `the agent gave up on ${nodeId}: ${update.detail ?? "no detail"}`);
+          this.rework(
+            task,
+            `The previous agent gave up: ${update.detail ?? "no explanation"}. Its work so far is on this branch: continue from it, check the branch's diff first, and find another way past what stopped it.`,
+          );
         } else {
           task.state = "failed";
           this.note(task, `failed on ${nodeId}: ${update.detail ?? "no detail"}`);
