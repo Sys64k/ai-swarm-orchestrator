@@ -14,8 +14,8 @@ const task = (jobs: JobRecord[], extra: Partial<ReportTask> = {}): ReportTask =>
 
 describe("track records", () => {
   const tasks = [
-    // Gemini, first try.
-    task([build("gemini", "built", { qa: "passed", acceptance: "met" }), qaRun("canfod", "passed")]),
+    // Gemini, first try; the acceptance check noted two quality problems.
+    task([build("gemini", "built", { qa: "passed", acceptance: "met", qualityNotes: 2 }), qaRun("canfod", "passed")]),
     // Gemini runs out of turns twice; Opus takes over and finishes.
     task([
       build("gemini", "outOfTurns"),
@@ -37,7 +37,7 @@ describe("track records", () => {
     const r = trackRecords(tasks, [], { by: "model" });
     assert.deepEqual(r.rows.map((x) => x.key), ["gemini", "opus", "haiku"], "most tasks finished first");
     const gemini = r.rows[0];
-    assert.deepEqual(gemini.builds, { jobs: 5, built: 3, unverified: 0, failed: 0, outOfTurns: 2, modelRefused: 0, dropped: 0, cancelled: 0, qaPassed: 2, qaFailed: 1, accepted: 1, unmet: 0 });
+    assert.deepEqual(gemini.builds, { jobs: 5, built: 3, unverified: 0, failed: 0, outOfTurns: 2, modelRefused: 0, dropped: 0, cancelled: 0, qaPassed: 2, qaFailed: 1, accepted: 1, unmet: 0, qualityNotes: 2 });
     assert.deepEqual(gemini.tasks, { worked: 3, finished: 2, firstTry: 1, tookOver: 0 });
     assert.equal(gemini.costUsd, 0.5);
     assert.equal(gemini.costPerFinishedUsd, 0.25);
@@ -100,7 +100,7 @@ describe("track records", () => {
 describe("track records, in step and over time", () => {
   it("counts every build result the job records know (the schema and the results agree)", () => {
     const fields = Object.keys(TrackRecordRowSchema.shape.builds.shape);
-    assert.deepEqual(fields, ["jobs", ...COUNTED_BUILD_RESULTS, "qaPassed", "qaFailed", "accepted", "unmet"]);
+    assert.deepEqual(fields, ["jobs", ...COUNTED_BUILD_RESULTS, "qaPassed", "qaFailed", "accepted", "unmet", "qualityNotes"]);
   });
 
   it("doesn't call a reworked task a first try because its earlier builds fall before --since", () => {

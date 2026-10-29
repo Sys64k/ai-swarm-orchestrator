@@ -123,6 +123,7 @@ export const JobRecordSchema = z
     acceptance: z.enum(["met", "unmet", "undecided"]).optional().describe("A build's work in the acceptance check"),
     acceptanceModel: z.string().optional().describe("The model that judged it"),
     acceptanceCostUsd: z.number().optional().describe("What that check cost (estimated)"),
+    qualityNotes: z.number().int().optional().describe("Quality notes the check made on its work (they don't block)"),
     overturned: z
       .enum(OVERTURN_REASONS)
       .optional()
@@ -549,6 +550,25 @@ const ReviewSchema = z
   })
   .describe("The task's GitHub pull request, with pull requests on");
 
+/** What the acceptance check notes about a change's quality besides its criteria; notes never block. */
+export const QUALITY_NOTE_KINDS = ["duplication", "dead-code", "misleading-summary", "tests-weakened", "other"] as const;
+export type QualityNoteKind = (typeof QUALITY_NOTE_KINDS)[number];
+export const QUALITY_NOTE_LABEL: Record<QualityNoteKind, string> = {
+  duplication: "Duplicated code",
+  "dead-code": "Dead code",
+  "misleading-summary": "Summary doesn't match the diff",
+  "tests-weakened": "Existing tests weakened or removed",
+  other: "Other",
+};
+/** Most notes kept from one check. */
+export const MAX_QUALITY_NOTES = 5;
+export const QualityNoteSchema = z.object({
+  kind: z.enum(QUALITY_NOTE_KINDS),
+  note: z.string().describe("What it is, in a sentence"),
+  file: z.string().optional(),
+});
+export type QualityNote = z.infer<typeof QualityNoteSchema>;
+
 export const AcceptanceSchema = z
   .object({
     result: z.enum(["checking", "met", "unmet", "undecided"]).describe("checking: under way; undecided: the check couldn't tell, and the work went on"),
@@ -560,6 +580,7 @@ export const AcceptanceSchema = z
     criteria: z
       .array(z.object({ criterion: z.string(), verdict: z.enum(["met", "unmet", "unclear"]), reason: z.string() }))
       .optional(),
+    qualityNotes: z.array(QualityNoteSchema).optional().describe("Quality issues it saw besides the criteria; they never block"),
   })
   .describe("The check of the work against the task's acceptance criteria, after QA passed");
 export type Acceptance = z.infer<typeof AcceptanceSchema>;
@@ -901,6 +922,7 @@ export const TrackRecordRowSchema = z
         qaFailed: z.number().int().describe("Builds whose work failed QA"),
         accepted: z.number().int().describe("Builds whose work met every acceptance criterion"),
         unmet: z.number().int().describe("Builds whose work had criteria unmet"),
+        qualityNotes: z.number().int().describe("Quality notes the acceptance check made on its builds' work (they don't block)"),
       })
       .describe("Its builds and what came of them"),
     qaRuns: z

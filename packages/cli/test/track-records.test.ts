@@ -4,7 +4,7 @@ import { trackRecordLines, trackRecordsPath } from "../dist/commands/track-recor
 
 const row = (key: string, extra: { finished?: number; qaPassed?: number; qaFailed?: number; runs?: number; passed?: number; cost?: number } = {}) => ({
   key,
-  builds: { jobs: 5, built: 4, unverified: 0, failed: 1, outOfTurns: 2, modelRefused: 0, dropped: 0, cancelled: 0, qaPassed: extra.qaPassed ?? 3, qaFailed: extra.qaFailed ?? 1, accepted: 2, unmet: 0 },
+  builds: { jobs: 5, built: 4, unverified: 0, failed: 1, outOfTurns: 2, modelRefused: 0, dropped: 0, cancelled: 0, qaPassed: extra.qaPassed ?? 3, qaFailed: extra.qaFailed ?? 1, accepted: 2, unmet: 0, qualityNotes: 1 },
   qaRuns: { runs: extra.runs ?? 0, passed: extra.passed ?? 0, failed: 0, errors: 0, dropped: 0 },
   tasks: { worked: 3, finished: extra.finished ?? 2, firstTry: 1, tookOver: 0 },
   costUsd: extra.cost ?? 0.5,
@@ -28,9 +28,9 @@ describe("aso track-records", () => {
     const lines = trackRecordLines({ by: "model", since: "2026-10-27T12:00:00.000Z", rows: [row("models/gemini-3.8-flash"), row("claude-opus-5-5", { finished: 0, qaPassed: 0, qaFailed: 0 })] });
     assert.equal(lines[0], "Track records by model, from jobs since 2026-10-27T12:00:00.000Z:");
     const [header, gemini, opus] = lines.slice(2, 5);
-    assert.match(header, /^MODEL\s+FINISHED\s+1ST TRY\s+TOOK OVER\s+BUILDS\s+QA PASSED\s+ACCEPTED\s+OUT OF TURNS\s+FAILED\s+COST\s+STARTED\s+PER TASK$/);
+    assert.match(header, /^MODEL\s+FINISHED\s+1ST TRY\s+TOOK OVER\s+BUILDS\s+QA PASSED\s+ACCEPTED\s+QUALITY NOTES\s+OUT OF TURNS\s+FAILED\s+COST\s+STARTED\s+PER TASK$/);
     assert.ok(!header.includes("QA RUNS"), "models don't run QA");
-    assert.match(gemini, /^models\/gemini-3\.8-flash\s+2\s+1\s+0\s+5\s+3\/4\s+2\/2\s+2\s+1\s+\$0\.50\s+2\/3\s+\$0\.75$/, "per task: all in, by where tasks started");
+    assert.match(gemini, /^models\/gemini-3\.8-flash\s+2\s+1\s+0\s+5\s+3\/4\s+2\/2\s+1 in 2\s+2\s+1\s+\$0\.50\s+2\/3\s+\$0\.75$/, "per task: all in, by where tasks started");
     assert.match(opus, /^claude-opus-5-5\s+0 .*\s-\s.*\$0\.50\s+-\s+-$/, "no QA verdicts and no task started: dashes");
     const older = trackRecordLines({ by: "model", since: null, rows: [{ ...row("gemini"), started: undefined } as never] });
     assert.match(older[3], /\$0\.50\s+-\s+-$/, "an older Hub sends no started: dashes");

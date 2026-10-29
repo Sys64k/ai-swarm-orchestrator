@@ -5,6 +5,8 @@ import {
   acceptanceNote,
   acceptancePrompt,
   diffText,
+  qualityNoteLines,
+  qualityNotesSuffix,
   readVerdict,
   unmetReason,
   type AcceptanceVerdict,
@@ -30,8 +32,8 @@ function model(answer: () => ReturnType<typeof reply>, name = "claude-opus-5-5")
   const requests: LlmRequest[] = [];
   return { name: "scripted", model: name, requests, complete: async (r) => (requests.push(r), answer()) };
 }
-const verdictCall = (criteria: Array<{ index: number; verdict: string; reason: string }>, summary = "ok") =>
-  reply([toolUse("v1", "report_acceptance", { criteria, summary })], "tool_use");
+const verdictCall = (criteria: Array<{ index: number; verdict: string; reason: string }>, summary = "ok", quality_notes?: unknown) =>
+  reply([toolUse("v1", "report_acceptance", { criteria, summary, ...(quality_notes === undefined ? {} : { quality_notes }) })], "tool_use");
 
 describe("acceptance check", () => {
   it("asks for each criterion against the diff, and trusts the agent's summary only as a claim", () => {
@@ -57,6 +59,35 @@ describe("acceptance check", () => {
     const skipped = readVerdict(verdictCall([{ index: 1, verdict: "met", reason: "x" }]).content, TASK.spec.acceptanceCriteria);
     assert.ok("error" in skipped && /skips criterion 2/.test(skipped.error));
     assert.ok("error" in readVerdict(reply([{ type: "text", text: "Looks good" }], "end_turn").content, TASK.spec.acceptanceCriteria));
+  });
+
+  it("reads quality notes beside the criteria, dropping unreadable ones, at most five", () => {
+    const notes = [
+      { kind: "duplication", note: " Copies deriveTitle's cutting into saveDocument. ", file: "lib/documents.ts" },
+      { kind: "misleading-summary", note: "Says it shares the code; it copies it." },
+      { kind: "style", note: "Prefers tabs." },
+      { kind: "dead-code", note: "" },
+      ...Array.from({ length: 6 }, (_, i) => ({ kind: "other", note: `n${i}` })),
+    ];
+    const read = readVerdict(verdictCall([{ index: 1, verdict: "met", reason: "a" }, { index: 2, verdict: "met", reason: "b" }], "ok", notes).content, TASK.spec.acceptanceCriteria);
+    assert.ok(!("error" in read));
+    assert.deepEqual(read.qualityNotes.slice(0, 2), [
+      { kind: "duplication", note: "Copies deriveTitle's cutting into saveDocument.", file: "lib/documents.ts" },
+      { kind: "misleading-summary", note: "Says it shares the code; it copies it." },
+    ]);
+    assert.equal(read.qualityNotes.length, 5, "an unknown kind and an empty note are dropped, then capped");
+    const none = readVerdict(verdictCall([{ index: 1, verdict: "met", reason: "a" }, { index: 2, verdict: "met", reason: "b" }]).content, TASK.spec.acceptanceCriteria);
+    assert.ok(!("error" in none) && none.qualityNotes.length === 0, "notes are optional");
+  });
+
+  it("tells the reviewer that missing tests are unmet, and what to note without blocking", async () => {
+    const scripted = model(() => verdictCall([{ index: 1, verdict: "met", reason: "a" }, { index: 2, verdict: "met", reason: "b" }], "ok", [{ kind: "dead-code", note: "unused helper" }]));
+    const verdict = await new AcceptanceChecker(async () => [scripted]).check(TASK, DIFF);
+    assert.ok(verdict.result === "met" && verdict.qualityNotes?.length === 1, "a note doesn't block");
+    const system = scripted.requests[0].system;
+    assert.match(system, /asks for tests, or for a file to be added or changed, is unmet when the diff has no such change/);
+    assert.match(system, /duplication .*dead-code .*misleading-summary .*tests-weakened/s);
+    assert.match(system, /never block/);
   });
 
   it("decides met, unmet or undecided, and never blocks on its own failure", async () => {
@@ -107,6 +138,13 @@ describe("acceptance check", () => {
       "- ✅ GET /api/llm answers the status",
       "- ❔ The llm-none scenario answers 404: no such scenario",
     ]);
+    assert.deepEqual(
+      acceptanceNote({ commit: "c", acceptance: { result: "met", commit: "c", at: "t", criteria: [criteria[0]], qualityNotes: [{ kind: "duplication", note: "copies the cutting", file: "lib/documents.ts" }] } }).slice(-3),
+      ["", "**Quality notes** (they don't block):", "- Duplicated code (`lib/documents.ts`): copies the cutting"],
+    );
+    assert.deepEqual(qualityNoteLines([]), [], "no notes, no lines");
+    assert.equal(qualityNotesSuffix([]), "");
+    assert.equal(qualityNotesSuffix([{ kind: "other", note: "a" }, { kind: "other", note: "b" }]), "; 2 quality notes");
     assert.deepEqual(acceptanceNote({ commit: "newer", acceptance: { result: "met", commit: "c", at: "t", criteria: [] } }), [], "only for the commit under review");
     assert.match(acceptanceNote({ commit: "c", acceptance: { result: "undecided", commit: "c", at: "t", reason: "no model" } })[0], /couldn't decide \(no model\)/);
   });
@@ -154,7 +192,8 @@ describe("acceptance check in the pipeline", () => {
         checks.push(diff!.head);
         const second = checks.length > 1;
         const criteria = task.spec.acceptanceCriteria.map((criterion, i) => ({ criterion, verdict: i === 1 && !second ? ("unmet" as const) : ("met" as const), reason: second ? "done" : "no llm-none scenario" }));
-        return { result: second ? "met" : "unmet", criteria, summary: "", model: "claude-opus-5-5", usage: { inputTokens: 100, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0.01 } };
+        const qualityNotes = second ? [{ kind: "duplication" as const, note: "copies the handler" }] : [];
+        return { result: second ? "met" : "unmet", criteria, summary: "", qualityNotes, model: "claude-opus-5-5", usage: { inputTokens: 100, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0.01 } };
       },
     };
     await withHub(
@@ -177,7 +216,10 @@ describe("acceptance check in the pipeline", () => {
         dev.send(createMessage("STATUS_UPDATE", "dev", { state: "completed", taskId: "llm", commit: fixed }));
         await passQa(qa, fixed);
         await waitFor(() => ctx.hub.tasks.get("llm")?.state === "merged" || undefined);
-        assert.equal(ctx.hub.tasks.get("llm")!.acceptance!.result, "met");
+        const merged = ctx.hub.tasks.get("llm")!;
+        assert.equal(merged.acceptance!.result, "met");
+        assert.deepEqual(merged.acceptance!.qualityNotes, [{ kind: "duplication", note: "copies the handler" }]);
+        assert.ok(merged.history.some((h) => h.event === "acceptance check: 2 of 2 criteria met; 1 quality note"));
         assert.equal(checks.length, 2);
         dev.ws.close();
         qa.ws.close();

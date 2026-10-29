@@ -46,7 +46,7 @@ const roundUsd = (usd: number) => Math.round(usd * 1e4) / 1e4;
 function emptyRow(key: string): TrackRecordRow {
   return {
     key,
-    builds: { jobs: 0, built: 0, unverified: 0, failed: 0, outOfTurns: 0, modelRefused: 0, dropped: 0, cancelled: 0, qaPassed: 0, qaFailed: 0, accepted: 0, unmet: 0 },
+    builds: { jobs: 0, built: 0, unverified: 0, failed: 0, outOfTurns: 0, modelRefused: 0, dropped: 0, cancelled: 0, qaPassed: 0, qaFailed: 0, accepted: 0, unmet: 0, qualityNotes: 0 },
     qaRuns: { runs: 0, passed: 0, failed: 0, errors: 0, dropped: 0 },
     tasks: { worked: 0, finished: 0, firstTry: 0, tookOver: 0 },
     costUsd: 0,
@@ -91,6 +91,7 @@ function countBuild(row: TrackRecordRow, job: JobRecord): void {
   if (job.qa === "failed") b.qaFailed++;
   if (job.acceptance === "met") b.accepted++;
   if (job.acceptance === "unmet") b.unmet++;
+  b.qualityNotes += job.qualityNotes ?? 0;
   row.costUsd += job.costUsd;
 }
 

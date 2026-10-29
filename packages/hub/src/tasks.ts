@@ -25,7 +25,7 @@ import type { NodeRegistry } from "./registry.js";
 import { DEFAULT_ROUTING_POLICIES, selectNode, type RoutingPolicies } from "./routing.js";
 import type { TranscriptInput } from "./transcripts.js";
 import type { Screenshots, ScreenshotSet } from "./screenshots.js";
-import { acceptanceCounts, unmetReason, type AcceptanceChecker } from "./llm/acceptance.js";
+import { acceptanceCounts, qualityNotesSuffix, unmetReason, type AcceptanceChecker } from "./llm/acceptance.js";
 import type { WorkerJob } from "./worker-scope.js";
 import type { JobOutcome } from "./track-record.js";
 import { addBuildUsage, endJob, failedBuildResult, markAcceptance, markOverturned, markQa, markVerified, openJob, startJob, type JobKind } from "./jobs.js";
@@ -948,15 +948,16 @@ export class TaskManager {
     if (task.state !== "verifying" || task.commit !== commit || task.acceptance?.result !== "checking") return;
     if (verdict.usage) this.recordLlmUsage(task.spec.taskId, verdict.usage);
     const at = new Date().toISOString();
-    markAcceptance(task.jobs, verdict.result, { model: verdict.model, costUsd: verdict.usage?.costUsd });
     if (verdict.result === "undecided") {
+      markAcceptance(task.jobs, verdict.result, { model: verdict.model, costUsd: verdict.usage?.costUsd });
       task.acceptance = { result: "undecided", commit, at, reason: verdict.reason, ...(verdict.model ? { model: verdict.model } : {}) };
       this.note(task, `acceptance check undecided (${verdict.reason}); going on`);
       return this.release(task);
     }
-    task.acceptance = { result: verdict.result, commit, at, model: verdict.model, summary: verdict.summary, criteria: verdict.criteria };
-    const counts = acceptanceCounts(verdict.criteria);
-    this.note(task, `acceptance check: ${counts}`);
+    const notes = verdict.qualityNotes ?? [];
+    markAcceptance(task.jobs, verdict.result, { model: verdict.model, costUsd: verdict.usage?.costUsd, qualityNotes: notes.length });
+    task.acceptance = { result: verdict.result, commit, at, model: verdict.model, summary: verdict.summary, criteria: verdict.criteria, ...(notes.length ? { qualityNotes: notes } : {}) };
+    this.note(task, `acceptance check: ${acceptanceCounts(verdict.criteria)}${qualityNotesSuffix(notes)}`);
     if (task.nodeId) this.onOutcome?.(task.nodeId, verdict.result === "unmet" ? "unmet" : "accepted");
     if (verdict.result === "unmet") this.rework(task, unmetReason(verdict.criteria));
     else this.release(task);

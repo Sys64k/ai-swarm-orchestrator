@@ -175,6 +175,15 @@ the verdict, criterion by criterion, goes into the pull request. If the check ca
 model, a model error), the work moves on with a note. It costs one short call per round (a few
 cents with Opus), counted in the task's cost; `--no-acceptance-check` turns it off.
 
+- **Missing tests are unmet.** A criterion that asks for tests, or for a file to be added or
+  changed, is *unmet* when the diff has no such change: the diff does show that. *Unclear* is
+  for what it can't show, such as code outside the diff.
+- **Quality notes, which never block.** The check also notes concrete problems besides the
+  criteria, up to five: duplicated code, dead code, a summary that claims what the diff doesn't
+  do, and existing tests weakened or removed. They go into the pull request, the console's task
+  page (*Acceptance check*) and the task's history, and track records count them per model
+  (*quality notes*), so a model that passes but cuts corners shows up.
+
 ## Projects
 
 One Hub runs several projects at the same time. They share the workers and the Architect.
