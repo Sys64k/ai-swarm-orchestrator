@@ -129,15 +129,18 @@ describe("tests-first tasks", () => {
 
         expectType(await dev.next(5000), "TASK_ASSIGNMENT");
         dev.send(createMessage("STATUS_UPDATE", "dev", { state: "in_progress", taskId: "greet", slot: 1 }));
+        // The builder's unfinished code is saved on the branch as it gives up.
+        const saved = await pushOnTop(ctx.gitUrl, "greet", { "greet.mjs": "export const greet = () => {};\n" });
         dev.send(createMessage("STATUS_UPDATE", "dev", { state: "failed", taskId: "greet", detail: "the agent stopped without calling finish: the test imports greet.js, the task says greet.mjs", gaveUp: true }));
 
         const rewriting = expectType(await dev.next(5000), "TASK_ASSIGNMENT").payload;
         assert.equal(rewriting.role, "qa", "back to the test writer");
         assert.match(rewriting.rework!.reason, /^The builder gave up on the tests you wrote first: .*greet\.mjs\. If it's right, fix the tests/);
         const task = ctx.hub.tasks.get("greet")!;
-        assert.deepEqual([task.testsFirst!.phase, task.testsFirst!.disputed, task.reworkRound], ["tests", true, 0], "a dispute isn't a rework round");
+        assert.deepEqual([task.testsFirst!.phase, task.testsFirst!.disputed, task.testsFirst!.from, task.reworkRound], ["tests", true, saved, 0], "a dispute isn't a rework round");
 
-        // The writer fixes one test file and adds another: both are locked from now on.
+        // The writer adds a test on top of the builder's code: only its own change is checked
+        // against QA's scope (greet.mjs isn't its), and only its tests are locked.
         dev.send(createMessage("STATUS_UPDATE", "dev", { state: "in_progress", taskId: "greet", slot: 1 }));
         const revised = await pushOnTop(ctx.gitUrl, "greet", { "edge.test.mjs": "// edge cases\n" });
         dev.send(createMessage("STATUS_UPDATE", "dev", { state: "completed", taskId: "greet", commit: revised }));

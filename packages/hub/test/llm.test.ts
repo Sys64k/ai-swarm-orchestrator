@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { describe, it } from "node:test";
 import Anthropic from "@anthropic-ai/sdk";
-import { AnthropicApiAdapter, classify, CREDIT_MESSAGE, DEFAULT_PLAN_BUDGET_USD, describeCutOff, toolResultBlocks, withCutOffNote, LlmError, priceUsage, taskPrompt, TURN_WARNING, withTurnWarning, type LlmRequest } from "@aso/hub";
+import { AnthropicApiAdapter, classify, contextFull, CREDIT_MESSAGE, DEFAULT_PLAN_BUDGET_USD, describeCutOff, toolResultBlocks, withCutOffNote, LlmError, priceUsage, taskPrompt, TURN_WARNING, withTurnWarning, type LlmRequest } from "@aso/hub";
 import { CONVERSATION_MAX_IMAGE_BYTES, CONVERSATION_MAX_IMAGES, createMessage, type AgentMessage } from "@aso/shared";
 import { callModelWithRetry, startWorker, type ModelReply } from "@aso/worker";
 import {
@@ -182,7 +182,7 @@ describe("LLM gateway (Hub)", () => {
   it("does not commit refused, truncated or failed turns, so the turn can be retried", () => {
     const outcomes = [
       () => reply([], "refusal"),
-      () => reply([toolUse("tu_x", "write_file", { path: "a" })], "max_tokens"),
+      () => reply([toolUse("tu_x", "write_file", { path: "a" })], "max_tokens", 1000, 32_000),
       () => {
         throw new LlmError("rate limited", true);
       },
@@ -214,10 +214,33 @@ describe("LLM gateway (Hub)", () => {
     );
   });
 
+  it("ends an attempt whose conversation fills the model's context window, for a rework round in a fresh one", () => {
+    assert.deepEqual([contextFull(17), contextFull(999), contextFull(32_000)], [true, true, false], "no output limit is that small");
+    const model = new ScriptedModel(() => reply([], "max_tokens", 32_000, 17));
+    return withHub(
+      async (ctx) => {
+        const w = await implementer(ctx, "dev", "greet");
+        w.send(prompt("dev", crypto.randomUUID(), 0));
+        const r = result(await w.next());
+        assert.deepEqual([r.outcome, r.outcome === "error" && r.retryable], ["error", false], "retrying the same conversation can't help");
+        const task = ctx.hub.tasks.get("greet")!;
+        assert.equal(task.contextFull, true);
+        const history = task.history.map((h) => h.event).join("\n");
+        assert.match(history, /answer stopped after 17 tokens: the conversation fills the model's context window/);
+        assert.match(history, /filled the model's context window \(about 32,000 tokens\); its work so far is kept/);
+        w.send(createMessage("STATUS_UPDATE", "dev", { state: "failed", taskId: "greet", detail: "the conversation filled the model's context window" }));
+        await waitFor(() => ctx.hub.tasks.get("greet")?.reworkRound === 1);
+        assert.match(task.rework!.reason, /^The agent filled its model's context window before finishing/);
+        w.ws.close();
+      },
+      { llm: { adapter: model } },
+    );
+  });
+
   it("tells the model when its last answer was cut off, and notes what the answer held", () => {
     const big = "x".repeat(5000);
     const outcomes = [
-      () => reply([{ type: "thinking", thinking: "plan", signature: "s" }, toolUse("tu_x", "write_file", { path: "src/big.css", content: big })], "max_tokens"),
+      () => reply([{ type: "thinking", thinking: "plan", signature: "s" }, toolUse("tu_x", "write_file", { path: "src/big.css", content: big })], "max_tokens", 1000, 32_000),
       () => reply([toolUse("tu_1", "list_files", {})]),
       () => reply([text("Done.")], "end_turn"),
     ];
@@ -236,13 +259,13 @@ describe("LLM gateway (Hub)", () => {
         const [first, retry, next] = model.requests.map((r) => r.messages.at(-1)!.content);
         assert.equal(typeof first, "string", "no note before anything was cut off");
         const note = (retry as Block[]).at(-1)!;
-        assert.match(String(note.text), /^\[ASO\] Your previous answer to this turn was cut off at the output limit \(100 tokens\) and thrown away/);
+        assert.match(String(note.text), /^\[ASO\] Your previous answer to this turn was cut off at the output limit \(32,000 tokens\) and thrown away/);
         assert.match(String(note.text), /targeted edit_file calls instead of rewriting them/);
         assert.ok(!(next as Block[]).some((b) => b.type === "text"), "the note is gone once a turn succeeds");
 
         const history = ctx.hub.tasks.get("greet")!.history.map((h) => h.event);
         assert.ok(
-          history.includes("answer cut off at the output limit (100 tokens) and discarded; it held: thinking (4 chars), write_file src/big.css (5,035 chars of input)"),
+          history.includes("answer cut off at the output limit (32,000 tokens) and discarded; it held: thinking (4 chars), write_file src/big.css (5,035 chars of input)"),
           history.join("\n"),
         );
         w.ws.close();

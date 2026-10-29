@@ -101,9 +101,10 @@ export class HubRepository {
   /**
    * Check a worker's claimed result before spending QA time on it. Returns an error message,
    * or undefined if the commit is the head of `task/<id>` and leaves protected files alone (and,
-   * on a tests-first task, the tests written first since `locked.since`).
+   * on a tests-first task, the tests written first since `locked.since`). With `scopeFrom`, the
+   * role's scope applies to the changes since that commit.
    */
-  async verifyTaskCommit(taskId: TaskId, commit: string, role?: AgentRole, locked?: LockedTests): Promise<string | undefined> {
+  async verifyTaskCommit(taskId: TaskId, commit: string, role?: AgentRole, locked?: LockedTests, scopeFrom?: string): Promise<string | undefined> {
     const branch = taskBranchName(taskId);
     const head = await this.resolve(`refs/heads/${branch}`);
     if (!head) return `${branch} was not pushed to the Hub`;
@@ -115,7 +116,9 @@ export class HubRepository {
     const blocked = files.filter(isProtectedPath);
     if (blocked.length) return `${branch} modifies protected files: ${blocked.join(", ")}`;
     if (role) {
-      const outOfScope = files.filter((f) => writeDenial(role, f));
+      // From `scopeFrom`: only this agent's own changes (a test writer after a dispute works on top of the builder's).
+      const own = scopeFrom ? (await this.git.raw(["diff", "--name-only", "--no-renames", `${scopeFrom}..${commit}`])).split("\n").filter(Boolean) : files;
+      const outOfScope = own.filter((f) => writeDenial(role, f));
       if (outOfScope.length) return `${branch} modifies files outside the ${role} role's scope: ${outOfScope.join(", ")}`;
     }
     if (locked) {
@@ -124,6 +127,11 @@ export class HubRepository {
       if (changed.length) return `${branch} changes the tests written first (${changed.join(", ")}): make them pass without changing them, or give up saying which test is wrong`;
     }
     return undefined;
+  }
+
+  /** The head of the task's branch on the Hub, or undefined before its first push. */
+  async branchHead(taskId: TaskId): Promise<string | undefined> {
+    return this.resolve(`refs/heads/${taskBranchName(taskId)}`);
   }
 
   /** A file's contents at `commit`, or undefined when it has none. */

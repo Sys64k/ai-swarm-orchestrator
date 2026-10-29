@@ -278,6 +278,7 @@ export class ProjectSet {
     recordEvent: (taskId: string, event: string): void => this.taskOwner(taskId)?.tasks.recordEvent(taskId, event),
     recordModelRefused: (taskId: string, spec: string, error: string): void => this.taskOwner(taskId)?.tasks.recordModelRefused(taskId, spec, error),
     recordOutOfTurns: (taskId: string, turns: number): void => this.taskOwner(taskId)?.tasks.recordOutOfTurns(taskId, turns),
+    recordContextFull: (taskId: string, tokens: number): void => this.taskOwner(taskId)?.tasks.recordContextFull(taskId, tokens),
     recordChallenger: (taskId: string, spec: string): void => this.taskOwner(taskId)?.tasks.recordChallenger(taskId, spec),
   };
 

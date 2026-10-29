@@ -59,6 +59,7 @@ describe("a task's job records", () => {
   it("names how a failed build ended", () => {
     assert.equal(failedBuildResult({ switchingModel: true, outOfTurns: true }), "modelRefused");
     assert.equal(failedBuildResult({ outOfTurns: true }), "outOfTurns");
+    assert.equal(failedBuildResult({ contextFull: true }), "outOfTurns", "a full context window is running out of room too");
     assert.equal(failedBuildResult({}), "failed");
   });
 });

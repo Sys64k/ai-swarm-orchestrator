@@ -230,7 +230,11 @@ aso hub-service install ... --agent-model claude-haiku-5-5 \
   gemini/models/gemini-3.8-flash refused this task)`.
 - **Running out of turns counts too:** an agent that uses all its turns (`--max-turns`) has its
   work saved on the branch, and its task goes on in a rework round from there instead of
-  failing, so it escalates like work QA or the acceptance check sent back. **So does giving up:**
+  failing, so it escalates like work QA or the acceptance check sent back. **So does a full
+  context window:** an answer stopped for length after under 1,000 tokens means the conversation
+  fills the model's window (no output limit is that small), so the next round starts a fresh
+  conversation from the saved work; for a local model, give it more room (Ollama's
+  `OLLAMA_CONTEXT_LENGTH`). **So does giving up:**
   an agent that stops without finishing, saying why, hands the task on to a rework round with
   its explanation (track records count it under failed).
 - **The rework limit stays** at 3 rework rounds, so a task gets at most 4 tries. With the
@@ -304,7 +308,8 @@ claude-opus-5-5          3         0        3          3       3/3        3/3   
 - **Quality notes:** what the acceptance check noted on its checked work (duplicated code, dead
   code, a misleading summary, weakened tests), as "3 in 5" checks; they don't block, they show
   which model passes cleanly. See [How a task flows](using-aso.md#how-a-task-flows).
-- **Out of turns, failed:** builds whose agent ran out of turns or gave up.
+- **Out of turns, failed:** builds whose agent ran out of room (its turns, or its model's context
+  window) or gave up.
 - **Cost:** its own builds' estimated model cost.
 - **Started, per task: what a task really costs.** The tasks whose first build was this model's
   (machine's, …), finished out of those that ended, and what a finished one cost **all in**:

@@ -1248,6 +1248,10 @@
             "description": "The current attempt's agent used all its turns: its failure becomes a rework round continuing from the saved work",
             "type": "boolean"
           },
+          "contextFull": {
+            "description": "The current attempt's conversation filled its model's context window: the same, in a fresh conversation",
+            "type": "boolean"
+          },
           "switchingModel": {
             "description": "The current attempt's model was refused: its failure requeues the task on another model",
             "type": "boolean"
@@ -1393,6 +1397,10 @@
               "disputed": {
                 "description": "The builder said a test was wrong, and the tests went back to their writer (once)",
                 "type": "boolean"
+              },
+              "from": {
+                "description": "After a dispute: the branch head the test writer started from; only its own changes since are checked and locked",
+                "type": "string"
               }
             },
             "required": [
@@ -3472,7 +3480,7 @@
                       "type": "integer",
                       "minimum": -9007199254740991,
                       "maximum": 9007199254740991,
-                      "description": "A build whose agent used all its turns (its work was kept for the next round)"
+                      "description": "A build whose agent used all its turns, or whose conversation filled its model's context window (its work was kept for the next round)"
                     },
                     "modelRefused": {
                       "type": "integer",
