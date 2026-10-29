@@ -20,7 +20,7 @@ What's built, phase by phase.
 | 14 | Agents: a cheaper model for builders and QA, plan budgets, conflict resolution with `main`, unfinished work kept at the turn limit, a hold when the Anthropic credit runs out, QA screenshots for the reviewer | ✅ Done |
 | 15 | Operations: deploy after each merge, catch up with merges made on GitHub, the Hub updating itself from its repository's `main`, offline alerts for workers, deploys and updates in `aso status` | ✅ Done |
 | 16 | Workers anywhere: a revocable key per worker machine, and LAN discovery so workers find the Hub without its address | ✅ Done |
-| 17 | Any model: providers added with just a key (Anthropic, OpenAI, OpenRouter, Gemini, Groq, Mistral, Ollama or any OpenAI-compatible API) with model lists from their APIs, a model per desk, prices you can set, an acceptance check against each task's definition of done, and escalation of a failing task to a stronger model | ✅ Done |
+| 17 | Any model: providers added with just a key (Anthropic, OpenAI, OpenRouter, Gemini, Groq, Mistral, Ollama, Ollama Cloud or any OpenAI-compatible API) with model lists from their APIs, a model per desk, prices you can set, an acceptance check against each task's definition of done, and escalation of a failing task to a stronger model | ✅ Done |
 | 18 | Machines anywhere: workers find the Hub over Tailscale too; a worker gateway for machines on the internet (worker keys only, through a TLS tunnel such as Tailscale Funnel); worker keys limited to projects, trust and a model budget; a track record per machine; invites from the console; a volunteer machine's own model serving its own jobs for free; Docker kept tidy | ✅ Done |
 
 The whole loop runs end to end: you describe a requirement, the Architect plans it with you,

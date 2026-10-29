@@ -7,7 +7,7 @@ import { accumulateChunks, sseData, type ChatAnswer, type ChatToolCall } from "@
 export { accumulateChunks, classifyHttp, sseData, type ChatAnswer };
 
 /**
- * Any model behind an OpenAI-compatible Chat Completions API: OpenAI, Gemini, Mistral, Groq,
+ * Any model behind an OpenAI-compatible Chat Completions API: OpenAI, Gemini, Mistral, Groq, Ollama Cloud,
  * OpenRouter, LiteLLM, and local servers such as Ollama, vLLM and LM Studio. The Hub keeps its
  * conversations in one format (the Messages API's, which it already speaks); this adapter
  * translates each request to Chat Completions and the answer back.
