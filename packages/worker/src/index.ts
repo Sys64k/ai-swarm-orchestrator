@@ -37,7 +37,7 @@ export {
   type DockerSandboxOptions,
   type RunOptions,
 } from "./sandbox.js";
-export { AgentStoppedError, LlmTaskExecutor, ModelError, callModelWithRetry, describe as describeToolCall, fitTurnResults } from "./agent/executor.js";
+export { AgentStoppedError, TestsDisputedError, LlmTaskExecutor, ModelError, callModelWithRetry, describe as describeToolCall, fitTurnResults } from "./agent/executor.js";
 export { ModelChannel, type ModelSubject } from "./model-channel.js";
 export { AgentTools, TOOL_OUTPUT_LIMIT, type ToolCall, type ToolHost, type ToolResult } from "./agent/tools.js";
 export { probeImage, type ImageInfo } from "./agent/image.js";

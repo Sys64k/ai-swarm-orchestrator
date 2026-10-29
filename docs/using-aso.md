@@ -108,10 +108,12 @@ cutting text.
 2. **The builder** (the desk's model, escalation as usual) gets the task with the list of tests
    and the writer's notes, and writes the code that makes them pass. A push that changes those
    tests is refused, so it can't loosen a test to fit its code.
-3. **A disputed test** goes back once: a builder sure that a test is wrong gives up saying why,
-   and the tests go back to their writer with that explanation (not a rework round). The writer
+3. **A disputed test** goes back once: a builder sure that a test is wrong calls `dispute_tests`
+   (which test, and why), and the tests go back to their writer with that reason (not a rework
+   round). Only that builder has the tool, and only until it's used; giving up without it is an
+   ordinary rework round. The writer
    works on top of the builder's saved code: only its own changes must be test files, and only
-   its tests are locked. It fixes them or keeps them and says why. After that, giving up is an ordinary rework round.
+   its tests are locked. It fixes them or keeps them and says why.
 
 The test writer's job isn't counted as a build in track records; its cost is part of what the
 task cost all in. The pull request and the console's task page say who wrote the tests, and which.
@@ -150,6 +152,7 @@ their desk.
    - `write_file`, `edit_file`, `delete_file`
    - `run_command` (no shell, no git)
    - `request_dependencies`, `set_package_scripts`
+   - `dispute_tests`, only for a [tests-first](#tests-first) task's builder
 3. **Verify.** The Hub checks that the reported commit is the head of `task/<id>` and doesn't
    touch `package.json` or lockfiles.
 4. **QA.** A QA worker checks out that exact commit, runs `npm ci` if the commit has a

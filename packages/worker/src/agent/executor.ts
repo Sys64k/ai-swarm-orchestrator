@@ -24,6 +24,11 @@ export class AgentStoppedError extends Error {
   override name = "AgentStoppedError";
 }
 
+/** A tests-first task's builder disputed a test written first (`dispute_tests`); its work is kept, not handed in. */
+export class TestsDisputedError extends Error {
+  override name = "TestsDisputedError";
+}
+
 /**
  * The coding agent. Runs on the worker: asks the Hub for the model's next step, executes the
  * requested tools in the checkout, sends the results back, until the model calls `finish`.
@@ -56,6 +61,12 @@ export class LlmTaskExecutor implements TaskExecutor {
       turn = reply.turn + 1;
       const calls = reply.toolCalls.filter((c) => c.name !== "finish");
       const finish = reply.toolCalls.find((c) => c.name === "finish");
+      // A dispute ends the attempt at once; the call is refused like any unknown tool on a task without tests written first.
+      const dispute = reply.toolCalls.find((c) => c.name === "dispute_tests");
+      if (dispute && task.testsFirst) {
+        const parsed = AGENT_TOOLS.dispute_tests.input.safeParse(dispute.input);
+        if (parsed.success) throw new TestsDisputedError(`the builder disputes a test written first: ${parsed.data.test}: ${parsed.data.reason}`);
+      }
       ctx.report(
         `turn ${reply.turn}: ${[...calls.map((c) => describe(c)), ...(finish ? ["finish"] : [])].join(", ") || reply.stopReason}`,
       );

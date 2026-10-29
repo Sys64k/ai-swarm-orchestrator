@@ -54,7 +54,7 @@ describe("agent tools", () => {
   it("publishes JSON schemas for every tool", () => {
     const defs = agentToolDefinitions();
     assert.deepEqual(defs.map((d) => d.name), [
-      "list_files", "read_file", "search", "view_image", "write_file", "edit_file", "delete_file", "run_command", "request_dependencies", "set_package_scripts", "finish", "submit_plan", "ask_questions",
+      "list_files", "read_file", "search", "view_image", "write_file", "edit_file", "delete_file", "run_command", "request_dependencies", "set_package_scripts", "finish", "dispute_tests", "submit_plan", "ask_questions",
     ]);
     for (const d of defs) {
       assert.equal(d.input_schema.type, "object");

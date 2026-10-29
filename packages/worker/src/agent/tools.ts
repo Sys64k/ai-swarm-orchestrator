@@ -79,8 +79,8 @@ export class AgentTools {
       content: truncate(content),
       isError,
     });
-    // finish / submit_plan / ask_questions end the agent loop and are handled by its caller.
-    if (!isAgentToolName(call.name) || call.name === "finish" || call.name === "submit_plan" || call.name === "ask_questions") {
+    // finish / dispute_tests / submit_plan / ask_questions end the agent loop and are handled by its caller.
+    if (!isAgentToolName(call.name) || call.name === "finish" || call.name === "dispute_tests" || call.name === "submit_plan" || call.name === "ask_questions") {
       return done(`unknown tool: ${call.name}`, true);
     }
     if (!ROLE_POLICIES[this.host.role].tools.includes(call.name)) {

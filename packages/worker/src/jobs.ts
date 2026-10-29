@@ -19,8 +19,8 @@ import {
 } from "@aso/shared";
 import { AgentGitClient } from "./git/agent-git-client.js";
 
-/** Failures where the agent was cut off mid-work: the turn limit, its budget, the model gone, or it stopped. */
-const AGENT_CUT_OFF = new Set(["ModelError", "AgentStoppedError"]);
+/** Failures where the agent was cut off mid-work: the turn limit, its budget, the model gone, it stopped, or it disputed the tests. */
+const AGENT_CUT_OFF = new Set(["ModelError", "AgentStoppedError", "TestsDisputedError"]);
 import { ModelChannel, type ModelReply, type ModelTurn } from "./model-channel.js";
 import { hostRunner, type CommandRunner } from "./sandbox.js";
 import { collectScreenshots, hasScreenshotScript, missingViews, type Screenshot } from "./screenshots.js";
@@ -257,7 +257,7 @@ export class JobRunner {
     const repoDir = this.repoDir(task.project, slot);
     const job: RunningJob = { taskId: task.taskId, job: "implement" };
     let conflicts: string[] = [];
-    const status = (state: "in_progress" | "failed", detail?: string, gaveUp = false) =>
+    const status = (state: "in_progress" | "failed", detail?: string, ended: { gaveUp?: boolean; disputesTests?: boolean } = {}) =>
       send(
         "STATUS_UPDATE",
         {
@@ -265,7 +265,8 @@ export class JobRunner {
           taskId: task.taskId,
           detail: detail?.slice(0, 2000),
           ...(state === "in_progress" ? { slot: slot + 1, ...(conflicts.length ? { conflicts } : {}) } : {}),
-          ...(gaveUp ? { gaveUp } : {}),
+          ...(ended.gaveUp ? { gaveUp: true } : {}),
+          ...(ended.disputesTests ? { disputesTests: true } : {}),
         },
         state === "failed" ? job : undefined,
       );
@@ -314,7 +315,8 @@ export class JobRunner {
         const saved = await opened.saveProgress(message);
         if (saved) message += ` (unfinished work saved on task/${task.taskId} @ ${saved.slice(0, 8)}; a retry continues from it)`;
       }
-      status("failed", message, (err as Error).name === "AgentStoppedError");
+      const name = (err as Error).name;
+      status("failed", message, { gaveUp: name === "AgentStoppedError", disputesTests: name === "TestsDisputedError" });
     }
   }
 

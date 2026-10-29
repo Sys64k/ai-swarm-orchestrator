@@ -592,6 +592,48 @@ console.log("greeting ok");\n`;
     }
   }
 
+  it("sends the tests back to their writer when a tests-first builder calls dispute_tests, offering it only once", async () => {
+    const tools = (req: LlmRequest) => req.tools.map((t) => t.name);
+    const model = new ScriptedModel((req) => {
+      const first = req.messages[0].content as string;
+      const n = req.messages.length;
+      if (first.startsWith("# Tests first")) {
+        const again = /disputes the tests you wrote first/.test(first);
+        if (n === 1) return reply([toolUse("w1", "write_file", { path: "greet.test.mjs", content: again ? "// greeting.txt holds hello\n" : "// greeting.txt holds hi\n" })]);
+        return reply([toolUse("w2", "finish", { summary: again ? "fixed: hello" : "greeting.txt holds hi", commit_message: "test: greeting" })]);
+      }
+      if (!/already went back to their writer once/.test(first)) {
+        assert.ok(tools(req).includes("dispute_tests"), "a builder that may dispute has the tool");
+        return reply([toolUse("b1", "dispute_tests", { test: "greet.test.mjs", reason: "the task says hello, the test says hi" })]);
+      }
+      assert.ok(!tools(req).includes("dispute_tests"), "only once");
+      if (n === 1) return reply([toolUse("b2", "write_file", { path: "greeting.txt", content: "hello\n" })]);
+      return reply([toolUse("b3", "finish", { summary: "wrote greeting", commit_message: "feat: add greeting" })]);
+    });
+    await withHub(
+      async (ctx) => {
+        const dir = tempDir("aso-dev-");
+        const dev = await startWorker({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "dev", workDir: dir, hardware: hardware(), sandbox: "none" });
+        try {
+          await waitFor(() => ctx.hub.registry.has("dev"));
+          await postTask(ctx.port, { taskId: "greet", role: "backend", title: "Add greeting", description: "greeting.txt must contain hello", testsFirst: true });
+          const task = await waitFor(() => ["merged", "failed"].includes(ctx.hub.tasks.get("greet")!.state) && ctx.hub.tasks.get("greet")!, 30_000, "task to end");
+          const events = task.history.map((h) => h.event).join("\n");
+          assert.equal(task.state, "merged", events);
+          assert.match(events, /back to the test writer: The builder disputes the tests you wrote first: the builder disputes a test written first: greet\.test\.mjs: the task says hello, the test says hi/);
+          assert.equal(task.reworkRound, 0, "a dispute isn't a rework round");
+          assert.equal(git(ctx.repoDir, "show", "main:greet.test.mjs"), "// greeting.txt holds hello");
+          assert.ok(!model.requests.filter((r) => (r.messages[0].content as string).startsWith("# Tests first")).some((r) => tools(r).includes("dispute_tests")), "the writer never has it");
+        } finally {
+          dev.stop();
+          await dev.runner.idle();
+          rmSync(dir, { recursive: true, force: true });
+        }
+      },
+      { qa: { enabled: false }, llm: { adapter: model }, acceptanceCheck: false },
+    );
+  });
+
   it("reminds an agent that stops without finish, and merges once it finishes", () => {
     const model = new ScriptedModel((req) => {
       switch (req.messages.length) {

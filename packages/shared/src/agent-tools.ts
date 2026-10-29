@@ -126,6 +126,16 @@ export const AGENT_TOOLS = {
       ),
     }),
   },
+  dispute_tests: {
+    description:
+      "Only for a task whose tests were written first, and only when you are sure one of them is wrong: it contradicts the " +
+      "task or the existing code. It ends your attempt (your work so far is kept), and the tests go back to their writer " +
+      "once, with your reason. Not for a test that is hard to pass, nor for work you couldn't finish.",
+    input: z.strictObject({
+      test: z.string().min(1).max(500).describe("The test that is wrong: its file and name"),
+      reason: z.string().min(1).max(4000).describe("What in the task or the existing code it contradicts"),
+    }),
+  },
   submit_plan: {
     description:
       "Architect only. Submit the plan: a summary and the tasks to delegate. Each task has a plan-local key; " +

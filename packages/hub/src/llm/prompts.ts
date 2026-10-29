@@ -136,7 +136,7 @@ You write this task's tests before anyone writes its code. A builder then makes 
 
 /** What the test writer is told when the builder disputes its tests. */
 export function disputeReason(detail: string | undefined): string {
-  return `The builder gave up on the tests you wrote first: ${detail ?? "no explanation"}. If it's right, fix the tests. If they're right, keep them and say why in your summary: the builder reads it. This happens only once.`;
+  return `The builder disputes the tests you wrote first: ${detail ?? "no explanation"}. If it's right, fix the tests. If they're right, keep them and say why in your summary: the builder reads it. This happens only once.`;
 }
 
 /** What a tests-first task's builder is told about the tests written first. */
@@ -149,7 +149,7 @@ function testsFirstBrief(t: NonNullable<TaskRecord["testsFirst"]>): string[] {
     "",
     t.disputed
       ? "They already went back to their writer once after a builder said one was wrong, and this is the result: make them pass."
-      : "If you are sure a test is wrong (it contradicts the task or the existing code), say which and why, and stop without calling a tool: the tests go back to their writer, once.",
+      : "If you are sure a test is wrong (it contradicts the task or the existing code), call dispute_tests with which and why: the tests go back to their writer, once. A test that's hard to pass isn't wrong.",
   ];
 }
 
