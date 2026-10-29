@@ -86,6 +86,8 @@ export interface PlannedTask {
   description: string;
   acceptanceCriteria: string[];
   dependsOn: string[];
+  /** The Architect's model writes its tests first; the builder makes them pass. */
+  testsFirst?: boolean;
 }
 
 export interface Plan {

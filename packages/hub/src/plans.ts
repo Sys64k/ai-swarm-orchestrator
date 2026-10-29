@@ -204,6 +204,7 @@ export class PlanManager {
           acceptanceCriteria: t.acceptanceCriteria,
           files: t.files,
           dependsOn: t.dependsOn.map((k) => ids[k]),
+          ...(t.testsFirst ? { testsFirst: true } : {}),
         },
         // The plan key ("api", "login-page") reads far better in ids than a truncated title.
         { planId, idHint: t.key },

@@ -9,7 +9,7 @@ interface PlanView {
   state: string;
   summary?: string;
   error?: string;
-  tasks?: Array<{ key: string; role: string; kind: string; title: string; dependsOn: string[]; acceptanceCriteria: string[] }>;
+  tasks?: Array<{ key: string; role: string; kind: string; title: string; dependsOn: string[]; acceptanceCriteria: string[]; testsFirst?: boolean }>;
   taskIds?: Record<string, string>;
   questions?: string[];
   dialogue?: PlanDialogueEntry[];
@@ -120,7 +120,7 @@ function printPlan(plan: PlanView): void {
   console.log(`\n${plan.summary}\n`);
   for (const [i, t] of plan.tasks!.entries()) {
     const deps = t.dependsOn.length ? `  (after ${t.dependsOn.join(", ")})` : "";
-    console.log(`${i + 1}. [${t.role}/${t.kind}] ${t.key}: ${t.title}${deps}`);
+    console.log(`${i + 1}. [${t.role}/${t.kind}${t.testsFirst ? ", tests first" : ""}] ${t.key}: ${t.title}${deps}`);
     for (const c of t.acceptanceCriteria) console.log(`     - ${c}`);
   }
   console.log(`\nPlanning cost: ${plan.llm.calls} model turns, ~$${plan.llm.costUsd.toFixed(3)}`);

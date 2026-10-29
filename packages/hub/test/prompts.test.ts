@@ -19,6 +19,14 @@ describe("the Architect's instructions", () => {
     assert.match(prompt, /never leave those updates to a later qa task/);
   });
 
+  it("mark edge-case logic tests first with its interface spelled out, and name code to reuse", () => {
+    const prompt = architectSystemPrompt();
+    assert.match(prompt, /set testsFirst on a task whose correctness lives in edge cases/);
+    assert.match(prompt, /Not for layout, wiring or config, nor for qa tasks/);
+    assert.match(prompt, /spell out the interface the tests use/);
+    assert.match(prompt, /add a criterion such as "reuses .* rather than a copy"/);
+  });
+
   it("stay byte-stable, so they stay in the prompt cache", () => {
     assert.equal(architectSystemPrompt(), architectSystemPrompt());
   });

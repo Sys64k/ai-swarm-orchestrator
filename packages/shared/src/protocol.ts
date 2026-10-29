@@ -228,6 +228,10 @@ export const PlannedTaskSchema = z.strictObject({
   acceptanceCriteria: z.array(z.string().min(1)).max(20).default([]),
   files: z.array(RepoPathSchema).max(50).default([]),
   dependsOn: z.array(z.string()).max(20).default([]),
+  testsFirst: z
+    .boolean()
+    .optional()
+    .describe("Logic whose correctness lives in edge cases: the Architect's model writes its tests first, and the builder makes them pass without changing them"),
 });
 export type PlannedTask = z.infer<typeof PlannedTaskSchema>;
 
