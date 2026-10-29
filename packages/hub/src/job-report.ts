@@ -1,4 +1,5 @@
 import { agentName, COUNTED_BUILD_RESULTS, type JobRecord, type PlanState, type TaskState, type TrackRecordQuery, type TrackRecordRow, type TrackRecords } from "@aso/shared";
+import { isBuild, isTestWriting } from "./jobs.js";
 
 /**
  * Track records, rebuilt from the tasks' job records (`jobs.ts`): how each model, machine, desk,
@@ -160,7 +161,12 @@ function plansInScope(plans: readonly ReportPlan[], query: TrackRecordQuery): Re
 
 /** A task's builds that have ended, oldest first. */
 function endedBuilds(task: ReportTask): JobRecord[] {
-  return (task.jobs ?? []).filter((j) => j.job === "implement" && ended(j));
+  return (task.jobs ?? []).filter((j) => isBuild(j) && ended(j));
+}
+
+/** What a tests-first task's test writer cost: part of what the task cost all in. */
+function testWritingCost(task: ReportTask): number {
+  return (task.jobs ?? []).filter(isTestWriting).reduce((sum, j) => sum + j.costUsd, 0);
 }
 
 /**
@@ -209,7 +215,7 @@ function startedBy(task: ReportTask, query: TrackRecordQuery, planShare: number)
   const first = builds[0];
   const key = first && keyOf(first, task, query.by);
   if (!first || key === undefined || !inPeriod(first, query) || !ofModel(query, buildModel(first))) return undefined;
-  return { key, costUsd: builds.reduce((sum, j) => sum + j.costUsd + (j.acceptanceCostUsd ?? 0), planShare) };
+  return { key, costUsd: builds.reduce((sum, j) => sum + j.costUsd + (j.acceptanceCostUsd ?? 0), planShare + testWritingCost(task)) };
 }
 
 function countStarted(row: TrackRecordRow, task: ReportTask, costUsd: number): void {
@@ -239,7 +245,8 @@ export function trackRecords(tasks: readonly ReportTask[], plans: readonly Repor
     if (query.level && task.spec.level !== query.level) continue;
     const started = startedBy(task, query, planShareOf(task));
     if (started) countStarted(rowOf(started.key), task, started.costUsd);
-    for (const job of (task.jobs ?? []).filter((j) => ended(j) && inPeriod(j, query))) {
+    // The test writer's job isn't a build or a QA run: only its cost counts, in what the task cost.
+    for (const job of (task.jobs ?? []).filter((j) => ended(j) && !isTestWriting(j) && inPeriod(j, query))) {
       const key = keyOf(job, task, query.by);
       if (key === undefined) continue;
       const counted = () => {

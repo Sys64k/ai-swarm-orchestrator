@@ -24,6 +24,17 @@ export function openJob(jobs: readonly JobRecord[] | undefined, kind: JobKind): 
   return last && !last.endedAt ? last : undefined;
 }
 
+/** A build: an implement job that isn't a tests-first task's test writer. */
+export const isBuild = (j: JobRecord): boolean => j.job === "implement" && !j.writesTests;
+
+/** A tests-first task's test writer's job (an implement job that writes the tests). */
+export const isTestWriting = (j: JobRecord): boolean => j.job === "implement" && !!j.writesTests;
+
+/** The model the task's tests were written on, if a test writer ran. */
+export function testWriterModel(jobs: readonly JobRecord[] | undefined): string | undefined {
+  return [...(jobs ?? [])].reverse().find((j) => isTestWriting(j) && j.model)?.model;
+}
+
 /** The latest build. */
 export function lastBuild(jobs: readonly JobRecord[] | undefined): JobRecord | undefined {
   return [...(jobs ?? [])].reverse().find((j) => j.job === "implement");

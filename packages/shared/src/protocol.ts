@@ -207,6 +207,8 @@ export const TaskSpecSchema = z.strictObject({
   level: TaskLevelSchema.optional(),
   /** A model every build of the task runs on: no escalation, no trial. The Hub keeps it as the spec it resolves to (`<provider>/<model>`). */
   model: z.string().min(1).max(200).optional(),
+  /** Tests first: the Architect's model writes the tests, then the builder makes them pass without changing them. */
+  testsFirst: z.boolean().optional(),
 });
 export type TaskSpec = z.infer<typeof TaskSpecSchema>;
 

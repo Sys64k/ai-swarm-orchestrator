@@ -124,6 +124,7 @@ export const JobRecordSchema = z
     acceptanceModel: z.string().optional().describe("The model that judged it"),
     acceptanceCostUsd: z.number().optional().describe("What that check cost (estimated)"),
     qualityNotes: z.number().int().optional().describe("Quality notes the check made on its work (they don't block)"),
+    writesTests: z.boolean().optional().describe("The test writer's job on a tests-first task, not a build: track records leave it out"),
     overturned: z
       .enum(OVERTURN_REASONS)
       .optional()
@@ -569,6 +570,17 @@ export const QualityNoteSchema = z.object({
 });
 export type QualityNote = z.infer<typeof QualityNoteSchema>;
 
+export const TestsFirstSchema = z
+  .object({
+    phase: z.enum(["tests", "build"]).describe("tests: the test writer (the Architect's model) writes them; build: the builder makes them pass"),
+    commit: z.string().optional().describe("The test writer's last commit"),
+    files: z.array(z.string()).describe("The tests it wrote: a builder's push that changes them is refused"),
+    notes: z.string().optional().describe("The test writer's summary, for the builder"),
+    disputed: z.boolean().optional().describe("The builder said a test was wrong, and the tests went back to their writer (once)"),
+  })
+  .describe("A tests-first task's phases");
+export type TestsFirst = z.infer<typeof TestsFirstSchema>;
+
 export const AcceptanceSchema = z
   .object({
     result: z.enum(["checking", "met", "unmet", "undecided"]).describe("checking: under way; undecided: the check couldn't tell, and the work went on"),
@@ -610,6 +622,7 @@ export const TaskSchema = z.object({
   mainCommit: z.string().optional(),
   qaSummary: z.string().optional(),
   acceptance: AcceptanceSchema.optional(),
+  testsFirst: TestsFirstSchema.optional(),
   screenshots: z
     .object({
       commit: z.string().describe("The commit QA tested when it took them"),

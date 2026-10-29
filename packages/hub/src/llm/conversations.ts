@@ -19,6 +19,7 @@ import type { Transcripts } from "../transcripts.js";
 type TaskDirectory = ProjectSet["tasks"];
 type PlanDirectory = ProjectSet["plans"];
 import type { AgentTurn } from "../tasks.js";
+import { roleOf, writingTests } from "../tests-first.js";
 import { LlmError, type LlmAdapter } from "./adapter.js";
 import { priceUsage } from "./pricing.js";
 import { Semaphore } from "./semaphore.js";
@@ -137,6 +138,8 @@ interface Conversation {
    * pinned for the whole round. (Named for desks, as saved conversations know it.)
    */
   deskModel?: string;
+  /** A tests-first task's test writer (the task's phase when the conversation began): it runs on the Architect's model. */
+  testWriter?: boolean;
 }
 
 /** A conversation as saved on disk: the subject and tools are rebuilt from the kind, id and role. */
@@ -150,6 +153,7 @@ interface SavedConversation {
   /** Answer to the last turn, for a worker that lost it in the restart and asks again. */
   lastResult?: OkResult;
   deskModel?: string;
+  testWriter?: boolean;
 }
 
 /**
@@ -217,6 +221,7 @@ export class ConversationManager {
         results: c.lastResult ? new Map([[c.lastResult.turn, c.lastResult]]) : new Map(),
         lastActivity: Date.now(),
         ...(c.deskModel ? { deskModel: c.deskModel } : {}),
+        ...(c.testWriter ? { testWriter: true } : {}),
       });
     }
     if (this.conversations.size) log.info(`restored ${this.conversations.size} agent conversation(s)`);
@@ -238,7 +243,7 @@ export class ConversationManager {
     if (req.taskId !== undefined) {
       const taskId = req.taskId;
       if (!this.tasks.isImplementing(nodeId, taskId)) return `task ${taskId} is not being implemented by ${nodeId}`;
-      return this.makeSubject("task", taskId, this.tasks.get(taskId)!.spec.role, nodeId);
+      return this.makeSubject("task", taskId, roleOf(this.tasks.get(taskId)!), nodeId);
     }
     const planId = req.planId!;
     if (!this.plans.isPlanning(nodeId, planId)) return `plan ${planId} is not being planned by ${nodeId}`;
@@ -279,11 +284,11 @@ export class ConversationManager {
 
   /**
    * The model a conversation calls, with its limit on calls at once: the Architect plans on the
-   * main model; a task agent on its desk's model, else the default agent model. A desk model the
+   * main model, and a tests-first task's test writer works on it; a task agent on its desk's model, else the default agent model. A desk model the
    * Hub can no longer use (say its key was removed) falls back to the default.
    */
   private routeFor(conv: Conversation): Route | undefined {
-    if (conv.subject.role === "architect") return this.architectRoute();
+    if (conv.subject.role === "architect" || conv.testWriter) return this.architectRoute();
     if (conv.deskModel?.startsWith(MACHINE_PREFIX) && this.opts.machineModels) {
       try {
         return this.opts.machineModels.route(conv.nodeId, conv.deskModel);
@@ -347,7 +352,7 @@ export class ConversationManager {
    * take the task, record this one as refused, so the failing attempt is requeued on that model.
    */
   private skipRefusedModel(conv: Conversation, error: string): void {
-    if (conv.subject.kind !== "task") return;
+    if (conv.subject.kind !== "task" || conv.testWriter) return;
     const spec = calledSpec({ spec: conv.deskModel }, this.opts.defaultAgentSpec);
     const task = this.tasks.get(conv.subject.id);
     if (!spec || !task || task.spec.model) return; // its own model: nowhere else to go
@@ -405,7 +410,11 @@ export class ConversationManager {
         results: new Map(),
         lastActivity: Date.now(),
       };
-      const choice: RoundModel = subject.kind === "task" ? this.roundModelOf(subject.id, nodeId) : {};
+      // A test writer runs on the Architect's model: deciding what "done" means is the hard part.
+      const task = subject.kind === "task" ? this.tasks.get(subject.id) : undefined;
+      const writer = !!task && writingTests(task);
+      const choice: RoundModel = writer ? { why: "writes the tests first" } : subject.kind === "task" ? this.roundModelOf(subject.id, nodeId) : {};
+      if (writer) conv.testWriter = true;
       if (choice.spec) conv.deskModel = choice.spec;
       this.conversations.set(conv.id, conv);
       const model = this.routeFor(conv)?.adapter.model;
@@ -577,6 +586,7 @@ export class ConversationManager {
       pendingToolUseIds: conv.pendingToolUseIds,
       lastResult,
       ...(conv.deskModel ? { deskModel: conv.deskModel } : {}),
+      ...(conv.testWriter ? { testWriter: true } : {}),
     };
     this.store?.saveConversation(conv.id, saved);
   }

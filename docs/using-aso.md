@@ -93,6 +93,26 @@ curl -X POST http://localhost:7420/api/tasks \
 `GET /api/tasks/<id>` and the dashboard show the task's state, the node working on it, any
 rework rounds, and an event history.
 
+### Tests first
+
+With `"testsFirst": true`, a strong model decides what "done" means before a cheaper one builds
+it. Use it where a careless implementation goes wrong at the edges: merging, limits, parsing,
+cutting text.
+
+1. **The test writer** runs on the Architect's model, in the `qa` role, so it can change test
+   files only. It reads the code the task touches and its existing tests, writes tests for every
+   criterion and the edge cases, and runs them: they must fail because the feature is missing,
+   not because a test is broken. Nothing goes to QA yet.
+2. **The builder** (the desk's model, escalation as usual) gets the task with the list of tests
+   and the writer's notes, and writes the code that makes them pass. A push that changes those
+   tests is refused, so it can't loosen a test to fit its code.
+3. **A disputed test** goes back once: a builder sure that a test is wrong gives up saying why,
+   and the tests go back to their writer with that explanation (not a rework round). The writer
+   fixes them or keeps them and says why. After that, giving up is an ordinary rework round.
+
+The test writer's job isn't counted as a build in track records; its cost is part of what the
+task cost all in. The pull request and the console's task page say who wrote the tests, and which.
+
 ## Agents
 
 An **agent** is one job slot of a worker machine, named after both: `avalon #2` is desk 2 on

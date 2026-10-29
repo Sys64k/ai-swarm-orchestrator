@@ -571,11 +571,27 @@ export function crewLine(task: Pick<Task, "state" | "crew">): string | undefined
  * marked: "Model: gemini", "Models: terra (on trial), then opus". Undefined before its first build.
  */
 export function modelLine(task: Pick<Task, "jobs" | "challenger">): string | undefined {
-  const models = (task.jobs ?? []).flatMap((j) => (j.job === "implement" && j.model ? [j.model] : []));
+  const models = (task.jobs ?? []).flatMap((j) => (isBuild(j) && j.model ? [j.model] : []));
   const runs = models.filter((m, i) => m !== models[i - 1]);
   if (!runs.length) return undefined;
   if (task.challenger) runs[0] += " (on trial)";
   return `${runs.length === 1 ? "Model" : "Models"}: ${runs.join(", then ")}`;
+}
+
+type TaskJob = NonNullable<Task["jobs"]>[number];
+/** A build: not a tests-first task's test writer (the Hub's isBuild in jobs.ts). */
+const isBuild = (j: TaskJob) => j.job === "implement" && !j.writesTests;
+
+/**
+ * A tests-first task's phase for its page: "Tests first: the test writer (claude-opus-5-5) is
+ * writing them" or "Tests first, by claude-opus-5-5: a.test.ts; the builder can't change them".
+ */
+export function testsFirstLine(task: Pick<Task, "jobs" | "testsFirst">): string | undefined {
+  const t = task.testsFirst;
+  if (!t) return undefined;
+  const writer = [...(task.jobs ?? [])].reverse().find((j) => j.job === "implement" && j.writesTests && j.model)?.model;
+  if (t.phase === "tests") return `Tests first: the test writer${writer ? ` (${writer})` : ""} is writing them${t.disputed ? " again, after the builder disputed one" : ""}`;
+  return `Tests first${writer ? `, by ${writer}` : ""}: ${t.files.join(", ") || "no files"}; the builder can't change them${t.disputed ? " (back to their writer once)" : ""}`;
 }
 
 /** Where a project's QA-approved work goes, for its page. */

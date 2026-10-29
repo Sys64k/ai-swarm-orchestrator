@@ -87,6 +87,15 @@ describe("track records", () => {
     assert.ok(!three.some((x) => x.key === "opus"), "the plan isn't counted");
   });
 
+  it("leaves a tests-first task's test writer out of the builds, but charges its cost to the task", () => {
+    const writer = build("opus", "built", { writesTests: true, costUsd: 0.4 });
+    const r = trackRecords([task([writer, build("qwen", "built", { qa: "passed" })])], [], { by: "model" });
+    assert.deepEqual(r.rows.map((x) => x.key), ["qwen"], "the writer's job is no build of its model");
+    const qwen = r.rows[0];
+    assert.deepEqual([qwen.tasks.finished, qwen.tasks.firstTry, qwen.builds.jobs], [1, 1, 1], "the builder's first build is its first try");
+    assert.equal(qwen.started.costUsd, 0.5, "all in: its build and the tests written for it");
+  });
+
   it("counts only a period's jobs between since and until, for trends", () => {
     const opusAt = tasks[1].jobs![2].startedAt; // Opus's build, after Gemini's first two there
     const before = trackRecords(tasks, [], { by: "model", until: opusAt });

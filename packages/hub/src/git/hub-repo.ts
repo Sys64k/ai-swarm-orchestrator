@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import type { LockedTests } from "../tests-first.js";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { execFile } from "node:child_process";
@@ -99,9 +100,10 @@ export class HubRepository {
 
   /**
    * Check a worker's claimed result before spending QA time on it. Returns an error message,
-   * or undefined if the commit is the head of `task/<id>` and leaves protected files alone.
+   * or undefined if the commit is the head of `task/<id>` and leaves protected files alone (and,
+   * on a tests-first task, the tests written first since `locked.since`).
    */
-  async verifyTaskCommit(taskId: TaskId, commit: string, role?: AgentRole): Promise<string | undefined> {
+  async verifyTaskCommit(taskId: TaskId, commit: string, role?: AgentRole, locked?: LockedTests): Promise<string | undefined> {
     const branch = taskBranchName(taskId);
     const head = await this.resolve(`refs/heads/${branch}`);
     if (!head) return `${branch} was not pushed to the Hub`;
@@ -115,6 +117,11 @@ export class HubRepository {
     if (role) {
       const outOfScope = files.filter((f) => writeDenial(role, f));
       if (outOfScope.length) return `${branch} modifies files outside the ${role} role's scope: ${outOfScope.join(", ")}`;
+    }
+    if (locked) {
+      const since = await this.git.raw(["diff", "--name-only", "--no-renames", `${locked.since}..${commit}`]);
+      const changed = since.split("\n").filter((f) => locked.files.includes(f));
+      if (changed.length) return `${branch} changes the tests written first (${changed.join(", ")}): make them pass without changing them, or give up saying which test is wrong`;
     }
     return undefined;
   }
