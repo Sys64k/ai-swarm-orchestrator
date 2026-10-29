@@ -117,6 +117,8 @@ their desk.
    executes locally until it calls `finish`, and the worker commits and pushes the branch back
    to the Hub. If the agent stops without calling `finish`, it is reminded once. If it stops
    again, the task fails with the agent's explanation, and nothing is pushed or sent to QA.
+   An empty reply (a reasoning model's turn of thinking only) isn't a stop: the agent is asked
+   again, up to 3 times in a row.
    The tools are:
    - `list_files`, `read_file`, `search`
    - `view_image`, to look at a screenshot the agent saved (agents are asked to check visual
