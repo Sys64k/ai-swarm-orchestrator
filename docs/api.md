@@ -32,7 +32,7 @@ Answers can gain fields over time: clients should ignore fields they don't know.
 | `POST` | `/api/worker-keys/{id}/revoke` | Revoke a key: its machine is disconnected and can't come back with it |
 | `GET` | `/api/models` | The models desks can use, and the Architect's and default ones |
 | `GET` | `/api/public-stats` | The swarm's track record as the Hub shares it, for anyone (404 unless started with `--public-stats`) |
-| `GET` | `/api/track-records` | How models, machines, desks, roles or projects have done with their jobs (`?by=`, `project`, `role`, `model`: only that model's work, `since`, `until`: one period of a trend) |
+| `GET` | `/api/track-records` | How models, machines, desks, roles, projects or task levels have done with their jobs (`?by=`, `project`, `role`, `level`, `model`: only that model's work, `since`, `until`: one period of a trend) |
 | `GET` | `/api/model-suggestions` | Which model each role would do as well on for less, or clearly better on (`?since=`, default the last 30 days) |
 | `POST` | `/api/models/roles` | Put the Architect or the reviewer (the acceptance check) on a model (`{ role, model }`), or back on `default` |
 | `POST` | `/api/models/challengers` | Put a model on trial for the desks or the reviewer (`{ role, model, share?, budgetUsd? }`), end one (`end: true`), or all with `model: "none"` |
@@ -65,6 +65,6 @@ Answers can gain fields over time: clients should ignore fields they don't know.
 | `GET` | `/api/plans`, `/api/plans/:id` | Plans with state, summary, proposed tasks, cost |
 | `POST` | `/api/plans/:id/approve` / `reject` | Decide on a proposed plan; approve returns the created task ids. Plans with questions can be rejected too |
 | `POST` | `/api/plans/:id/reply` | `{ "message" }`: answer the Architect's questions (`awaiting_input`) or ask for changes to a `proposed` plan; it is planned again. `409` in other states or after 10 replies |
-| `POST` | `/api/tasks` | Submit a task: `role`, `title`, `description`, optional `kind`, `taskId`, `acceptanceCriteria`, `files`, `dependsOn` (existing task ids). Returns `201`, `400` (validation) or `409` (duplicate id) |
+| `POST` | `/api/tasks` | Submit a task: `role`, `title`, `description`, optional `kind`, `taskId`, `acceptanceCriteria`, `files`, `dependsOn` (existing task ids), `level` (how hard, 1 to 5, for track records), `model` (every build on this model: no escalation or trial). Returns `201`, `400` (validation, or a model the Hub doesn't know) or `409` (duplicate id) |
 | `GET` (WS) | `/ws` | Agent WebSocket endpoint (see [protocol](../ARCHITECTURE.md#4-communication-protocol)) |
 | Git | `/git/<project>.git` | Clone and fetch a project. Pushes are limited to creating or updating `task/<id>` branches |

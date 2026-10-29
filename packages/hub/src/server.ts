@@ -844,6 +844,12 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     const resolved = resolveModel(model, (await providers.models()).models, providers.list());
     return "error" in resolved ? resolved : { spec: resolved.spec };
   };
+  /** A task's own model → its spec; `default` isn't one (a task without a model already gets the default). */
+  const resolveTaskModel = async (model: string): Promise<{ spec: string } | { error: string }> => {
+    const resolved = model === "default" ? { spec: null } : await resolveSpec(model);
+    if ("error" in resolved) return resolved;
+    return resolved.spec ? { spec: resolved.spec } : { error: "a task's model must be a model, not default" };
+  };
   /**
    * Like resolveSpec, but a machine's own model goes as it is: the roles and the ladder can't
    * take one, and DeskModels refuses it with that reason.
@@ -1349,8 +1355,11 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     const req = await parsed(c, CreateTaskBodySchema);
     if (!req.ok) return c.json({ error: req.error }, 400);
     try {
-      const { project, ...spec } = req.data;
-      return c.json(projects.resolve(project).tasks.submit(spec), 201);
+      const { project, model, ...spec } = req.data;
+      // Checked after parsing: whether a model exists depends on the providers. Kept as the desks name theirs.
+      const own = model === undefined ? undefined : await resolveTaskModel(model);
+      if (own && "error" in own) return c.json({ error: `model: ${own.error}` }, 400);
+      return c.json(projects.resolve(project).tasks.submit({ ...spec, ...(own ? { model: own.spec } : {}) }), 201);
     } catch (err) {
       return fail(c, err);
     }

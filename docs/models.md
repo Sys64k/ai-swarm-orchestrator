@@ -240,6 +240,10 @@ aso hub-service install ... --agent-model claude-haiku-5-5 \
 - **A person's retry** starts the task again on its desk's model and gives refused models
   another chance (a refusal may have been fixed since).
 - **Off:** `--no-escalation` keeps every round on the desk's model.
+- **A task with a model of its own** (`model` when it's submitted, `POST /api/tasks`) runs every
+  round on that model, whatever its desk's model, the ladder or a trial: no escalation, and a
+  refusal fails it instead of moving it on. That keeps its record that model's alone, for
+  finding what a model can do (see [Task levels](#task-levels-how-hard-a-model-can-go)).
 
 #### Change it while the Hub runs
 
@@ -275,6 +279,7 @@ aso track-records                    # by model
 aso track-records --by host          # by machine (with their QA runs for others)
 aso track-records --by desk --project aso-ui --since 2026-11-01
 aso track-records --by project --model gpt-6.1-terra   # one model's work, per project
+aso track-records --by level --model qwen3-coder:30b   # one model's work, per task level
 ```
 
 It prints, for example:
@@ -326,6 +331,22 @@ reviewer's met held up.
   and `GET /api/track-records` serves it. With a model filter, only that model's work counts: its
   builds, the tasks it started and finished, its plans and acceptance checks, but no QA runs,
   which have no model.
+
+#### Task levels: how hard a model can go
+
+A task can say how hard it is: `level`, 1 to 5, when it's submitted (`POST /api/tasks`). Track
+records group by it (`--by level`, with `no level` for tasks without one) and filter by it
+(`--level 3`); plans have no level, so a level filter leaves them out. With a model of the
+task's own (see [Escalation](#escalation)), the same tasks at each level show how far a model
+goes before it fails, e.g. a local model through Ollama:
+
+| Level | A task like |
+|---|---|
+| 1 | one pure function, with its tests |
+| 2 | a change to an existing function, its tests still passing |
+| 3 | a small feature across two or three files |
+| 4 | a UI component with its tests |
+| 5 | a change across packages (API and UI together) |
 
 #### Suggestions: the cheapest mix that holds up
 

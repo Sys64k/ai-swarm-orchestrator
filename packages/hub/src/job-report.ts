@@ -11,7 +11,7 @@ import { agentName, COUNTED_BUILD_RESULTS, type JobRecord, type PlanState, type 
 export interface ReportTask {
   project: string;
   state: TaskState;
-  spec: { role: string };
+  spec: { role: string; level?: number };
   jobs?: JobRecord[];
   /** The plan it came from, whose cost its tasks share. */
   planId?: string;
@@ -69,8 +69,13 @@ function keyOf(job: JobRecord, task: ReportTask, by: TrackRecordQuery["by"]): st
       return task.spec.role;
     case "project":
       return task.project;
+    case "level":
+      return levelKey(task);
   }
 }
+
+/** A task's level as track records show it. */
+const levelKey = (task: ReportTask) => (task.spec.level ? `level ${task.spec.level}` : "no level");
 
 /** A job that has ended (a build still being checked, `pushed`, hasn't). */
 const ended = (j: JobRecord) => !!j.endedAt && !!j.result && j.result !== "pushed";
@@ -144,9 +149,9 @@ function countPlan(row: TrackRecordRow, plan: ReportPlan): void {
   p.costUsd += plan.llm.costUsd;
 }
 
-/** The plans a query covers: its project and model, in its period; none with a role filter (plans have no role). */
+/** The plans a query covers: its project and model, in its period; none with a role or level filter (plans have neither). */
 function plansInScope(plans: readonly ReportPlan[], query: TrackRecordQuery): ReportPlan[] {
-  if (query.role) return [];
+  if (query.role || query.level) return [];
   return plans.filter(
     (p) => (!query.project || p.project === query.project) && ofModel(query, p.model ?? UNKNOWN_MODEL) && inPeriod({ startedAt: p.createdAt }, query),
   );
@@ -214,7 +219,7 @@ function countStarted(row: TrackRecordRow, task: ReportTask, costUsd: number): v
 }
 
 /**
- * Track records: per model, machine, desk, role or project, what came of its ended builds and
+ * Track records: per model, machine, desk, role, project or task level, what came of its ended builds and
  * QA runs, the tasks it built on and finished, and their cost. By model and by project also the
  * plans made (the Architect's model) and the acceptance checks made (the reviewer's model).
  * With a model filter, only that model's work: by machine, say, how it did on each.
@@ -230,6 +235,7 @@ export function trackRecords(tasks: readonly ReportTask[], plans: readonly Repor
   for (const task of tasks) {
     if (query.project && task.project !== query.project) continue;
     if (query.role && task.spec.role !== query.role) continue;
+    if (query.level && task.spec.level !== query.level) continue;
     const started = startedBy(task, query, planShareOf(task));
     if (started) countStarted(rowOf(started.key), task, started.costUsd);
     for (const job of (task.jobs ?? []).filter((j) => ended(j) && inPeriod(j, query))) {

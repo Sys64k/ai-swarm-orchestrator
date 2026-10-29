@@ -322,7 +322,7 @@ export interface Desks {
   models: Array<{ model: string; baseUrl?: string; concurrency: number; running: number; waiting: number }>;
 }
 
-export type TrackRecordKey = "model" | "host" | "desk" | "role" | "project";
+export type TrackRecordKey = "model" | "host" | "desk" | "role" | "project" | "level";
 
 /** One model's, machine's, desk's, role's or project's record (`GET /api/track-records`). */
 export interface TrackRecordRow {

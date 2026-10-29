@@ -71,6 +71,22 @@ describe("track records", () => {
     assert.deepEqual(trackRecords([], [], { by: "model" }), { by: "model", since: null, rows: [] });
   });
 
+  it("groups and filters by the task's level, leaving plans out of a level filter", () => {
+    const levelled = [
+      task([build("qwen", "built", { qa: "passed" })], { spec: { role: "frontend", level: 1 } }),
+      task([build("qwen", "failed")], { state: "failed", spec: { role: "frontend", level: 3 } }),
+      task([build("gemini", "built")], { spec: { role: "backend", level: 3 } }),
+      task([build("gemini", "built")]),
+    ];
+    const plan: ReportPlan = { project: "shop", state: "approved", model: "opus", llm: { costUsd: 1 }, createdAt: at() };
+    const byLevel = trackRecords(levelled, [plan], { by: "level", model: "qwen" }).rows;
+    assert.deepEqual(byLevel.map((x) => [x.key, x.tasks.finished, x.builds.failed]), [["level 1", 1, 0], ["level 3", 0, 1]], "one model's ladder");
+    assert.deepEqual(trackRecords(levelled, [plan], { by: "level" }).rows.map((x) => x.key).sort(), ["level 1", "level 3", "no level"], "no plans: they have no level");
+    const three = trackRecords(levelled, [plan], { by: "model", level: 3 }).rows;
+    assert.deepEqual(three.map((x) => [x.key, x.builds.jobs]), [["gemini", 1], ["qwen", 1]]);
+    assert.ok(!three.some((x) => x.key === "opus"), "the plan isn't counted");
+  });
+
   it("counts only a period's jobs between since and until, for trends", () => {
     const opusAt = tasks[1].jobs![2].startedAt; // Opus's build, after Gemini's first two there
     const before = trackRecords(tasks, [], { by: "model", until: opusAt });
