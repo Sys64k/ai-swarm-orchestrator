@@ -257,7 +257,7 @@ export class JobRunner {
     const repoDir = this.repoDir(task.project, slot);
     const job: RunningJob = { taskId: task.taskId, job: "implement" };
     let conflicts: string[] = [];
-    const status = (state: "in_progress" | "failed", detail?: string) =>
+    const status = (state: "in_progress" | "failed", detail?: string, gaveUp = false) =>
       send(
         "STATUS_UPDATE",
         {
@@ -265,6 +265,7 @@ export class JobRunner {
           taskId: task.taskId,
           detail: detail?.slice(0, 2000),
           ...(state === "in_progress" ? { slot: slot + 1, ...(conflicts.length ? { conflicts } : {}) } : {}),
+          ...(gaveUp ? { gaveUp } : {}),
         },
         state === "failed" ? job : undefined,
       );
@@ -313,7 +314,7 @@ export class JobRunner {
         const saved = await opened.saveProgress(message);
         if (saved) message += ` (unfinished work saved on task/${task.taskId} @ ${saved.slice(0, 8)}; a retry continues from it)`;
       }
-      status("failed", message);
+      status("failed", message, (err as Error).name === "AgentStoppedError");
     }
   }
 

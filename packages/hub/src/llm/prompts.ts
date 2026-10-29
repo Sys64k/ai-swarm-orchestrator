@@ -119,7 +119,8 @@ function describePlannedTask(t: PlannedTask): string {
 export const CONTINUE_PROMPT =
   "You ended your turn without calling finish, so nothing has been handed in. If the task is complete and verified, " +
   "call finish now. Otherwise keep working with your tools. If you cannot complete the task, reply with a short " +
-  "explanation of what blocks you and call no tool: the task then fails with your explanation, and nothing goes to QA.";
+  "explanation of what blocks you and call no tool: your work so far is kept, nothing goes to QA, and the task comes back " +
+  "as a rework round with your explanation (it fails once its rework rounds are used up).";
 
 /** First user message: the task as the Hub knows it, including feedback from a failed attempt. */
 export function taskPrompt(task: TaskRecord): string {

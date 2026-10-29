@@ -673,14 +673,14 @@ console.log("greeting ok");\n`;
       async (ctx) => {
         const record = await runGreet(ctx);
         assert.equal(record.state, "failed");
-        assert.match(record.history.at(-1)!.event, /stopped without calling finish: \(no explanation\)/);
-        assert.equal(silent.requests.length, 6, "write, 3 empty replies asked again, then the reminder, then failed");
+        assert.match(record.history.map((h) => h.event).join("\n"), /gave up on .*stopped without calling finish: \(no explanation\)/);
+        assert.equal(silent.requests.length, 4 * 6, "each of 4 tries: write, 3 empty replies asked again, the reminder, then it gave up");
       },
       { qa: { enabled: false }, llm: { adapter: silent } },
     );
   });
 
-  it("fails the task without QA when the agent stops twice without finish", () => {
+  it("makes an agent's give-up (stopping twice without finish) a rework round, and fails once they're used up", () => {
     const model = new ScriptedModel((req) =>
       req.messages.length === 1
         ? reply([toolUse("t1", "write_file", { path: "greeting.txt", content: "half done\n" })])
@@ -691,9 +691,12 @@ console.log("greeting ok");\n`;
         const record = await runGreet(ctx);
         const events = record.history.map((h) => h.event);
         assert.equal(record.state, "failed", events.join("\n"));
-        assert.match(events.at(-1)!, /stopped without calling finish: I can't add the test script/);
+        assert.match(events.join("\n"), /gave up on .*stopped without calling finish: I can't add the test script/);
+        assert.match(events.join("\n"), /rework round 1: The previous agent gave up: .*I can't add the test script/);
+        assert.match(events.at(-1)!, /gave up after 3 rework rounds/);
         assert.ok(!events.some((e) => /pushed|QA/.test(e)), events.join("\n"));
-        assert.equal(model.requests.length, 3); // write, stop, stop again after the reminder
+        assert.equal(model.requests.length, 4 * 3, "each of 4 tries: write, stop, stop again after the reminder");
+        assert.deepEqual(record.jobs?.map((j) => j.result), ["failed", "failed", "failed", "failed"], "counted as given up");
         assert.throws(() => git(ctx.repoDir, "show", "main:greeting.txt"));
       },
       { qa: { enabled: false }, llm: { adapter: model } },

@@ -339,6 +339,8 @@ const StatusUpdatePayload = z
     conflicts: z.array(z.string().min(1).max(1000)).max(500).optional(),
     /** Sent with `completed`: the views the agent asks QA to screenshot. */
     screenshotTargets: ScreenshotTargetsSchema.optional(),
+    /** Sent with `failed`: the agent gave up (stopped without finishing, saying why); its work so far is saved. */
+    gaveUp: z.boolean().optional(),
   })
   .refine((p) => p.state === "idle" || p.taskId !== undefined, {
     message: "taskId is required unless state is idle",

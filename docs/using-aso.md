@@ -116,7 +116,8 @@ their desk.
    agent works through tools the worker
    executes locally until it calls `finish`, and the worker commits and pushes the branch back
    to the Hub. If the agent stops without calling `finish`, it is reminded once. If it stops
-   again, the task fails with the agent's explanation, and nothing is pushed or sent to QA.
+   again, it has given up: nothing is sent to QA, its work so far is saved on the branch, and the
+   task comes back as a rework round with its explanation (failing once the rounds are used up).
    An empty reply (a reasoning model's turn of thinking only) isn't a stop: the agent is asked
    again, up to 3 times in a row.
    The tools are:

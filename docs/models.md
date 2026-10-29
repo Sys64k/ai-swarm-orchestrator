@@ -230,7 +230,9 @@ aso hub-service install ... --agent-model claude-haiku-5-5 \
   gemini/models/gemini-3.8-flash refused this task)`.
 - **Running out of turns counts too:** an agent that uses all its turns (`--max-turns`) has its
   work saved on the branch, and its task goes on in a rework round from there instead of
-  failing, so it escalates like work QA or the acceptance check sent back.
+  failing, so it escalates like work QA or the acceptance check sent back. **So does giving up:**
+  an agent that stops without finishing, saying why, hands the task on to a rework round with
+  its explanation (track records count it under failed).
 - **The rework limit stays** at 3 rework rounds, so a task gets at most 4 tries. With the
   defaults:
 
