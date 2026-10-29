@@ -147,6 +147,8 @@ flowchart LR
 | | `registry.ts` | `NodeRegistry`: connected nodes, heartbeats, the jobs each runs (up to its slots), drain/restart, automatic updates |
 | | `routing.ts` | `selectNode()`: a pure, deterministic routing function |
 | | `tasks.ts` | `TaskManager`: queue, dispatch, verification, QA, rework, merge, node-loss handling |
+| | `tests-first.ts` | A tests-first task's phase rules: who works in which role, which tests are locked, when a dispute counts |
+| | `jobs.ts`, `job-report.ts` | Job records on each task (`isBuild` defines a build), and track records rebuilt from them |
 | | `git/http-backend.ts` | Git smart-HTTP via a `git http-backend` CGI bridge, with the push policy |
 | | `git/hub-repo.ts` | `HubRepository`: verify task commits, merge and add dependencies on main under one lock |
 | | `llm/adapter.ts` | `LlmAdapter` interface; `AnthropicApiAdapter` (official SDK, streaming, caching, fallbacks) |
@@ -204,7 +206,7 @@ keys are rejected.
 | `REGISTRATION_ACK` | hub → node | 1 | Registration accepted |
 | `NODE_HEARTBEAT` | node → hub | 2 | Every 15 s: free RAM, CPU load, Docker availability |
 | `TASK_ASSIGNMENT` | hub → node | 2 | A `TaskSpec` with its `project` (the worker checks out `/git/<project>.git`), plus `rework` (round, reason, failures, test output) when the task comes back |
-| `STATUS_UPDATE` | node → hub | 2 | `accepted`, `in_progress`, `waiting_*`, `completed` (with commit and any `screenshotTargets`), `failed`, `idle` |
+| `STATUS_UPDATE` | node → hub | 2 | `accepted`, `in_progress`, `waiting_*`, `completed` (with commit and any `screenshotTargets`), `failed` (with `gaveUp` or `disputesTests` when the agent stopped on purpose), `idle` |
 | `TEST_EXECUTION` | hub → node | 3 | QA: test an exact commit with `setup` steps and a `command` argv; carries the `project` and any `screenshotTargets` |
 | `FEEDBACK_LOOP` | node → hub | 3 | QA verdict: `pass` (with the screenshots the project's script saved, if any), or `fail` with at least one failure and the output tail |
 | `FILE_OPERATION` | node → hub | 5 | Audit trail of agent file edits (sent by the agent loop) |
@@ -475,11 +477,11 @@ stateDiagram-v2
   assigned --> in_progress: worker started
   assigned --> pending: node lost (not started)
   in_progress --> in_progress: node lost → held, node resumes
-  in_progress --> pending: held too long / node lost the job
+  in_progress --> pending: held too long / node lost the job / rework (out of turns, context full, gave up) / tests disputed
   in_progress --> verifying: completed + commit
-  in_progress --> failed: worker reports failed
+  in_progress --> failed: worker reports failed (an error, or no rounds left)
   verifying --> awaiting_qa: commit is branch head, no protected files
-  verifying --> pending: rework (bad push)
+  verifying --> pending: rework (bad push) / tests written first, on to a builder
   verifying --> merging: QA disabled
   awaiting_qa --> testing: TEST_EXECUTION
   testing --> awaiting_qa: QA node could not run / lost
@@ -522,6 +524,21 @@ stateDiagram-v2
   never appear in project names), so the sandbox mounts only that job's checkout. A worker
   that reconnects reports all its `running` jobs and gets each one back. The Architect has one
   slot.
+- **An unfinished attempt is a rework round.** Running out of turns, filling the model's
+  context window and giving up all end alike: the worker saves the work on the branch and
+  reports `failed`, and the Hub makes that a rework round (`rework`) whose reason says what
+  happened and to continue from the branch. It counts toward `maxReworkRounds`, escalation
+  applies, and the task fails only when the rounds are used up. Why: failing at once threw
+  away the rounds QA or the acceptance check would have given, and a weaker model's stop is
+  often got past by a fresh conversation or a stronger model (see
+  [the local-model experiment](docs/local-model-experiment.md)). How each is detected:
+  [Escalation](#escalation-llmescalationts) and [Tools and their limits](#tools-and-their-limits).
+- **Level and a model of its own.** A task may carry `level` (1–5, how hard it is) and `model`
+  (resolved to a `<provider>/<model>` spec when submitted; an unknown one is a 400). The level
+  only groups and filters track records. A task with its own model is pinned: every round runs
+  on it, with no escalation, no trial, and a refusal fails it instead of moving it on. Why:
+  together they measure how hard a task one model can finish alone, so its record must be that
+  model's only.
 - **Ownership.** Status updates and verdicts are accepted only from the node that currently
   owns that stage of the task.
 - **History.** Every task keeps an event history (last 50 entries), shown by
@@ -555,6 +572,36 @@ stateDiagram-v2
   limits: rework rounds, node drops, QA attempts and budget. The budget counts from the retry
   (`budgetBaseUsd`), while `llm.costUsd` keeps the total. The branch keeps the previous
   attempt, and the agent gets a `rework` note saying why it is running again.
+
+### Tests-first tasks (`tests-first.ts`)
+
+A task with `testsFirst` (set when submitted, or by the Architect on a planned task) runs in two
+phases, kept in `task.testsFirst` (`phase`, `commit`, `files`, `notes`, `disputed`, `from`).
+`tests-first.ts` holds the rules, so the task pipeline, the prompts and the model routing agree.
+
+| Phase | Who | What the Hub does |
+|---|---|---|
+| `tests` | The test writer: the Architect's model (`ConversationManager.routeFor`), in the `qa` role (`roleOf`), so it may write test files only | Its push is verified like any other, then `testsWritten` records the files it changed and its summary, and requeues the task for a builder. No QA: the tests fail until the feature exists |
+| `build` | A builder on the desk's model, with the usual escalation | The prompt lists the tests and the writer's notes. Push verification (`lockedTests`) refuses a commit that changes those files since the writer's commit |
+
+**Disputes.** A builder that may still dispute (`mayDispute`: once per task) gets the
+`dispute_tests` tool, added last to its tool list so every other conversation keeps the same
+cached prefix. Calling it ends the attempt with the work saved, and the worker reports `failed`
+with `disputesTests`. `disputeTests` then sends the tests back to their writer with the reason,
+through `sendBack` (not a rework round, so it costs none of the limit), and notes the branch head in
+`testsFirst.from`. The writer works on top of the builder's saved code, so push verification
+applies the `qa` scope only to the changes since `from`, and only the files changed since then
+are added to the locked tests. A plain give-up, or a second dispute, is an ordinary rework round.
+
+**Why.** Deciding what "done" means is the hard part on edge-case logic, so the strong model
+does that once, and a cheaper model does the bulk. Locking the tests keeps a builder from
+loosening a test to fit its code. The dispute is an explicit tool because when any give-up
+counted as one, builders used it for "couldn't finish in time", and the strong model rewrote
+tests that were fine (see [the local-model experiment](docs/local-model-experiment.md)).
+
+The test writer's job carries `writesTests`, so `isBuild` leaves it out of builds, trials and
+track records; its cost counts in the task's all-in cost. The pull request and the console say
+who wrote the tests, and which.
 
 ### Transcripts
 
@@ -740,6 +787,9 @@ Pushes land as branch refs in the Hub repo without touching its checked-out `mai
   so a buggy or modified worker can't sneak lockfile changes past QA.
 - Every changed file is within the task role's writable scope (`ROLE_POLICIES`). For example,
   a QA branch that edits `src/` is sent back.
+- On a tests-first task, the builder's commit leaves the tests written first alone, and a test
+  writer back after a dispute is held to its role's scope only from where it started (see
+  [Tests-first tasks](#tests-first-tasks-tests-firstts)).
 
 **Merging** the tested commit, not whatever the branch points to now, runs under the `main`
 lock it shares with dependency installs:
@@ -832,6 +882,20 @@ numbered criteria, the agent's summary (labelled a claim) and the diff against t
   the pull request.
 - **Undecided:** no model, a model error, no diff, or an answer that skips a criterion; the
   work goes on, noted on the task and in the pull request.
+
+- **Missing tests are unmet.** The prompt says a criterion asking for tests, or for a file to be
+  added or changed, is `unmet` when the diff has no such change. `unclear` is for what the diff
+  can't show (code outside it, a cut diff). Before, a reviewer could call absent tests
+  `unclear`, which doesn't block, though the diff does show that they're missing.
+- **Quality notes, which never block.** `report_acceptance` also takes `quality_notes`: up to
+  `MAX_QUALITY_NOTES` (5) concrete problems besides the criteria, each a kind
+  (`QUALITY_NOTE_KINDS`: `duplication`, `dead-code`, `misleading-summary`, `tests-weakened`,
+  `other`), a sentence and an optional file; `readQualityNotes` drops what it can't read. They
+  go on `task.acceptance.qualityNotes`, the pull request (`qualityNoteLines`) and the history,
+  and the build's job record counts them (`qualityNotes`), so track records show a model that
+  passes but cuts corners. They don't block because they're judgment calls; a criterion is the
+  place for a must (the Architect writes reuse criteria, see
+  [Planning flow](#planning-flow)).
 
 A verdict for a commit that's no longer the task's (a newer push, a cancel) is dropped. The
 check's tokens count toward the task's spend. Tried on the real history of aso-ui #99: it judged
@@ -989,7 +1053,7 @@ sequenceDiagram
 | `change.type` | Fields | Hub action |
 |---|---|---|
 | `add_dependencies` | `packages: [{name, version?, dev}]` (1–30, distinct names) | `npm install --package-lock-only --ignore-scripts`, one run for runtime and one for dev packages, one commit |
-| `set_scripts` | `scripts: {name: command}` (1–10) | Edit `package.json` directly, merging scripts and keeping the indentation and other fields |
+| `set_scripts` | `scripts: {name: command}` (1–10) | Edit `package.json` directly, adding the new scripts and keeping the indentation and other fields; refused whole if it would change an existing script |
 
 **Empty projects.** When the target has no `package.json`, the Hub first writes a minimal one
 (`name` from the directory, `version: "0.1.0"`, `private: true`). This lets a brand-new
@@ -1002,6 +1066,12 @@ repository be bootstrapped entirely by agents.
 - **Lifecycle scripts refused:** `preinstall`, `install`, `postinstall`, `prepublish`,
   `preprepare`, `prepare`, `postprepare`, `prepack`, `postpack`, `dependencies`. npm runs these
   automatically during installs, including the workers' and QA's `npm ci`.
+- **Add only.** A request that gives an existing script another command is refused, none of it
+  applied (`scriptChangeRefusal` names the scripts and says a new name works); setting one to
+  the command it already has is fine. Why: a script change lands on `main` at once, for every
+  task, and an agent that changed `test` broke QA for all of them until it was put back (see
+  [the local-model experiment](docs/local-model-experiment.md)). People change existing
+  scripts by editing `package.json`.
 - **No extra power.** Agents can already run arbitrary programs through `run_command`; scripts
   just make that reproducible for QA.
 
@@ -1016,7 +1086,7 @@ repository be bootstrapped entirely by agents.
 | Hub checkout clean and on `main` | `rejected` |
 | No `pnpm-lock.yaml` / `yarn.lock` / `bun.lock*` | `rejected` (npm only) |
 | Root `package.json` missing | Created (minimal), then the change is applied |
-| npm succeeds within 5 min (dependencies) / `package.json` is valid JSON (scripts) | Roll back, `rejected` with the error |
+| npm succeeds within 5 min (dependencies) / `package.json` is valid JSON and no existing script changes (scripts) | Roll back, `rejected` with the error |
 | Only `package.json` / `package-lock.json` changed | Roll back everything, `rejected` |
 | Nothing changed (already satisfied) | `installed` with the current main commit, no new commit |
 
@@ -1132,6 +1202,7 @@ request is translated:
 | `tool_result` (with `is_error`) | a `tool` message (prefixed `Error:`) |
 | image in a `tool_result` (view_image) | a following `user` message with `image_url` parts with `ASO_LLM_VISION=1`; otherwise a text note |
 | `thinking` blocks | dropped (only valid for their own model) |
+| an assistant turn left with neither text nor tool calls (a reasoning model's thinking only) | left out: Ollama refuses `content: null` without tool calls (400), and two user messages in a row are fine |
 | a tool call's provider data (Gemini's `extra_content` thought signature) | kept on the `tool_use` block as `aso_provider_data` and sent back as the call's `extra_content`; stripped before any Anthropic request (`withoutProviderData`) |
 | tools | `function` tools with the same JSON Schema |
 
@@ -1251,6 +1322,24 @@ the branch and reports `failed`, which then becomes a rework round (`rework`, so
 the limit and escalation applies) with a reason telling the agent to continue from the branch.
 When the rounds are used up, the task fails as before.
 
+Two other ways an attempt ends unfinished take the same path:
+
+- **A full context window.** An answer stopped for length (`max_tokens`) after fewer than
+  `CONTEXT_FULL_BELOW_TOKENS` (1,000) output tokens wasn't stopped by an output limit, since
+  none is that small: the conversation fills the model's context window (gpt-oss on Ollama's
+  32k, say). Retrying the turn in the same conversation can't help, so the Hub fails the turn
+  (not retryable) and calls `TaskManager.recordContextFull`, which sets `contextFull`; the
+  worker's `failed` report becomes a rework round, and the next round starts a fresh
+  conversation from the saved work. The job counts as `outOfTurns`.
+- **Giving up.** An agent that stops twice without `finish` (see
+  [Tools and their limits](#tools-and-their-limits)) is reported with `gaveUp`; the rework
+  reason carries its explanation and tells the next agent to find another way past it. The job
+  counts as `failed`.
+
+**A task's own model** (`spec.model`) bypasses all of this: `roundModelOf` returns it for every
+round, before trials and the ladder, and `skipRefusedModel` doesn't move a refused one on. Its
+rework rounds still happen, on the same model.
+
 A non-retryable LLM error on a task conversation (`modelRefused`): if `roundModel` with that
 model refused gives another model, the task records it in `refusedModels` and sets
 `switchingModel`; the worker's `failed` report then requeues the task (`pending`) instead of
@@ -1263,6 +1352,7 @@ failing it, without a rework round. A person's retry clears both.
 | No API key | error, not retryable | Task `failed` ("no LLM configured") |
 | Rate limit, 5xx, connection, unparseable stream | error, retryable; turn not committed | Retry the same turn after 2/5/15/30/60 s |
 | `stop_reason: max_tokens` | error, retryable; not committed. The history notes what the discarded answer held | Retry; the retried turn tells the model its answer was cut off and to keep it shorter (targeted edits, large files in parts) |
+| `stop_reason: max_tokens` under 1,000 output tokens (context window full) | error, not retryable; the task is marked `contextFull` | Work saved, `failed`; the Hub makes it a rework round in a fresh conversation |
 | `stop_reason: refusal` (after fallbacks) | error, not retryable | Task `failed` with the category |
 | Bad key, bad request, credits exhausted | error, not retryable | Task `failed` with the API's message |
 | Task over budget | error, not retryable | Task `failed`; raise `--task-budget` and resubmit |
@@ -1279,14 +1369,23 @@ failing it, without a rework round. A person's retry clears both.
 | `write_file` / `edit_file` / `delete_file` | Exact-match edits (unique unless `replace_all`); protected files refused; reported via `FILE_OPERATION` |
 | `run_command` | argv without a shell, in the job sandbox; `CI=1`; default 120 s timeout (max 900); `git`, shells, `sudo` and `npm install`-style commands refused |
 | `request_dependencies` | Adds up to 30 npm packages via the Hub in one commit; returns once installed and rebased |
-| `set_package_scripts` | Sets npm scripts via the Hub (creates package.json if missing); returns once rebased |
-| `finish` | Ends the loop with a summary, a commit message and, for a visible change, the views QA should screenshot; refused if other calls in the same turn failed |
+| `set_package_scripts` | Adds npm scripts via the Hub (creates package.json if missing), never changes an existing one; returns once rebased |
+| `finish` | Ends the loop with a summary, a commit message and, for a visible change, the views QA should screenshot (an empty `screenshots` list means none); refused if other calls in the same turn failed |
+| `dispute_tests` | Only for a tests-first task's builder that may still dispute: names the test and why it's wrong. Ends the attempt with the work saved, and sends the tests back to their writer once (see [Tests-first tasks](#tests-first-tasks-tests-firstts)) |
+
+`finish` takes `screenshots: []` as no list (`FinishScreenshotsSchema`) because models send one
+to mean "none", and refusing it made them give up after refused `finish` calls (see
+[the local-model experiment](docs/local-model-experiment.md)).
 
 **Stopping without `finish`.** A reply with no tool calls hands nothing in. The worker sends the
 next turn with no tool results, and the Hub turns that into a reminder (`CONTINUE_PROMPT`): call
 `finish` if done, keep working, or explain the blocker. If the agent stops again right after the
-reminder, the worker throws `AgentStoppedError` and reports the task `failed` with the agent's
-text. Unfinished work is never pushed, so it never reaches QA or burns rework rounds.
+reminder, it has given up: the worker throws `AgentStoppedError`, saves the work on the branch
+and reports `failed` with `gaveUp` and the agent's text, and the Hub makes that a rework round
+(see [Escalation](#escalation-llmescalationts)). Nothing goes to QA: unfinished work isn't
+handed in, only kept for the next round. An empty reply (no text, no tool call; a reasoning
+model's turn of thinking only) isn't a stop: the worker asks again, up to `MAX_EMPTY_REPLIES`
+(3) in a row, since giving up comes with an explanation.
 
 **Limits and safety:**
 
@@ -1316,10 +1415,10 @@ text. Unfinished work is never pushed, so it never reaches QA or burns rework ro
   with `paused: true`. `callModelWithRetry` on workers and the Architect then asks again every
   60 s without using up its retries. The first call that works clears the hold (`onResume`).
 - **Unfinished work is kept.** When an agent is cut off (turn limit, budget, the model gone,
-  or it stopped without `finish`), the worker commits what is in the checkout as
-  `wip: unfinished (…)` and pushes it to `task/<id>` before reporting the failure
-  (`AgentGitClient.saveProgress`). A retry resumes that branch, so the next attempt continues
-  from it.
+  it stopped without `finish`, or it disputed the tests), the worker commits what is in the
+  checkout as `wip: unfinished (…)` and pushes it to `task/<id>` before reporting the failure
+  (`AgentGitClient.saveProgress`). A rework round or a retry resumes that branch, so the next
+  attempt continues from it.
 - **Idle conversations.** These are dropped after 30 minutes, and as soon as their task is no
   longer being implemented by that node.
 
@@ -1403,14 +1502,16 @@ refuses tools and paths outside the policy. The Hub re-checks every branch befor
 | Role | Tools | Writable | System prompt focus |
 |---|---|---|---|
 | Architect | `list_files`, `read_file`, `search`, `view_image`, `submit_plan`, `ask_questions` | none | Explore, then split the requirement into independently testable tasks with explicit contracts and dependencies |
-| `backend` | explore + edit + `run_command` + `request_dependencies` + `finish` | any (minus protected files) | Data models, DB, API routes; prefers Prisma + PostgreSQL, Hono |
+| `backend` | explore (with `view_image`) + edit + `run_command` + `request_dependencies` + `set_package_scripts` + `finish` | any (minus protected files) | Data models, DB, API routes; prefers Prisma + PostgreSQL, Hono |
 | `frontend` | same | any (minus protected files) | UI; prefers Next.js App Router, Tailwind, shadcn/ui |
 | `qa` | same | test files and test config | Tests only; describes bugs instead of fixing feature code; prefers Vitest, Playwright |
 | `devops` | same | Dockerfiles, compose, CI, `infra/`, `deploy/`, `scripts/`, `Makefile` | Containers and CI; prefers GitHub Actions |
 
 Every prompt says to follow the project's existing stack when it differs from the
 preferences. System prompts and tool lists are byte-stable per role, so they stay in the
-prompt cache.
+prompt cache. The one variant is a tests-first builder's list, which has `dispute_tests` added
+at the end, so the shared prefix stays the same. A tests-first task's test writer works in the
+`qa` role whatever the task's own role.
 
 ### Planning flow
 
@@ -1474,6 +1575,14 @@ sequenceDiagram
 - **Plan-local keys.** Proposed tasks use keys (`api`, `login-page`), and `dependsOn` refers
   to keys. Approval submits tasks in dependency order and maps keys to the generated task ids.
 - **Linking.** Each created task records its `planId`.
+- **Tests first and reuse.** A planned task may carry `testsFirst`, which approval passes on to
+  the task (see [Tests-first tasks](#tests-first-tasks-tests-firstts)). The Architect's prompt
+  asks for it on logic whose correctness lives in edge cases (merging, limits, cutting text,
+  parsing, sorting, dates, money, permissions), not on layout, wiring, config or `qa` tasks, and
+  asks it to spell out the interface the tests use, since tests and code come from different
+  agents. Where the code already has what a task needs, it names it in the description with a
+  criterion to reuse it rather than copy it; the acceptance check judges that against the diff
+  like any criterion.
 
 ## 12. Authentication
 
@@ -1928,15 +2037,18 @@ rebuilt from the records, so it covers every machine, desk and model.
 | Its agent's conversation starts | `recordJobModel`: the model it runs on |
 | Each of its agent's model calls | `recordAgentUsage`: the job's `calls` and `costUsd`, and the task's (the acceptance check's cost goes only to the task, through `recordLlmUsage`) |
 | `completed` | `pushed`; `verify` turns it into `built` or `unverified` |
-| `failed` | `failedBuildResult`: `modelRefused` (`switchingModel`), `outOfTurns` (the task's `outOfTurns` mark) or `failed` |
+| `failed` | `failedBuildResult`: `modelRefused` (`switchingModel`), `outOfTurns` (the task's `outOfTurns` or `contextFull` mark) or `failed` (a give-up among them) |
 | QA's verdict | the QA run ends `passed` / `qaFailed`, and the last build gets `qa` |
-| The acceptance check | the last build gets `acceptance`, `acceptanceModel` (by the name the Hub calls it, like a build's `model`) and `acceptanceCostUsd` |
+| The acceptance check | the last build gets `acceptance`, `acceptanceModel` (by the name the Hub calls it, like a build's `model`), `acceptanceCostUsd` and `qualityNotes` (how many) |
 | A person asks for changes (GitHub or ASO) or closes the pull request; the deploy of its merge fails in the command (`deployFailed(commit)`, from the deploy's `exitCode`) | `markOverturned`: a `met` last build gets `overturned` (`changesRequested`, `closed`, `deployFailed`), once |
 | A drop (`requeue` of a started job), a cancel, a task failing | `dropped`, `cancelled`, `failed` |
 
-`trackRecords(tasks, query)` is pure: it groups ended jobs by model, host, desk, role or
-project and counts builds by result (`COUNTED_BUILD_RESULTS`), the verdicts on them, QA runs
-(not by model: tests run without one) and cost. A merged task counts as finished for whoever
+`trackRecords(tasks, query)` is pure: it groups ended jobs by model, host, desk, role,
+project or task level (`level 1` … `level 5`, `no level`) and counts builds by result
+(`COUNTED_BUILD_RESULTS`), the verdicts and quality notes on them, QA runs (not by model:
+tests run without one) and cost. A tests-first task's test writer's job (`writesTests`) is
+neither a build nor a QA run: `isBuild` leaves it out, and only its cost counts, in the task's
+`started` cost. A `level` filter, like `role`, leaves plans out (they have neither). A merged task counts as finished for whoever
 made its last `built` build (`finishedBy`): `firstTry` when that was its only build, `tookOver`
 when an earlier build was someone else's. That is judged over all the task's builds, so
 `since` can't make a reworked task look like a first try. A settled task (merged or failed; not

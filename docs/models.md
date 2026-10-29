@@ -153,6 +153,9 @@ aso hub-service install ... --agent-model local/qwen3-coder:30b   # builders and
   on refusal. Costs read $0 for models without a price in the Hub's table, so task budgets don't
   stop them; the turn limit does.
 
+For how far local models get on real tasks, and what the core changed because of it, see
+[the local-model experiment](local-model-experiment.md).
+
 ### A model per desk
 
 Each desk (a job slot on a worker machine, `<host>#<slot>`, e.g. `avalon#1`) can use its own
