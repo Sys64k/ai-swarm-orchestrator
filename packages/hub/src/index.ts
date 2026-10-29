@@ -68,4 +68,4 @@ export { addBuildUsage, endJob, failedBuildResult, JOBS_LIMIT, lastBuild, markAc
 export { budgetSpent, describeScope, mayUseProject, projectOfGitPath, REFUSE_ALL, refuseJob, type KeyScope, type WorkerJob } from "./worker-scope.js";
 export { MACHINE_PREFIX, MachineModels } from "./llm/machine-models.js";
 export { OnePerKey } from "./one-per-key.js";
-export { buildingToPassTests, canDispute, lockedTests, roleOf, writingTests, type LockedTests } from "./tests-first.js";
+export { buildingToPassTests, canDispute, lockedTests, mayDispute, roleOf, writingTests, type LockedTests } from "./tests-first.js";

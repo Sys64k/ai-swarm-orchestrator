@@ -36,7 +36,12 @@ export function lockedTests(task: Phased): LockedTests | undefined {
   return buildingToPassTests(task) && t!.commit && t!.files.length ? { since: t!.commit, files: t!.files } : undefined;
 }
 
-/** Whether a builder's give-up disputes the tests: once per task, back to their writer instead of a rework round. */
-export function canDispute(task: Phased, gaveUp: boolean | undefined): boolean {
-  return !!gaveUp && buildingToPassTests(task) && !task.testsFirst.disputed;
+/** Whether the builder may still dispute the tests (dispute_tests): once per task. */
+export function mayDispute(task: Phased): boolean {
+  return buildingToPassTests(task) && !task.testsFirst.disputed;
+}
+
+/** Whether a builder's dispute sends the tests back to their writer; a second one is an ordinary give-up. */
+export function canDispute(task: Phased, disputesTests: boolean | undefined): boolean {
+  return !!disputesTests && mayDispute(task);
 }

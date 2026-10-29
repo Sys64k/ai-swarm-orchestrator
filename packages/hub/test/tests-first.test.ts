@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { canDispute, lockedTests, roleOf, testsFirstNote, writingTests } from "@aso/hub";
+import { canDispute, lockedTests, mayDispute, roleOf, testsFirstNote, writingTests } from "@aso/hub";
 import { createMessage, type AgentMessage } from "@aso/shared";
 import { git, gitAsync, postTask, pushTaskBranch, reply, ScriptedModel, tempDir, text, TOKEN, waitFor, withHub, worker, writeFiles, type HubContext, type TestClient } from "./helpers.ts";
 
@@ -42,7 +42,8 @@ describe("tests-first tasks", () => {
     assert.equal(lockedTests({ testsFirst: { phase: "tests", commit: "c", files: [TEST] } }), undefined, "nothing is locked while they're written");
     assert.equal(lockedTests({ testsFirst: { phase: "build", commit: "c", files: [] } }), undefined);
     const building = { testsFirst: { phase: "build" as const, files: [TEST] } };
-    assert.deepEqual([canDispute(building, true), canDispute(building, false), canDispute({ testsFirst: { ...building.testsFirst, disputed: true } }, true), canDispute({}, true)], [true, false, false, false], "a give-up disputes the tests once");
+    assert.deepEqual([canDispute(building, true), canDispute(building, false), canDispute({ testsFirst: { ...building.testsFirst, disputed: true } }, true), canDispute({}, true)], [true, false, false, false], "a dispute sends the tests back once");
+    assert.deepEqual([mayDispute(building), mayDispute({ testsFirst: { ...building.testsFirst, disputed: true } }), mayDispute({ testsFirst: { phase: "tests", files: [] } })], [true, false, false]);
     assert.deepEqual(testsFirstNote({ testsFirst: { phase: "tests", files: [] } }), [], "nothing to say until they're written");
     assert.deepEqual(testsFirstNote({ jobs: [{ job: "implement", round: 0, host: "h", slot: 1, nodeId: "n", model: "claude-opus-5-5", writesTests: true, startedAt: "t", calls: 1, costUsd: 0 }], testsFirst: { phase: "build", files: [TEST], disputed: true } }), [
       "**Tests written first** by `claude-opus-5-5`: `greet.test.mjs` (back to their writer once after the builder disputed them); the builder couldn't change them",
@@ -117,7 +118,7 @@ describe("tests-first tasks", () => {
     );
   });
 
-  it("sends the tests back to their writer once when the builder disputes them, then counts a give-up as usual", async () => {
+  it("sends the tests back to their writer once when the builder disputes them; a plain give-up is a rework round", async () => {
     await withHub(
       async (ctx: HubContext) => {
         const dev = await worker(ctx.port, "dev", { hostname: "avalon" });
@@ -128,16 +129,21 @@ describe("tests-first tasks", () => {
         dev.send(createMessage("STATUS_UPDATE", "dev", { state: "completed", taskId: "greet", commit: tests }));
 
         expectType(await dev.next(5000), "TASK_ASSIGNMENT");
+        // A give-up that doesn't dispute the tests: an ordinary rework round, still the builder's.
         dev.send(createMessage("STATUS_UPDATE", "dev", { state: "in_progress", taskId: "greet", slot: 1 }));
-        // The builder's unfinished code is saved on the branch as it gives up.
+        dev.send(createMessage("STATUS_UPDATE", "dev", { state: "failed", taskId: "greet", detail: "couldn't finish in time", gaveUp: true }));
+        assert.equal(expectType(await dev.next(5000), "TASK_ASSIGNMENT").payload.role, "backend");
+        assert.equal(ctx.hub.tasks.get("greet")!.reworkRound, 1);
+        dev.send(createMessage("STATUS_UPDATE", "dev", { state: "in_progress", taskId: "greet", slot: 1 }));
+        // The builder's unfinished code is saved on the branch as it disputes a test.
         const saved = await pushOnTop(ctx.gitUrl, "greet", { "greet.mjs": "export const greet = () => {};\n" });
-        dev.send(createMessage("STATUS_UPDATE", "dev", { state: "failed", taskId: "greet", detail: "the agent stopped without calling finish: the test imports greet.js, the task says greet.mjs", gaveUp: true }));
+        dev.send(createMessage("STATUS_UPDATE", "dev", { state: "failed", taskId: "greet", detail: "the builder disputes a test written first: greet.test.mjs: it imports greet.js, the task says greet.mjs", disputesTests: true }));
 
         const rewriting = expectType(await dev.next(5000), "TASK_ASSIGNMENT").payload;
         assert.equal(rewriting.role, "qa", "back to the test writer");
-        assert.match(rewriting.rework!.reason, /^The builder gave up on the tests you wrote first: .*greet\.mjs\. If it's right, fix the tests/);
+        assert.match(rewriting.rework!.reason, /^The builder disputes the tests you wrote first: .*greet\.mjs\. If it's right, fix the tests/);
         const task = ctx.hub.tasks.get("greet")!;
-        assert.deepEqual([task.testsFirst!.phase, task.testsFirst!.disputed, task.testsFirst!.from, task.reworkRound], ["tests", true, saved, 0], "a dispute isn't a rework round");
+        assert.deepEqual([task.testsFirst!.phase, task.testsFirst!.disputed, task.testsFirst!.from, task.reworkRound], ["tests", true, saved, 1], "a dispute isn't a rework round");
 
         // The writer adds a test on top of the builder's code: only its own change is checked
         // against QA's scope (greet.mjs isn't its), and only its tests are locked.
@@ -147,12 +153,12 @@ describe("tests-first tasks", () => {
         expectType(await dev.next(5000), "TASK_ASSIGNMENT");
         assert.deepEqual(task.testsFirst, { phase: "build", commit: revised, files: ["edge.test.mjs", TEST], disputed: true });
 
-        // A second give-up is an ordinary one: a rework round for the builder.
+        // A second dispute is an ordinary give-up: a rework round for the builder.
         dev.send(createMessage("STATUS_UPDATE", "dev", { state: "in_progress", taskId: "greet", slot: 1 }));
-        dev.send(createMessage("STATUS_UPDATE", "dev", { state: "failed", taskId: "greet", detail: "still wrong", gaveUp: true }));
+        dev.send(createMessage("STATUS_UPDATE", "dev", { state: "failed", taskId: "greet", detail: "still wrong", disputesTests: true }));
         const again = expectType(await dev.next(5000), "TASK_ASSIGNMENT").payload;
         assert.equal(again.role, "backend");
-        assert.equal(task.reworkRound, 1);
+        assert.equal(task.reworkRound, 2);
         assert.match(again.rework!.reason, /^The previous agent gave up: still wrong/);
         dev.ws.close();
       },

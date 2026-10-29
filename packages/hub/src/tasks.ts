@@ -728,9 +728,9 @@ export class TaskManager {
             task,
             `The agent ${why} before finishing. Its work so far is on this branch: continue from it, and spend your turns finishing what's left (checking the branch's diff first) rather than exploring the whole project again.`,
           );
-        } else if (canDispute(task, update.gaveUp)) {
+        } else if (canDispute(task, update.disputesTests)) {
           void this.disputeTests(task, update.detail);
-        } else if (update.gaveUp) {
+        } else if (update.gaveUp || update.disputesTests) {
           // Like running out of turns: a rework round, so the task gets another try (and escalates).
           this.note(task, `the agent gave up on ${nodeId}: ${update.detail ?? "no detail"}`);
           this.rework(

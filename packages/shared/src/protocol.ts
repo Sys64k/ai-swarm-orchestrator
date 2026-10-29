@@ -347,6 +347,8 @@ const StatusUpdatePayload = z
     screenshotTargets: ScreenshotTargetsSchema.optional(),
     /** Sent with `failed`: the agent gave up (stopped without finishing, saying why); its work so far is saved. */
     gaveUp: z.boolean().optional(),
+    /** Sent with `failed`: a tests-first task's builder disputed a test written first (dispute_tests); `detail` says which and why. */
+    disputesTests: z.boolean().optional(),
   })
   .refine((p) => p.state === "idle" || p.taskId !== undefined, {
     message: "taskId is required unless state is idle",

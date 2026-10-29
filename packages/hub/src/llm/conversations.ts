@@ -19,7 +19,7 @@ import type { Transcripts } from "../transcripts.js";
 type TaskDirectory = ProjectSet["tasks"];
 type PlanDirectory = ProjectSet["plans"];
 import type { AgentTurn } from "../tasks.js";
-import { roleOf, writingTests } from "../tests-first.js";
+import { mayDispute, roleOf, writingTests } from "../tests-first.js";
 import { LlmError, type LlmAdapter } from "./adapter.js";
 import { priceUsage } from "./pricing.js";
 import { Semaphore } from "./semaphore.js";
@@ -140,6 +140,8 @@ interface Conversation {
   deskModel?: string;
   /** A tests-first task's test writer (the task's phase when the conversation began): it runs on the Architect's model. */
   testWriter?: boolean;
+  /** A tests-first task's builder that may dispute the tests: it has dispute_tests. */
+  disputes?: boolean;
 }
 
 /** A conversation as saved on disk: the subject and tools are rebuilt from the kind, id and role. */
@@ -154,6 +156,7 @@ interface SavedConversation {
   lastResult?: OkResult;
   deskModel?: string;
   testWriter?: boolean;
+  disputes?: boolean;
 }
 
 /**
@@ -164,7 +167,7 @@ export class ConversationManager {
   private readonly conversations = new Map<string, Conversation>();
   /** requestId → conversation, for answering retries. */
   private readonly requests = new Map<string, { conversationId: string; turn: number }>();
-  private readonly toolsByRole = new Map<AgentRole, Anthropic.Beta.BetaTool[]>();
+  private readonly toolsByRole = new Map<string, Anthropic.Beta.BetaTool[]>();
   private readonly taskBudgetUsd: number;
   /** Set while model calls are on hold (out of credit). */
   private paused?: { reason: string; since: string };
@@ -213,7 +216,7 @@ export class ConversationManager {
         id: c.id,
         subject,
         nodeId: c.nodeId,
-        tools: this.toolsFor(subject.role),
+        tools: this.toolsFor(subject.role, c.disputes),
         system: subject.role === "architect" ? architectSystemPrompt() : systemPrompt(subject.role),
         messages: c.messages,
         turn: c.turn,
@@ -222,19 +225,24 @@ export class ConversationManager {
         lastActivity: Date.now(),
         ...(c.deskModel ? { deskModel: c.deskModel } : {}),
         ...(c.testWriter ? { testWriter: true } : {}),
+        ...(c.disputes ? { disputes: true } : {}),
       });
     }
     if (this.conversations.size) log.info(`restored ${this.conversations.size} agent conversation(s)`);
   }
 
-  /** Byte-stable and in a fixed order per role, so tools + system prompt form a cacheable prefix. */
-  private toolsFor(role: AgentRole): Anthropic.Beta.BetaTool[] {
-    let tools = this.toolsByRole.get(role);
+  /**
+   * Byte-stable and in a fixed order per role, so tools + system prompt form a cacheable prefix.
+   * A tests-first task's builder that may still dispute the tests also gets dispute_tests, last.
+   */
+  private toolsFor(role: AgentRole, disputes = false): Anthropic.Beta.BetaTool[] {
+    const key = `${role}${disputes ? "+dispute" : ""}`;
+    let tools = this.toolsByRole.get(key);
     if (!tools) {
-      tools = agentToolDefinitions(ROLE_POLICIES[role].tools).map(
+      tools = agentToolDefinitions([...ROLE_POLICIES[role].tools, ...(disputes ? (["dispute_tests"] as const) : [])]).map(
         (t) => ({ ...t, eager_input_streaming: true }) as unknown as Anthropic.Beta.BetaTool,
       );
-      this.toolsByRole.set(role, tools);
+      this.toolsByRole.set(key, tools);
     }
     return tools;
   }
@@ -398,20 +406,22 @@ export class ConversationManager {
     let conv = this.conversations.get(req.conversationId);
     if (!conv) {
       if (req.turn !== 0) return void fail(`unknown conversation ${req.conversationId}`);
+      const task = subject.kind === "task" ? this.tasks.get(subject.id) : undefined;
+      const disputes = !!task && mayDispute(task);
       conv = {
         id: req.conversationId,
         subject,
         nodeId,
-        tools: this.toolsFor(subject.role),
+        tools: this.toolsFor(subject.role, disputes),
         system: subject.role === "architect" ? architectSystemPrompt() : systemPrompt(subject.role),
         messages: [],
         turn: 0,
         pendingToolUseIds: [],
         results: new Map(),
         lastActivity: Date.now(),
+        ...(disputes ? { disputes: true } : {}),
       };
       // A test writer runs on the Architect's model: deciding what "done" means is the hard part.
-      const task = subject.kind === "task" ? this.tasks.get(subject.id) : undefined;
       const writer = !!task && writingTests(task);
       const choice: RoundModel = writer ? { why: "writes the tests first" } : subject.kind === "task" ? this.roundModelOf(subject.id, nodeId) : {};
       if (writer) conv.testWriter = true;
@@ -594,6 +604,7 @@ export class ConversationManager {
       lastResult,
       ...(conv.deskModel ? { deskModel: conv.deskModel } : {}),
       ...(conv.testWriter ? { testWriter: true } : {}),
+      ...(conv.disputes ? { disputes: true } : {}),
     };
     this.store?.saveConversation(conv.id, saved);
   }
