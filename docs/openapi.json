@@ -1087,6 +1087,16 @@
                   "type": "string",
                   "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
                 }
+              },
+              "level": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 5
+              },
+              "model": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
               }
             },
             "required": [
@@ -3321,7 +3331,8 @@
               "host",
               "desk",
               "role",
-              "project"
+              "project",
+              "level"
             ]
           },
           "since": {
@@ -3338,7 +3349,7 @@
               "properties": {
                 "key": {
                   "type": "string",
-                  "description": "The model, machine, desk, role or project"
+                  "description": "The model, machine, desk, role, project or level (level 1 … level 5, no level)"
                 },
                 "builds": {
                   "type": "object",
@@ -4550,6 +4561,16 @@
               "type": "string",
               "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
             }
+          },
+          "level": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
           },
           "project": {
             "type": "string",
@@ -6180,7 +6201,7 @@
             }
           },
           "400": {
-            "description": "Invalid task, or several projects and none named",
+            "description": "Invalid task, a model the Hub doesn't know, or several projects and none named",
             "content": {
               "application/json": {
                 "schema": {
@@ -6221,13 +6242,13 @@
         "tags": [
           "Tasks"
         ],
-        "summary": "How models, machines, desks, roles or projects have done with their jobs",
+        "summary": "How models, machines, desks, roles, projects or task levels have done with their jobs",
         "parameters": [
           {
             "name": "by",
             "in": "query",
             "required": false,
-            "description": "Group by model (default), host, desk, role or project",
+            "description": "Group by model (default), host, desk, role, project or level",
             "schema": {
               "type": "string"
             }
@@ -6246,6 +6267,15 @@
             "in": "query",
             "required": false,
             "description": "Only tasks of this role",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "level",
+            "in": "query",
+            "required": false,
+            "description": "Only tasks of this level, 1 to 5 (no plans: they have no level)",
             "schema": {
               "type": "string"
             }

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { DiscoveryClaimSchema, DiscoveryKeyIdSchema } from "./discovery.js";
 import { MAX_PLAN_REPLY_LENGTH } from "./plan-dialogue.js";
-import { HardwareProfileSchema, LlmUsageSchema, PlannedTaskSchema, ProjectIdSchema, SupervisorSchema, TaskSpecInputSchema, TaskSpecSchema } from "./protocol.js";
+import { HardwareProfileSchema, LlmUsageSchema, PlannedTaskSchema, ProjectIdSchema, SupervisorSchema, TaskLevelSchema, TaskSpecInputSchema, TaskSpecSchema } from "./protocol.js";
 
 /**
  * The Hub's HTTP API as data: what each request sends and what each answer holds. The Hub
@@ -816,7 +816,7 @@ export const DesksSchema = z.object({
 export type Desks = z.infer<typeof DesksSchema>;
 export const SignedInSchema = z.object({ ok: z.literal(true) });
 
-export const TRACK_RECORD_KEYS = ["model", "host", "desk", "role", "project"] as const;
+export const TRACK_RECORD_KEYS = ["model", "host", "desk", "role", "project", "level"] as const;
 export type TrackRecordKey = (typeof TRACK_RECORD_KEYS)[number];
 
 /** The roles model suggestions compare: the desks' builders, the reviewer (acceptance check), the Architect. */
@@ -862,9 +862,10 @@ export const ModelSuggestionsSchema = z.object({
 export type ModelSuggestions = z.infer<typeof ModelSuggestionsSchema>;
 
 export const TrackRecordQuerySchema = z.object({
-  by: z.enum(TRACK_RECORD_KEYS).default("model").describe("Group by the model, the machine, the desk (machine #slot), the task's role, or its project"),
+  by: z.enum(TRACK_RECORD_KEYS).default("model").describe("Group by the model, the machine, the desk (machine #slot), the task's role, its project, or its level (how hard, 1 to 5)"),
   project: z.string().optional().describe("Only this project's tasks"),
   role: z.string().optional().describe("Only tasks of this role"),
+  level: z.coerce.number().pipe(TaskLevelSchema).optional().describe("Only tasks of this level (how hard, 1 to 5); plans, which have no level, are left out"),
   model: z
     .string()
     .optional()
@@ -884,7 +885,7 @@ export type TrackRecordQuery = z.infer<typeof TrackRecordQuerySchema>;
 
 export const TrackRecordRowSchema = z
   .object({
-    key: z.string().describe("The model, machine, desk, role or project"),
+    key: z.string().describe("The model, machine, desk, role, project or level (level 1 … level 5, no level)"),
     builds: z
       .object({
         jobs: z.number().int().describe("Builds that ended"),

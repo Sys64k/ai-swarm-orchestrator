@@ -221,11 +221,11 @@ otherwise what data is missing. `--since <date>` (default: the last 30 days), `-
 
 ## `aso track-records`
 
-How models, machines, desks, roles or projects have done with their jobs: tasks finished (on
+How models, machines, desks, roles, projects or task levels have done with their jobs: tasks finished (on
 the first try, or taking over from another), their builds' QA and acceptance verdicts, how often
 they ran out of turns or failed, and their cost per task finished; by model and by project also
 the plans made as the Architect and the acceptance checks made as the reviewer. `--by
-model|host|desk|role|project` (default `model`), `--project`, `--role`, `--model <name>` (only
+model|host|desk|role|project|level` (default `model`), `--project`, `--role`, `--level <1-5>`, `--model <name>` (only
 that model's work, e.g. `--by project --model gpt-6.1-terra`: how it did on each project),
 `--since <date>`, `--until <date>` (with `--since`, one period, e.g. a week), `--json`. See [Track records](models.md#track-records-how-each-model-has-done).
 

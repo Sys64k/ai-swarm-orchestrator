@@ -313,7 +313,7 @@ export class ConversationManager {
     return member && this.opts.deskModels?.modelOf(deskName(member.host, member.slot));
   }
 
-  /** The model a task's agent on `nodeId` starts from: its desk's, else the machine's own one; undefined: the default. */
+  /** The model a task's agent on `nodeId` starts from: a trial's, its desk's, else the machine's own one; undefined: the default. */
   private ownModelOf(taskId: string, nodeId: string): string | undefined {
     return this.tasks.get(taskId)?.challenger ?? this.deskModelOf(taskId, nodeId) ?? this.opts.machineModels?.defaultSpec(nodeId);
   }
@@ -328,9 +328,12 @@ export class ConversationManager {
 
   /**
    * This round's model for a task's agent: its desk's, else the machine's own model when it serves
-   * one, or one up the escalation ladder, skipping models that refused it.
+   * one, or one up the escalation ladder, skipping models that refused it. A task's own model always.
    */
   private roundModelOf(taskId: string, nodeId: string): RoundModel {
+    // A task with a model of its own stays on it: no trial, no escalation, so its record is that model's alone.
+    const pinned = this.tasks.get(taskId)?.spec.model;
+    if (pinned) return { spec: pinned, why: "the task's own model" };
     this.maybeChallenger(taskId);
     const task = this.tasks.get(taskId);
     const choice = roundModel(this.opts.escalation?.(), task ?? { reworkRound: 0 }, this.ownModelOf(taskId, nodeId), this.opts.defaultAgentSpec);
@@ -347,7 +350,7 @@ export class ConversationManager {
     if (conv.subject.kind !== "task") return;
     const spec = calledSpec({ spec: conv.deskModel }, this.opts.defaultAgentSpec);
     const task = this.tasks.get(conv.subject.id);
-    if (!spec || !task) return;
+    if (!spec || !task || task.spec.model) return; // its own model: nowhere else to go
     if (canSwitchFrom(this.opts.escalation?.(), task, this.ownModelOf(task.spec.taskId, conv.nodeId), this.opts.defaultAgentSpec, spec)) {
       this.tasks.recordModelRefused(task.spec.taskId, spec, error);
     }

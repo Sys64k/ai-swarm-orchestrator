@@ -1077,6 +1077,7 @@ export const TRACK_RECORD_GROUPS: ReadonlyArray<{ by: TrackRecordKey; label: str
   { by: "desk", label: "Desks" },
   { by: "role", label: "Roles" },
   { by: "project", label: "Projects" },
+  { by: "level", label: "Task levels" },
 ];
 
 export function trackRecordGroupLabel(by: TrackRecordKey): string {

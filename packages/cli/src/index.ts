@@ -16,6 +16,7 @@ import {
   MAX_JUNIOR_TRIES,
   MAX_WORKER_SLOTS,
   TRACK_RECORD_KEYS,
+  TASK_LEVELS,
 } from "@aso/shared";
 import type { Effort } from "@aso/hub";
 import { startArchitect } from "@aso/architect";
@@ -451,10 +452,11 @@ program
   .action(desksCommand);
 program
   .command("track-records")
-  .description("How models, machines, desks, roles or projects have done: tasks finished, first tries, QA, acceptance, cost")
+  .description("How models, machines, desks, roles, projects or task levels have done: tasks finished, first tries, QA, acceptance, cost")
   .addOption(new Option("--by <key>", "group by").choices([...TRACK_RECORD_KEYS]).default("model"))
   .option("--project <name>", "only this project's tasks")
   .option("--role <role>", "only tasks of this role (frontend, backend, ...)")
+  .addOption(new Option("--level <n>", "only tasks of this level (how hard, 1 to 5)").choices(TASK_LEVELS.map(String)))
   .option("--model <name>", "only this model's work (its name as track records show it, e.g. gemini-3.8-flash), grouped --by machine, project, ...")
   .option("--since <time>", "only jobs started at or after this time (ISO 8601, e.g. 2026-10-01)")
   .option("--until <time>", "only jobs started before this time (ISO 8601, e.g. 2026-10-08)")

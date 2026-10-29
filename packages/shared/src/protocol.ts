@@ -188,6 +188,10 @@ const NodeHeartbeatPayload = z.strictObject({
 });
 
 /** A unit of work as produced by the Architect (or submitted via the Hub API). */
+/** How hard a task is: 1 (one function) to 5 (a change across packages). */
+export const TASK_LEVELS = [1, 2, 3, 4, 5] as const;
+export const TaskLevelSchema = z.number().int().min(TASK_LEVELS[0]).max(TASK_LEVELS[TASK_LEVELS.length - 1]);
+
 export const TaskSpecSchema = z.strictObject({
   taskId: TaskIdSchema,
   role: WorkerRoleSchema,
@@ -199,6 +203,10 @@ export const TaskSpecSchema = z.strictObject({
   files: z.array(RepoPathSchema).default([]),
   /** Tasks that must be merged into main before this one starts. */
   dependsOn: z.array(TaskIdSchema).max(20).default([]),
+  /** How hard the task is (TASK_LEVELS): track records group by it. */
+  level: TaskLevelSchema.optional(),
+  /** A model every build of the task runs on: no escalation, no trial. The Hub keeps it as the spec it resolves to (`<provider>/<model>`). */
+  model: z.string().min(1).max(200).optional(),
 });
 export type TaskSpec = z.infer<typeof TaskSpecSchema>;
 

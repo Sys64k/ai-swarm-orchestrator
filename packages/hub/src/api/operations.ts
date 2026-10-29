@@ -237,11 +237,12 @@ const PLANS: ApiOperation[] = [
 const TASKS: ApiOperation[] = [
   { method: "get", path: "/api/tasks", tag: "Tasks", summary: "All tasks", query: projectQuery, responses: { 200: ok(["Task"]) } },
   {
-    method: "get", path: "/api/track-records", tag: "Tasks", summary: "How models, machines, desks, roles or projects have done with their jobs",
+    method: "get", path: "/api/track-records", tag: "Tasks", summary: "How models, machines, desks, roles, projects or task levels have done with their jobs",
     query: {
-      by: "Group by model (default), host, desk, role or project",
+      by: "Group by model (default), host, desk, role, project or level",
       project: "Only this project's tasks",
       role: "Only tasks of this role",
+      level: "Only tasks of this level, 1 to 5 (no plans: they have no level)",
       model: "Only this model's work, by its name as the records keep it: its builds, the tasks it started and finished, its plans and acceptance checks (no QA runs)",
       since: "Only jobs started at or after this time (ISO 8601)",
       until: "Only jobs started before this time (ISO 8601): with since, one period of a trend",
@@ -256,7 +257,7 @@ const TASKS: ApiOperation[] = [
   { method: "get", path: "/api/tasks/{id}", tag: "Tasks", summary: "One task", responses: { 200: ok("Task"), ...notFound("task") } },
   {
     method: "post", path: "/api/tasks", tag: "Tasks", summary: "Queue a task directly (without a plan)", body: "CreateTask",
-    responses: { 201: ok("Task", "Queued"), ...noProject, 400: err("Invalid task, or several projects and none named"), 409: err("The task id is taken") },
+    responses: { 201: ok("Task", "Queued"), ...noProject, 400: err("Invalid task, a model the Hub doesn't know, or several projects and none named"), 409: err("The task id is taken") },
   },
   { method: "post", path: "/api/tasks/{id}/cancel", tag: "Tasks", summary: "Stop a task (closes its pull request)", responses: act("Task", "task", "Finished, or merging right now") },
   { method: "post", path: "/api/tasks/{id}/retry", tag: "Tasks", summary: "Queue a failed or cancelled task again with fresh limits", responses: act("Task", "task", "Not failed or cancelled") },

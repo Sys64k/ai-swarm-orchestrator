@@ -219,6 +219,69 @@ describe("escalation (Hub)", () => {
     }
   });
 
+  it("keeps a task with a model of its own on it: over its desk's model, the ladder and the default", async () => {
+    const provider = await fakeProvider();
+    const saved = process.env.ASO_LLM_BASE_URL;
+    process.env.ASO_LLM_BASE_URL = provider.url;
+    try {
+      await withHub(
+        async (ctx) => {
+          for (const model of ["no-such-model", "default", ""]) {
+            const r = await call(ctx.port, "/api/tasks", { taskId: "nope", role: "backend", title: "T", description: "d", model });
+            assert.equal(r.status, 400, model);
+          }
+          const w = await worker(ctx.port, "dev");
+          assert.equal((await call(ctx.port, "/api/desks", { target: "test#1", model: "bad-model" })).status, 200);
+          await postTask(ctx.port, { taskId: "greet", role: "backend", title: "Greet", description: "d", model: "good-model", level: 2 });
+          const task = ctx.hub.tasks.get("greet")!;
+          assert.deepEqual([task.spec.model, task.spec.level], ["local/good-model", 2], "kept in the form the desks use");
+          const r = await firstTurn(w, "greet");
+          assert.match(JSON.stringify(r), /from good-model/);
+          assert.match(task.history.map((h) => h.event).join("\n"), /\(good-model, the task's own model\)/);
+          assert.deepEqual(provider.calls, ["good-model"], "not the desk's model");
+          w.ws.close();
+        },
+        {
+          llm: {
+            adapter: new ScriptedModel(() => assert.fail("a task agent reached the Architect's model")),
+            agentAdapter: new ScriptedModel(() => assert.fail("the default was used"), "claude-haiku-5-5"),
+            agentModel: "claude-haiku-5-5",
+            escalateTo: ["local/bad-model"],
+            juniorTries: 0,
+          },
+        },
+      );
+    } finally {
+      if (saved === undefined) delete process.env.ASO_LLM_BASE_URL;
+      else process.env.ASO_LLM_BASE_URL = saved;
+      await provider.close();
+    }
+  });
+
+  it("fails a task whose own model refuses it instead of moving it to another model", async () => {
+    const provider = await fakeProvider();
+    const saved = process.env.ASO_LLM_BASE_URL;
+    process.env.ASO_LLM_BASE_URL = provider.url;
+    try {
+      await withHub(
+        async (ctx) => {
+          const w = await worker(ctx.port, "dev");
+          await postTask(ctx.port, { taskId: "greet", role: "backend", title: "Greet", description: "d", model: "bad-model" });
+          assert.equal((await firstTurn(w, "greet")).outcome, "error");
+          w.send(createMessage("STATUS_UPDATE", "dev", { state: "failed", taskId: "greet", detail: "bad request (400)" }));
+          await waitFor(() => ctx.hub.tasks.get("greet")?.state === "failed");
+          assert.equal(ctx.hub.tasks.get("greet")!.refusedModels, undefined, "the default was there, but not for this task");
+          w.ws.close();
+        },
+        { llm: { adapter: new ScriptedModel(() => reply([text("x")], "end_turn")), agentAdapter: new ScriptedModel(() => reply([text("from the default")], "end_turn"), "claude-haiku-5-5"), agentModel: "claude-haiku-5-5", escalation: false } },
+      );
+    } finally {
+      if (saved === undefined) delete process.env.ASO_LLM_BASE_URL;
+      else process.env.ASO_LLM_BASE_URL = saved;
+      await provider.close();
+    }
+  });
+
   it("starts a round on the ladder's model once the junior tries are used up", async () => {
     const provider = await fakeProvider();
     const saved = process.env.ASO_LLM_BASE_URL;

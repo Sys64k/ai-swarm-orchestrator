@@ -6,6 +6,7 @@ export interface TrackRecordsOptions {
   by: TrackRecordKey;
   project?: string;
   role?: string;
+  level?: string;
   model?: string;
   since?: string;
   until?: string;
@@ -17,9 +18,9 @@ const usd = (n: number | undefined) => (n === undefined ? "-" : `$${n.toFixed(2)
 const ofTotal = (good: number, bad: number) => (good + bad ? `${good}/${good + bad}` : "-");
 
 /** The query string for `GET /api/track-records`. */
-export function trackRecordsPath(opts: Pick<TrackRecordsOptions, "by" | "project" | "role" | "model" | "since" | "until">): string {
+export function trackRecordsPath(opts: Pick<TrackRecordsOptions, "by" | "project" | "role" | "level" | "model" | "since" | "until">): string {
   const q = new URLSearchParams({ by: opts.by });
-  for (const k of ["project", "role", "model", "since", "until"] as const) if (opts[k]) q.set(k, opts[k]);
+  for (const k of ["project", "role", "level", "model", "since", "until"] as const) if (opts[k]) q.set(k, opts[k]);
   return `/api/track-records?${q.toString()}`;
 }
 
