@@ -92,7 +92,7 @@ export const JOB_RESULT_MEANING: Record<JobResult, string> = {
   built: "A build whose pushed work checked out",
   unverified: "A build whose push failed the Hub's checks",
   failed: "A job whose agent gave up, or whose task failed during it",
-  outOfTurns: "A build whose agent used all its turns (its work was kept for the next round)",
+  outOfTurns: "A build whose agent used all its turns, or whose conversation filled its model's context window (its work was kept for the next round)",
   modelRefused: "A build whose model's API refused the request (another model took over)",
   dropped: "A job whose machine went offline before it ended",
   cancelled: "A job ended because its task was cancelled",
@@ -577,6 +577,7 @@ export const TestsFirstSchema = z
     files: z.array(z.string()).describe("The tests it wrote: a builder's push that changes them is refused"),
     notes: z.string().optional().describe("The test writer's summary, for the builder"),
     disputed: z.boolean().optional().describe("The builder said a test was wrong, and the tests went back to their writer (once)"),
+    from: z.string().optional().describe("After a dispute: the branch head the test writer started from; only its own changes since are checked and locked"),
   })
   .describe("A tests-first task's phases");
 export type TestsFirst = z.infer<typeof TestsFirstSchema>;
@@ -616,6 +617,7 @@ export const TaskSchema = z.object({
   diffBase: z.string().optional().describe("A commit the Hub made on the branch first (a sync task's API copy): the acceptance check judges what came after it"),
   refusedModels: z.array(z.string()).optional().describe("Models whose API refused this task's requests; its later rounds use others"),
   outOfTurns: z.boolean().optional().describe("The current attempt's agent used all its turns: its failure becomes a rework round continuing from the saved work"),
+  contextFull: z.boolean().optional().describe("The current attempt's conversation filled its model's context window: the same, in a fresh conversation"),
   switchingModel: z.boolean().optional().describe("The current attempt's model was refused: its failure requeues the task on another model"),
   budgetBaseUsd: z.number().optional().describe("Spend before the latest retry; the budget counts from here"),
   commit: z.string().optional(),

@@ -21,7 +21,7 @@ export {
   type RoutingRequest,
 } from "./routing.js";
 export { AnthropicApiAdapter, apiErrorText, classify, CREDIT_MESSAGE, LlmError, type Effort, type LlmAdapter, type LlmRequest, type LlmResponse } from "./llm/adapter.js";
-export { ConversationManager, DEFAULT_PLAN_BUDGET_USD, TURN_WARNING, describeCutOff, toolResultBlocks, withCutOffNote, withTurnWarning, parseTotals, type UsageTotals } from "./llm/conversations.js";
+export { ConversationManager, DEFAULT_PLAN_BUDGET_USD, TURN_WARNING, contextFull, CONTEXT_FULL_BELOW_TOKENS, describeCutOff, toolResultBlocks, withCutOffNote, withTurnWarning, parseTotals, type UsageTotals } from "./llm/conversations.js";
 export { priceTable, priceUsage } from "./llm/pricing.js";
 export { CustomPrices } from "./llm/custom-prices.js";
 export { architectSystemPrompt, planPrompt, systemPrompt, taskPrompt } from "./llm/prompts.js";

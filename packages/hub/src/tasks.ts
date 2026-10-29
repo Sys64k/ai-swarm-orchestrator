@@ -112,6 +112,8 @@ export interface TaskRecord {
   switchingModel?: boolean;
   /** Set when the current attempt's agent used all its turns: its failure becomes a rework round (escalation applies). */
   outOfTurns?: boolean;
+  /** Set when the current attempt's conversation filled its model's context window: the same, in a fresh conversation. */
+  contextFull?: boolean;
   /** Files the agent reported touching (FILE_OPERATION), most recent last. */
   filesTouched: string[];
   /** One line per model turn: what the agent did and what it cost. */
@@ -356,6 +358,7 @@ export class TaskManager {
     task.refusedModels = undefined;
     task.switchingModel = undefined;
     task.outOfTurns = undefined;
+    task.contextFull = undefined;
     task.qaAttempts = 0;
     task.nodeId = undefined;
     task.qaNodeId = undefined;
@@ -646,6 +649,17 @@ export class TaskManager {
     this.note(task, `the agent used all ${turns} turns before finishing; its work so far is kept, and a rework round continues from it`);
   }
 
+  /**
+   * The conversation filled its model's context window: retrying the same conversation can't help,
+   * so like running out of turns, the attempt's failure becomes a rework round in a fresh one.
+   */
+  recordContextFull(taskId: string, tokens: number): void {
+    const task = this.tasks.get(taskId);
+    if (!task || (task.state !== "assigned" && task.state !== "in_progress")) return;
+    task.contextFull = true;
+    this.note(task, `the conversation filled the model's context window (about ${tokens.toLocaleString("en-US")} tokens); its work so far is kept, and a rework round continues from it in a fresh conversation`);
+  }
+
   /** Apply a STATUS_UPDATE. Returns an error string if the sender does not own the task. */
   handleStatus(nodeId: string, update: MessageOf<"STATUS_UPDATE">["payload"]): string | undefined {
     if (update.taskId === undefined) return undefined; // idle keepalive
@@ -706,16 +720,16 @@ export class TaskManager {
           task.nodeId = undefined;
           task.state = "pending";
           this.note(task, `requeued for another model after the failure on ${nodeId}`);
-        } else if (task.outOfTurns) {
+        } else if (task.outOfTurns || task.contextFull) {
+          const why = task.outOfTurns ? "used all its turns" : "filled its model's context window";
           task.outOfTurns = undefined;
+          task.contextFull = undefined;
           this.rework(
             task,
-            "The agent used all its turns before finishing. Its work so far is on this branch: continue from it, and spend your turns finishing what's left (checking the branch's diff first) rather than exploring the whole project again.",
+            `The agent ${why} before finishing. Its work so far is on this branch: continue from it, and spend your turns finishing what's left (checking the branch's diff first) rather than exploring the whole project again.`,
           );
         } else if (canDispute(task, update.gaveUp)) {
-          // The builder says a test is wrong: once, the tests go back to their writer with why.
-          task.testsFirst = { ...task.testsFirst!, phase: "tests", disputed: true };
-          this.sendBack(task, { reason: disputeReason(update.detail), failures: [] }, "back to the test writer");
+          void this.disputeTests(task, update.detail);
         } else if (update.gaveUp) {
           // Like running out of turns: a rework round, so the task gets another try (and escalates).
           this.note(task, `the agent gave up on ${nodeId}: ${update.detail ?? "no detail"}`);
@@ -916,7 +930,7 @@ export class TaskManager {
   private async verify(task: TaskRecord, commit: string): Promise<void> {
     let problem: string | undefined;
     try {
-      problem = await this.repo.verifyTaskCommit(task.spec.taskId, commit, roleOf(task), lockedTests(task));
+      problem = await this.repo.verifyTaskCommit(task.spec.taskId, commit, roleOf(task), lockedTests(task), writingTests(task) ? task.testsFirst!.from : undefined);
     } catch (err) {
       problem = `verification error: ${(err as Error).message}`;
     }
@@ -940,13 +954,23 @@ export class TaskManager {
   }
 
   /**
+   * The builder says a test is wrong: once, the tests go back to their writer with why. The writer
+   * works on top of the builder's saved work, so its push is checked from the branch's head now.
+   */
+  private async disputeTests(task: TaskRecord, detail: string | undefined): Promise<void> {
+    const from = await this.repo.branchHead(task.spec.taskId).catch(() => undefined);
+    task.testsFirst = { ...task.testsFirst!, phase: "tests", disputed: true, ...(from ? { from } : {}) };
+    this.sendBack(task, { reason: disputeReason(detail), failures: [] }, "back to the test writer");
+  }
+
+  /**
    * The test writer's tests are in: they fail until the feature is built, so no QA. The task goes
    * to a builder, who must make them pass without changing them (push verification refuses that).
    */
   private async testsWritten(task: TaskRecord, commit: string): Promise<void> {
     const before = task.testsFirst!;
-    // The files this round of the test writer changed; after a dispute, added to those it wrote before.
-    const diff = await this.repo.diff(commit, before.commit ?? task.diffBase).catch(() => undefined);
+    // The files this round of the test writer changed; after a dispute (from the builder's work), added to those it wrote before.
+    const diff = await this.repo.diff(commit, before.from ?? task.diffBase).catch(() => undefined);
     if (task.state !== "verifying" || task.commit !== commit) return;
     const files = [...new Set([...before.files, ...(diff?.files.map((f) => f.path) ?? [])])].sort();
     task.testsFirst = { phase: "build", commit, files, ...(task.summary ? { notes: task.summary } : {}), ...(before.disputed ? { disputed: true } : {}) };

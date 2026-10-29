@@ -243,11 +243,11 @@ export async function pushTaskBranch(gitUrl: string, taskId: string, files: Reco
 export type Block = Record<string, unknown>;
 export const toolUse = (id: string, name: string, input: Record<string, unknown>): Block => ({ type: "tool_use", id, name, input });
 export const text = (t: string): Block => ({ type: "text", text: t });
-export const reply = (content: Block[], stopReason = "tool_use", tokens = 1000): LlmResponse => ({
+export const reply = (content: Block[], stopReason = "tool_use", tokens = 1000, outputTokens = 100): LlmResponse => ({
   content: content as unknown as LlmResponse["content"],
   stopReason,
   model: "claude-opus-5-5",
-  tokens: { inputTokens: tokens, outputTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 0 },
+  tokens: { inputTokens: tokens, outputTokens, cacheReadTokens: 0, cacheWriteTokens: 0 },
 });
 
 /** Stand-in model: returns whatever the script says for the n-th call. */

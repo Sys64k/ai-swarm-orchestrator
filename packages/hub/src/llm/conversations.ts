@@ -501,6 +501,13 @@ export class ConversationManager {
       if (response.stopReason === "refusal") {
         return fail(`the model declined this request${response.refusalCategory ? ` (${response.refusalCategory})` : ""}`, false);
       }
+      if (response.stopReason === "max_tokens" && contextFull(response.tokens.outputTokens)) {
+        // No output limit is this small: the conversation fills the model's window, and retrying it can't help.
+        const tokens = response.tokens.inputTokens + response.tokens.cacheReadTokens + response.tokens.cacheWriteTokens;
+        conv.subject.recordEvent(`answer stopped after ${response.tokens.outputTokens.toLocaleString("en-US")} tokens: the conversation fills the model's context window`);
+        if (conv.subject.kind === "task") this.tasks.recordContextFull(conv.subject.id, tokens);
+        return fail("the conversation filled the model's context window", false);
+      }
       if (response.stopReason === "max_tokens") {
         // The retry of this turn tells the model, so it doesn't repeat the same answer.
         conv.cutOff = { outputTokens: response.tokens.outputTokens };
@@ -683,6 +690,14 @@ export function withCutOffNote(
   const text = `[ASO] Your previous answer to this turn was cut off at the output limit (${cutOff.outputTokens.toLocaleString("en-US")} tokens) and thrown away, so none of it took effect. ${advice}`;
   const blocks = typeof message.content === "string" ? [{ type: "text" as const, text: message.content }] : message.content;
   return { ...message, content: [...blocks, { type: "text" as const, text }] };
+}
+
+/** Answers stopped for length below this many tokens hit the model's context window, not an output limit. */
+export const CONTEXT_FULL_BELOW_TOKENS = 1_000;
+
+/** Whether an answer stopped for length was stopped by a full context window: no output limit is that small. */
+export function contextFull(outputTokens: number): boolean {
+  return outputTokens < CONTEXT_FULL_BELOW_TOKENS;
 }
 
 /** What a cut-off answer held, for the history: it is thrown away, so this is all that's left of it. */

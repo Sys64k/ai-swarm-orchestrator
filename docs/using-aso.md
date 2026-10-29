@@ -110,7 +110,8 @@ cutting text.
    tests is refused, so it can't loosen a test to fit its code.
 3. **A disputed test** goes back once: a builder sure that a test is wrong gives up saying why,
    and the tests go back to their writer with that explanation (not a rework round). The writer
-   fixes them or keeps them and says why. After that, giving up is an ordinary rework round.
+   works on top of the builder's saved code: only its own changes must be test files, and only
+   its tests are locked. It fixes them or keeps them and says why. After that, giving up is an ordinary rework round.
 
 The test writer's job isn't counted as a build in track records; its cost is part of what the
 task cost all in. The pull request and the console's task page say who wrote the tests, and which.

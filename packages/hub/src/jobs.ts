@@ -109,8 +109,9 @@ export function markOverturned(jobs: readonly JobRecord[] | undefined, reason: O
 }
 
 /** How a build ended when its worker reported it failed: the model refused, it ran out of turns, or it gave up. */
-export function failedBuildResult(task: { switchingModel?: boolean; outOfTurns?: boolean }): JobResult {
+export function failedBuildResult(task: { switchingModel?: boolean; outOfTurns?: boolean; contextFull?: boolean }): JobResult {
   if (task.switchingModel) return "modelRefused";
-  if (task.outOfTurns) return "outOfTurns";
+  // A full context window is running out of room too, like the turn limit.
+  if (task.outOfTurns || task.contextFull) return "outOfTurns";
   return "failed";
 }
