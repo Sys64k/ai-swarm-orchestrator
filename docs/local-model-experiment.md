@@ -125,6 +125,28 @@ Outside the core, Ollama on avalon now gives each conversation 65,536 tokens of 
 instead of 32,768, and qwen3-coder works desk avalon#4 on everyday tasks. Escalation still
 moves a task it fails twice to Opus.
 
+## Trying another model
+
+1. **Make it available.** Pull it on avalon (`ollama pull <model>`), or add its provider, and
+   check that it can call a tool: `aso llm-check --model local/<model>`. Passing that isn't
+   proof (devstral passed it): the ladder is.
+2. **Run the ladder** on the Hub's machine, from the core repo after `npm run build`:
+
+   ```bash
+   node scripts/local-model-ladder.mjs local/<model>                 # as it is
+   node scripts/local-model-ladder.mjs local/<model> --tests-first   # Opus writes the tests first
+   ```
+
+   Each run gets a fresh project (`ladder-<model>`) holding aso-test as it was before the first
+   ladder (commit `9cac1e3`), so every model does the same five tasks (variant A) from the same
+   code. The script submits them one at a time, pinned to the model, and prints a table of
+   results. Variants B–D are the other tasks the first four models ran (`--variant`).
+3. **Add the results here**, next to the earlier ones, with anything it taught us, and keep
+   [What's still open](#whats-still-open) current.
+
+The first four models ran on one shared project, each on its own variant, so their numbers
+above compare only roughly. From here on, models compare on the same tasks.
+
 ## What's still open
 
 - **Do these changes help the strong models?** The second aim needs measuring: Gemini's and
