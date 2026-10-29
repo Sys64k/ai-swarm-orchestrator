@@ -11,6 +11,7 @@ their own address), or a local server's address; the Hub then lists the models i
 aso provider add anthropic                 # asks for the key (hidden)
 aso provider add openai                    # also: openrouter, gemini, groq, mistral
 aso provider add ollama --url http://avalon:11434/v1
+aso provider add ollama-cloud              # Ollama's hosted models: its key, no address
 aso provider add custom --name lab --url http://lab:8000/v1   # any OpenAI-compatible API
 aso providers                              # each provider and how many models it lists
 aso provider remove openai                 # forgets the key
@@ -50,11 +51,15 @@ aso provider remove openai                 # forgets the key
   through the OpenAI-style Chat Completions API, where only the address, key and model name
   differ. Nothing is stored at OpenAI (`store: false`).
 - **Or put keys in the Hub's `.env`** (`~/.config/aso/.env`, read when the Hub starts):
-  `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`
-  and `MISTRAL_API_KEY` each make that provider available, and `ASO_LLM_BASE_URL` adds one
+  `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`,
+  `MISTRAL_API_KEY` and `OLLAMA_API_KEY` (Ollama Cloud) each make that provider available, and `ASO_LLM_BASE_URL` adds one
   OpenAI-compatible server as `local`. A change there needs a Hub restart; one made with
   `aso provider add` doesn't. A provider added on the Hub takes over a `.env` one of the same
   name. Older model names (`claude-haiku-5-5`, `openai:qwen3-coder:30b`) keep working.
+- **Ollama Cloud** (`ollama-cloud`, key from ollama.com/settings/keys) serves Ollama's hosted
+  models (`ollama-cloud/<model>`, as `GET /api/models` lists them) at `https://ollama.com/v1`.
+  It's a subscription with usage limits, not priced per token, so its models cost $0 in the
+  track records and task budgets don't stop them unless you set a price (`aso price set`).
 - **Gemini** names its models `models/<name>` (`gemini/models/gemini-3.8-flash`), and its list
   includes models it no longer serves to new keys; such a model fails on its first call with
   Google's explanation. `aso llm-check --model <spec>` tries one first.

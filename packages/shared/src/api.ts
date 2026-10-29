@@ -184,7 +184,7 @@ export const JoinBodySchema = z.strictObject({
 });
 export const DiscoveryProofBodySchema = DiscoveryClaimSchema.extend({ key: DiscoveryKeyIdSchema.describe("The key id from the worker's query") });
 /** The model providers ASO knows how to reach; `custom` is any OpenAI-compatible API by address. */
-export const PROVIDER_PRESETS = ["anthropic", "openai", "openrouter", "gemini", "groq", "mistral", "ollama", "custom"] as const;
+export const PROVIDER_PRESETS = ["anthropic", "openai", "openrouter", "gemini", "groq", "mistral", "ollama", "ollama-cloud", "custom"] as const;
 export type ProviderPreset = (typeof PROVIDER_PRESETS)[number];
 
 export interface PresetInfo {
@@ -209,6 +209,7 @@ export const PRESET_INFO: Record<ProviderPreset, PresetInfo> = {
   groq: { label: "Groq", baseUrl: "https://api.groq.com/openai/v1", kind: "openai-compatible", local: false, keyRequired: true, urlRequired: false, maxTokensField: "max_tokens" },
   mistral: { label: "Mistral", baseUrl: "https://api.mistral.ai/v1", kind: "openai-compatible", local: false, keyRequired: true, urlRequired: false, maxTokensField: "max_tokens" },
   ollama: { label: "Ollama", baseUrl: null, kind: "openai-compatible", local: true, keyRequired: false, urlRequired: true, maxTokensField: "max_tokens" },
+  "ollama-cloud": { label: "Ollama Cloud", baseUrl: "https://ollama.com/v1", kind: "openai-compatible", local: false, keyRequired: true, urlRequired: false, maxTokensField: "max_tokens" },
   custom: { label: "Custom", baseUrl: null, kind: "openai-compatible", local: true, keyRequired: false, urlRequired: true, maxTokensField: "max_tokens" },
 };
 

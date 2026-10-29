@@ -475,6 +475,7 @@ export const PROVIDER_FORMS: Record<ProviderPreset, { label: string; key: "requi
   groq: { label: "Groq", key: "required", url: false, vision: true },
   mistral: { label: "Mistral", key: "required", url: false, vision: true },
   ollama: { label: "Ollama (a local server)", key: "optional", url: true, vision: true, hint: "e.g. http://avalon:11434/v1" },
+  "ollama-cloud": { label: "Ollama Cloud", key: "required", url: false, vision: true, hint: "Ollama's hosted models (a subscription, not priced per token)" },
   custom: { label: "Other OpenAI-compatible API", key: "optional", url: true, vision: true, hint: "Its API root, e.g. http://lab:8000/v1" },
 };
 

@@ -264,7 +264,7 @@ export interface AvailableModel {
   baseUrl?: string;
 }
 
-export type ProviderPreset = "anthropic" | "openai" | "openrouter" | "gemini" | "groq" | "mistral" | "ollama" | "custom";
+export type ProviderPreset = "anthropic" | "openai" | "openrouter" | "gemini" | "groq" | "mistral" | "ollama" | "ollama-cloud" | "custom";
 
 /** A model provider (`GET /api/providers`): never its key, only whether it has one. */
 export interface Provider {

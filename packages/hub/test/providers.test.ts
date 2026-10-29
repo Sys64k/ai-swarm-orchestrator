@@ -55,10 +55,11 @@ describe("providers", () => {
     ]);
     assert.equal(env[1].label, "Local (avalon:11434)");
     assert.deepEqual(environmentProviders({}), []);
-    const cloud = environmentProviders({ OPENAI_API_KEY: "sk-oa", GEMINI_API_KEY: " g-key ", GROQ_API_KEY: "" });
+    const cloud = environmentProviders({ OPENAI_API_KEY: "sk-oa", GEMINI_API_KEY: " g-key ", GROQ_API_KEY: "", OLLAMA_API_KEY: "ol-key" });
     assert.deepEqual(cloud.map((p) => [p.id, p.preset, p.source, p.key, p.baseUrl]), [
       ["openai", "openai", "environment", "sk-oa", "https://api.openai.com/v1"],
       ["gemini", "gemini", "environment", "g-key", "https://generativelanguage.googleapis.com/v1beta/openai"],
+      ["ollama-cloud", "ollama-cloud", "environment", "ol-key", "https://ollama.com/v1"],
     ], "each cloud key in the .env is a provider at its known address; an empty one isn't");
   });
 
@@ -70,6 +71,7 @@ describe("providers", () => {
       await assert.rejects(providers.add({ preset: "custom", id: "remote", baseUrl: api.url, key: "sk-wrong" }), /can't use Custom .*HTTP 401 \(the key was refused\)/);
       assert.equal(providers.get("remote"), undefined, "nothing saved");
       await assert.rejects(providers.add({ preset: "openai" }), /OpenAI needs an API key/);
+      await assert.rejects(providers.add({ preset: "ollama-cloud" }), /Ollama Cloud needs an API key/, "unlike a local Ollama");
       await assert.rejects(providers.add({ preset: "ollama" }), /needs the server's address/);
 
       const added = await providers.add({ preset: "custom", id: "remote", baseUrl: `${api.url}/`, key: "sk-right" });

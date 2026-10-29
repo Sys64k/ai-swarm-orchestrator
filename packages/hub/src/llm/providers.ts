@@ -52,6 +52,7 @@ export const ENV_KEYS = {
   GEMINI_API_KEY: "gemini",
   GROQ_API_KEY: "groq",
   MISTRAL_API_KEY: "mistral",
+  OLLAMA_API_KEY: "ollama-cloud",
 } as const satisfies Record<string, ProviderPreset>;
 
 export interface ProvidersEnv extends Partial<Record<keyof typeof ENV_KEYS, string>> {

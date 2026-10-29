@@ -4291,6 +4291,7 @@
               "groq",
               "mistral",
               "ollama",
+              "ollama-cloud",
               "custom"
             ]
           },
@@ -4987,6 +4988,7 @@
               "groq",
               "mistral",
               "ollama",
+              "ollama-cloud",
               "custom"
             ],
             "description": "Which provider; known ones know their own address"

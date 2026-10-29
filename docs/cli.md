@@ -168,7 +168,7 @@ done), and `revoke` shuts a machine out.
 
 `aso providers` lists the model providers (added ones and the `.env`'s) and how many models
 each lists. `aso provider add <preset>` adds one: `anthropic`, `openai`, `openrouter`,
-`gemini`, `groq`, `mistral` (they ask for the key at a hidden prompt, or read it from stdin;
+`gemini`, `groq`, `mistral`, `ollama-cloud` (they ask for the key at a hidden prompt, or read it from stdin;
 `--key` works but lands in your shell history), or `ollama` / `custom` with `--url`. `--name`
 gives a second one of a kind its own name; `--vision` marks models that accept images.
 `aso provider remove <id>` forgets it and its key. See [Providers](models.md#providers).
