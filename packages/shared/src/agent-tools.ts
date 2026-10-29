@@ -102,7 +102,8 @@ export const AGENT_TOOLS = {
   },
   set_package_scripts: {
     description:
-      "Ask the Hub to add or update npm scripts in package.json (e.g. test, build, dev, lint). You cannot edit package.json " +
+      "Ask the Hub to add npm scripts to package.json (e.g. test, build, dev, lint). Scripts the project already has can't be " +
+      "changed: use them as they are, or add one under a new name. You cannot edit package.json " +
       "yourself. If the project has no package.json yet, the Hub creates one. QA runs `npm test`, so the project needs a test " +
       "script. Install lifecycle scripts (postinstall, prepare, ...) are not allowed. Blocks until the change is on main and " +
       "your branch is rebased (your edits are kept).",
