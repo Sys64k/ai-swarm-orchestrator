@@ -43,3 +43,4 @@ export { AgentTools, TOOL_OUTPUT_LIMIT, type ToolCall, type ToolHost, type ToolR
 export { probeImage, type ImageInfo } from "./agent/image.js";
 export { collectScreenshots, hasScreenshotScript, missingViews, type Screenshot } from "./screenshots.js";
 export { callLocalModel, listLocalModels, type LocalAnswer, type LocalModelServer } from "./local-model.js";
+export { shellSyntax } from "./agent/shell-syntax.js";

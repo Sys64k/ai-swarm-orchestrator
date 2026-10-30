@@ -154,6 +154,7 @@ failing until we read the transcripts:
 | [#141](https://github.com/Sys64k/ai-swarm-orchestrator/pull/141) | Agents may add npm scripts, not change them | gpt-oss broke `test` on main |
 | [#143](https://github.com/Sys64k/ai-swarm-orchestrator/pull/143)–[#145](https://github.com/Sys64k/ai-swarm-orchestrator/pull/145) | The ladder script; level 2 says the title convention it's judged by | So the next models compare on the same tasks; two models failed our vague level 2 |
 | [#148](https://github.com/Sys64k/ai-swarm-orchestrator/pull/148) | Weakened existing tests send the work back | gpt-oss deleted tests to pass; a later builder changed a test to fit its code, and only a non-blocking note saw it |
+| [#152](https://github.com/Sys64k/ai-swarm-orchestrator/pull/152) | `run_command` refuses shell syntax, naming the command to run instead | glm-4.7-flash piped and redirected (`2>&1 \| head -50`) in a tool with no shell |
 
 Outside the core, Ollama on avalon now gives each conversation 65,536 tokens of context
 instead of 32,768, and qwen3-coder works desk avalon#4 on everyday tasks. Escalation still
@@ -190,8 +191,6 @@ above compare only roughly. From here on, models compare on the same tasks.
   try, cost all in) will show whether its share of the work should grow or end.
 - **glm-4.7-flash with tests first** (`--tests-first`) would show whether tests first rescues
   its levels 3 and 5, as it did qwen3-coder's level 3.
-- **`run_command` and shell syntax.** glm-4.7-flash piped and redirected in `run_command`, which
-  has no shell. A refusal naming what to drop would save it the wasted turns; not built.
 - **devstral** might drive the agent with a firmer reminder to call a tool; not tried.
 - **Ollama Cloud's larger models** (added as a provider in [#132](https://github.com/Sys64k/ai-swarm-orchestrator/pull/132))
   would show how much model size moves the line between pass and fail.

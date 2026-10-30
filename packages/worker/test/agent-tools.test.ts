@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { agentToolDefinitions, IMAGE_MAX_BYTES, MAX_FRAME_BYTES, TURN_IMAGE_BUDGET } from "@aso/shared";
-import { AgentTools, DependencyRejectedError, fitTurnResults, hostRunner, probeImage, type ToolResult } from "@aso/worker";
+import { AgentTools, DependencyRejectedError, fitTurnResults, hostRunner, probeImage, shellSyntax, type ToolResult } from "@aso/worker";
 
 process.env.ASO_LOG_LEVEL ??= "warn";
 
@@ -125,6 +125,28 @@ describe("agent tools", () => {
     err(await call("run_command", { argv: ["pnpm", "add", "x"] }), /use request_dependencies/);
     err(await call("run_command", { argv: ["definitely-not-a-program"] }), /cannot run/);
     err(await call("run_command", { argv: ["node", "-e", "setTimeout(()=>{}, 5000)"], timeout_sec: 1 }), /timed out after 1s/);
+  });
+
+  it("refuses shell syntax with the command to run instead, before running anything", async () => {
+    const piped = await call("run_command", { argv: ["npm", "test", "--", "-t", "exportBackup", "2>&1", "|", "head", "-50"] });
+    err(piped, /^`2>&1 \| head -50` is shell syntax, and run_command runs the program without a shell/);
+    assert.match(piped.content, /Run \["npm", "test", "--", "-t", "exportBackup"\] instead: its output already includes stderr, and you get its last 49,800 characters/);
+    err(await call("run_command", { argv: "npm test -- -t exportBackup 2>&1 | head -50" }), /Run \["npm", "test", "--", "-t", "exportBackup"\] instead/);
+    err(await call("run_command", { argv: "npm test" }), /whole command line in one item; give each word as its own item: \["npm", "test"\]/);
+    err(await call("run_command", { argv: ["npm", "test", "&&", "npm", "run", "lint"] }), /`&& npm run lint` is shell syntax[\s\S]*Run one program per call/);
+    writeFileSync(path.join(repo, "t.mjs"), "require('fs').writeFileSync('ran.txt', 'x');\n");
+    err(await call("run_command", { argv: ["node", "t.mjs", ">out.txt"] }), /`>out\.txt` is shell syntax/);
+    assert.equal(existsSync(path.join(repo, "ran.txt")), false, "nothing ran");
+  });
+
+  it("knows shell syntax from ordinary arguments", () => {
+    for (const argv of [["a", "|", "b"], ["a", "||", "b"], ["a", ";"], ["a", "&"], ["a", "<", "in"], ["a", ">", "f"], ["a", ">>", "f"], ["a", "2>/dev/null"], ["a", ">&2"], ["a", "&>", "f"]]) {
+      assert.ok(shellSyntax(argv, 100), argv.join(" "));
+    }
+    for (const argv of [["node", "-e", "console.log('a && b')"], ["npx", "vitest", "run", "-t", "a > b"], ["node", "--max-old-space-size=4096", "x.js"], ["npm", "test"]]) {
+      assert.equal(shellSyntax(argv, 100), undefined, argv.join(" "));
+    }
+    assert.match(shellSyntax(["|", "head"], 100)!, /^`\| head` is shell syntax[^[]*$/, "nothing to suggest running");
   });
 
   it("requests dependencies through the Hub", async () => {
