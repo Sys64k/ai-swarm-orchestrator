@@ -68,6 +68,7 @@ import {
   hasChanges,
   patchLines,
   currentTab,
+  retryEditFromForm,
   fileStatusLabel,
   formatBytes,
   screenshotList,
@@ -157,6 +158,15 @@ describe("pull request reviews", () => {
     assert.equal(currentTab(undefined, task("t", "in_progress"), true), "live");
     assert.equal(currentTab("screenshots", task("t", "awaiting_review", { screenshots: shots }), true), "screenshots");
     assert.deepEqual(["added", "deleted", "modified"].map((s) => fileStatusLabel(s as "added")), ["new · ", "deleted · ", ""]);
+  });
+
+  it("sends only what Edit and retry changed", () => {
+    const spec = { description: "Wide list", acceptanceCriteria: ["blog below shop", "no sideways scroll"] };
+    assert.deepEqual(retryEditFromForm(spec, "Wide list", "blog below shop\nno sideways scroll\n"), {}, "untouched: a plain retry");
+    assert.deepEqual(retryEditFromForm(spec, "  Wide list ", " keeps the order \n\n no sideways scroll"), { acceptanceCriteria: ["keeps the order", "no sideways scroll"] });
+    assert.deepEqual(retryEditFromForm(spec, "Wide list, order kept", "blog below shop\nno sideways scroll"), { description: "Wide list, order kept" });
+    assert.deepEqual(retryEditFromForm(spec, "   ", "blog below shop\nno sideways scroll"), {}, "an emptied description isn't sent");
+    assert.deepEqual(retryEditFromForm(spec, "Wide list", "- blog below shop\n2. no sideways scroll"), {}, "list markers are dropped");
   });
 
   it("lists QA screenshots with their console URL and a readable caption", () => {

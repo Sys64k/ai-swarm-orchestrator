@@ -4702,6 +4702,27 @@
           }
         }
       },
+      "RetryTask": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "The task's new description",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20000
+          },
+          "acceptanceCriteria": {
+            "description": "The task's new acceptance criteria, replacing the old ones",
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "description": "Correct the task before it runs again, e.g. a criterion that can't be met; the agent is told what changed"
+      },
       "RequestChanges": {
         "type": "object",
         "properties": {
@@ -6594,7 +6615,7 @@
         "tags": [
           "Tasks"
         ],
-        "summary": "Queue a failed or cancelled task again with fresh limits",
+        "summary": "Queue a failed or cancelled task again with fresh limits, optionally with its description or criteria corrected",
         "parameters": [
           {
             "name": "id",
@@ -6605,6 +6626,16 @@
             }
           }
         ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetryTask"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "OK",
@@ -6612,6 +6643,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Task"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }

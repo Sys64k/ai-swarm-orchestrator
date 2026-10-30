@@ -56,6 +56,7 @@ export { OpenAiCompatibleAdapter, OPENAI_PREFIX, accumulateChunks, classifyHttp,
 export { deskName, DeskModels, desksOf, modelConcurrency, type ModelSettings, type Route, type ToolCheck } from "./llm/desk-models.js";
 export { checkToolUse } from "./llm/tool-check.js";
 export { CLAUDE_FALLBACK, DEFAULT_CLAUDE_MODEL, environmentProviders, fetchModels, parseModelList, parseSpec, providerView, Providers, resolveModel, type Provider, type ProviderInput, type ProviderStatus } from "./llm/providers.js";
+export { correctTask, type CorrectedTask } from "./task-edit.js";
 export { ACCEPTANCE_DIFF_LIMIT, AcceptanceChecker, acceptanceCounts, acceptancePrompt, changedTestFiles, diffText, isTestFile, qualityNotesSuffix, readVerdict, unmetReason, type AcceptanceVerdict, type CriterionVerdict } from "./llm/acceptance.js";
 export { AttemptLimiter, clientAddress, createGatewayApp, gatewayAccess, GATEWAY_MAX_FAILURES, JOIN_PATH, PUBLIC_API_PATHS, type GatewayRule } from "./gateway.js";
 export { addOutcome, describeRecord, JOB_OUTCOMES, type JobOutcome, type TrackRecord } from "./track-record.js";

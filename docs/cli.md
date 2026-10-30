@@ -97,6 +97,9 @@ prints them and reads your answers (an empty answer rejects the plan).
 - `aso plan-approve <planId>` approves a proposed plan.
 - `aso plan-reply <planId> <message...>` answers questions or asks for changes.
 - `aso plan-reject <planId>` rejects a plan.
+- `aso task-retry <taskId>` runs a failed or cancelled task again. `--criteria-file <file>` (one
+  per line) or `--criterion <text>` (repeated) replaces its acceptance criteria, and
+  `--description <text>` its description, first.
 
 Without a terminal (scripts), `aso plan` prints these commands and exits.
 

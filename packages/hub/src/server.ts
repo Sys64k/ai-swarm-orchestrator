@@ -68,6 +68,7 @@ import {
   ModelSuggestionsQuerySchema,
   type PublicStats,
   type PublicStatsShare,
+  RetryTaskBodySchema,
 } from "@aso/shared";
 import { API_DOC_VERSION, openApiDocument } from "./api/openapi.js";
 import { syncApiCopies } from "./api-sync.js";
@@ -1311,7 +1312,11 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     }
   };
   app.post("/api/tasks/:id/cancel", (c) => taskAction(c, (p, id) => p.tasks.cancel(id)));
-  app.post("/api/tasks/:id/retry", (c) => taskAction(c, (p, id) => p.tasks.retry(id)));
+  app.post("/api/tasks/:id/retry", async (c) => {
+    const req = await parsed(c, RetryTaskBodySchema, { optional: true });
+    if (!req.ok) return c.json({ error: req.error }, 400);
+    return taskAction(c, (p, id) => p.tasks.retry(id, req.data));
+  });
 
   /** Like taskAction, for actions that wait on GitHub or Git and answer with something else than the task. */
   const taskQuery = async <T>(c: Context, action: (p: Project, id: string) => Promise<T>) => {

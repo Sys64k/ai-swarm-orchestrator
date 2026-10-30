@@ -56,7 +56,7 @@ Answers can gain fields over time: clients should ignore fields they don't know.
 | `POST` | `/api/tasks/:id/cancel` | Stop a task that isn't finished; a worker still on it is cut off at its next model turn |
 | `POST` | `/api/nodes/:id/drain` · `/resume` | Stop or resume giving a worker new jobs; its current job finishes. Resume also cancels a pending restart |
 | `POST` | `/api/nodes/:id/restart` | Drain a service worker and restart it once idle (`restart`: `pending`, then `sent`). 409 for a hand-started worker |
-| `POST` | `/api/tasks/:id/retry` | Queue a failed or cancelled task again with fresh limits and budget |
+| `POST` | `/api/tasks/:id/retry` | Queue a failed or cancelled task again with fresh limits and budget; an optional `{ description, acceptanceCriteria }` corrects it first |
 | `GET` | `/api/push` | Push notifications: the Hub's public key (`applicationServerKey`) and how many devices are subscribed |
 | `POST` | `/api/push/subscriptions`, `/check`, `/delete` | Add a device's `PushSubscription` (https endpoint, `p256dh`, `auth`), ask whether one is subscribed, remove one |
 | `POST` | `/api/push/test` | Send a test notification, to `{ "endpoint" }` or every device |

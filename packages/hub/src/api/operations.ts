@@ -1,6 +1,7 @@
 import {
   ApiErrorSchema,
   ApproveTaskBodySchema,
+  RetryTaskBodySchema,
   CreatePlanBodySchema,
   CreateProjectBodySchema,
   CreateTaskBodySchema,
@@ -71,6 +72,7 @@ export const REQUEST_SCHEMAS = {
   PlanReply: PlanReplyBodySchema,
   CreateTask: CreateTaskBodySchema,
   ApproveTask: ApproveTaskBodySchema,
+  RetryTask: RetryTaskBodySchema,
   RequestChanges: RequestChangesBodySchema,
   Sync: SyncBodySchema,
   DeployResult: DeployResultBodySchema,
@@ -260,7 +262,10 @@ const TASKS: ApiOperation[] = [
     responses: { 201: ok("Task", "Queued"), ...noProject, 400: err("Invalid task, a model the Hub doesn't know, or several projects and none named"), 409: err("The task id is taken") },
   },
   { method: "post", path: "/api/tasks/{id}/cancel", tag: "Tasks", summary: "Stop a task (closes its pull request)", responses: act("Task", "task", "Finished, or merging right now") },
-  { method: "post", path: "/api/tasks/{id}/retry", tag: "Tasks", summary: "Queue a failed or cancelled task again with fresh limits", responses: act("Task", "task", "Not failed or cancelled") },
+  {
+    method: "post", path: "/api/tasks/{id}/retry", tag: "Tasks", summary: "Queue a failed or cancelled task again with fresh limits, optionally with its description or criteria corrected", body: "RetryTask", optionalBody: true,
+    responses: { ...act("Task", "task", "Not failed or cancelled"), 400: err("Invalid body") },
+  },
   {
     method: "get", path: "/api/tasks/{id}/diff", tag: "Tasks", summary: "What the task changes, file by file, against the main it branched from",
     responses: { 200: ok("TaskDiff"), ...notFound("task"), 409: err("No unmerged commit to show") },
