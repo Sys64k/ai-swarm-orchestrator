@@ -1014,7 +1014,7 @@ export class TaskManager {
     task.acceptance = { result: verdict.result, commit, at, model: verdict.model, summary: verdict.summary, criteria: verdict.criteria, ...(notes.length ? { qualityNotes: notes } : {}) };
     this.note(task, `acceptance check: ${acceptanceCounts(verdict.criteria)}${qualityNotesSuffix(notes)}`);
     if (task.nodeId) this.onOutcome?.(task.nodeId, verdict.result === "unmet" ? "unmet" : "accepted");
-    if (verdict.result === "unmet") this.rework(task, unmetReason(verdict.criteria));
+    if (verdict.result === "unmet") this.rework(task, unmetReason(verdict.criteria, notes));
     else this.release(task);
     this.kick();
   }

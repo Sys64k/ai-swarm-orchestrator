@@ -1100,13 +1100,16 @@ export const QUALITY_NOTE_LABEL: Record<QualityNoteKind, string> = {
   other: "Other",
 };
 
+/** Quality notes that send the work back (the Hub's BLOCKING_QUALITY_NOTES); the others never block. */
+const BLOCKING_QUALITY_NOTES: readonly QualityNoteKind[] = ["tests-weakened"];
+
 const VERDICT_LABEL = { met: "Met", unmet: "Unmet", unclear: "Unclear" } as const;
 
 export interface AcceptanceView {
   headline: string;
   /** `reason`: why it isn't met; met ones need none. */
   criteria: Array<{ criterion: string; verdict: "met" | "unmet" | "unclear"; label: string; reason?: string }>;
-  notes: Array<{ label: string; text: string }>;
+  notes: Array<{ label: string; text: string; blocks: boolean }>;
 }
 
 /**
@@ -1126,7 +1129,7 @@ export function acceptanceView(task: { acceptance?: Acceptance; commit?: string 
   return {
     headline: `${counts}${a.model ? ` (${a.model})` : ""}.${a.summary ? ` ${a.summary}` : ""}`,
     criteria: criteria.map((c) => ({ criterion: c.criterion, verdict: c.verdict, label: VERDICT_LABEL[c.verdict], ...(c.verdict === "met" || !c.reason ? {} : { reason: c.reason }) })),
-    notes: (a.qualityNotes ?? []).map((q) => ({ label: QUALITY_NOTE_LABEL[q.kind] ?? q.kind, text: q.file ? `${q.file}: ${q.note}` : q.note })),
+    notes: (a.qualityNotes ?? []).map((q) => ({ label: QUALITY_NOTE_LABEL[q.kind] ?? q.kind, text: q.file ? `${q.file}: ${q.note}` : q.note, blocks: BLOCKING_QUALITY_NOTES.includes(q.kind) })),
   };
 }
 

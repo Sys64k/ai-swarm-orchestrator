@@ -563,6 +563,10 @@ export const QUALITY_NOTE_LABEL: Record<QualityNoteKind, string> = {
 };
 /** Most notes kept from one check. */
 export const MAX_QUALITY_NOTES = 5;
+/** Quality notes that send the work back like an unmet criterion; the others never block. */
+export const BLOCKING_QUALITY_NOTES: readonly QualityNoteKind[] = ["tests-weakened"];
+export const isBlockingNote = (note: Pick<QualityNote, "kind">): boolean => BLOCKING_QUALITY_NOTES.includes(note.kind);
+
 export const QualityNoteSchema = z.object({
   kind: z.enum(QUALITY_NOTE_KINDS),
   note: z.string().describe("What it is, in a sentence"),

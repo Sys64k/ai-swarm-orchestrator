@@ -153,11 +153,15 @@ function AcceptanceCheck({ task }: { task: Task }) {
       )}
       {view.notes.length > 0 && (
         <>
-          <h3 className="subhead">Quality notes (they don&apos;t block)</h3>
+          <h3 className="subhead">Quality notes (only weakened tests block)</h3>
           <ul className="list">
             {view.notes.map((n) => (
               <li key={`${n.label}-${n.text}`}>
-                <strong>{n.label}:</strong> {n.text}
+                <strong>
+                  {n.label}
+                  {n.blocks && " (blocks)"}:
+                </strong>{" "}
+                {n.text}
               </li>
             ))}
           </ul>

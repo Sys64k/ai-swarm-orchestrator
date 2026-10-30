@@ -309,8 +309,8 @@ claude-opus-5-5          3         0        3          3       3/3        3/3   
   the task before; with escalation, that's the stronger model rescuing it.
 - **QA passed, accepted:** the verdicts on its builds' work, as good out of all.
 - **Quality notes:** what the acceptance check noted on its checked work (duplicated code, dead
-  code, a misleading summary, weakened tests), as "3 in 5" checks; they don't block, they show
-  which model passes cleanly. See [How a task flows](using-aso.md#how-a-task-flows).
+  code, a misleading summary, weakened tests), as "3 in 5" checks; only weakened tests block,
+  the rest show which model passes cleanly. See [How a task flows](using-aso.md#how-a-task-flows).
 - **Out of turns, failed:** builds whose agent ran out of room (its turns, or its model's context
   window) or gave up.
 - **Cost:** its own builds' estimated model cost.

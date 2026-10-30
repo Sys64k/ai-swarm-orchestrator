@@ -4,7 +4,9 @@ import {
   AcceptanceChecker,
   acceptanceNote,
   acceptancePrompt,
+  changedTestFiles,
   diffText,
+  isTestFile,
   qualityNoteLines,
   qualityNotesSuffix,
   readVerdict,
@@ -86,8 +88,29 @@ describe("acceptance check", () => {
     assert.ok(verdict.result === "met" && verdict.qualityNotes?.length === 1, "a note doesn't block");
     const system = scripted.requests[0].system;
     assert.match(system, /asks for tests, or for a file to be added or changed, is unmet when the diff has no such change/);
-    assert.match(system, /duplication .*dead-code .*misleading-summary .*tests-weakened/s);
-    assert.match(system, /never block/);
+    assert.match(system, /duplication\s.*dead-code\s.*misleading-summary\s.*other\s.*These don't block the work/s);
+    assert.match(system, /tests-weakened, when the diff changes an existing test so that it checks less or\nexpects something else/);
+    assert.match(system, /Not when the\ntask's description or criteria ask for that behaviour to change/);
+  });
+
+  it("sends the work back when existing tests were weakened, even with every criterion met", async () => {
+    const allMet = [{ index: 1, verdict: "met", reason: "a" }, { index: 2, verdict: "met", reason: "b" }];
+    const weakened = { kind: "tests-weakened", note: "the sort test now expects descending ids", file: "src/ProjectList.test.tsx" };
+    const verdict = await new AcceptanceChecker(async () => [model(() => verdictCall(allMet, "ok", [{ kind: "duplication", note: "copied" }, weakened]))]).check(TASK, DIFF);
+    assert.equal(verdict.result, "unmet");
+    assert.ok(verdict.result === "unmet" && verdict.criteria.every((c) => c.verdict === "met"), "the criteria stay as judged");
+    const only = await new AcceptanceChecker(async () => [model(() => verdictCall(allMet, "ok", [{ kind: "duplication", note: "copied" }]))]).check(TASK, DIFF);
+    assert.equal(only.result, "met", "other notes still don't block");
+  });
+
+  it("points the reviewer at the existing test files the change modifies or deletes", () => {
+    for (const path of ["src/a.test.ts", "lib/b.spec.tsx", "test/c.ts", "packages/x/tests/d.mjs", "src/__tests__/e.js"]) assert.ok(isTestFile(path), path);
+    for (const path of ["src/latest.ts", "src/testing.ts", "contest/a.ts", "docs/tests.md"]) assert.ok(!isTestFile(path), path);
+    const file = (path: string, status: "added" | "modified" | "deleted") => ({ path, status, additions: 1, deletions: 1, binary: false, patch: "" });
+    const diff = { ...DIFF, files: [file("src/list.tsx", "modified"), file("src/list.test.tsx", "modified"), file("src/old.test.ts", "deleted"), file("tests/e2e/wide.spec.ts", "added")] };
+    assert.deepEqual(changedTestFiles(diff), ["src/list.test.tsx (modified)", "src/old.test.ts (deleted)"], "new test files aren't");
+    assert.match(acceptancePrompt(TASK, diff), /Existing test files this change modifies or deletes \(check them for weakened tests\):\n- src\/list\.test\.tsx \(modified\)\n- src\/old\.test\.ts \(deleted\)\n/);
+    assert.doesNotMatch(acceptancePrompt(TASK, { ...DIFF, files: [file("tests/e2e/wide.spec.ts", "added")] }), /Existing test files/);
   });
 
   it("decides met, unmet or undecided, and never blocks on its own failure", async () => {
@@ -132,6 +155,19 @@ describe("acceptance check", () => {
       { criterion: "The llm-none scenario answers 404", verdict: "unmet" as const, reason: "no such scenario" },
     ];
     assert.equal(unmetReason(criteria), "Acceptance check: 1 of 2 criteria not met.\n- The llm-none scenario answers 404\n  Missing: no such scenario\nDo these before finishing; the tests passing isn't enough.");
+    const weakened = { kind: "tests-weakened" as const, note: "the sort test now expects descending ids", file: "src/ProjectList.test.tsx" };
+    assert.equal(
+      unmetReason([criteria[0]], [{ kind: "duplication", note: "copied" }, weakened]),
+      [
+        "Acceptance check: existing tests weakened.",
+        "- Existing tests weakened (src/ProjectList.test.tsx): the sort test now expects descending ids",
+        "Put those tests back as they were and change the code to pass them, not the tests to pass the code.",
+        "Do these before finishing; the tests passing isn't enough.",
+      ].join("\n"),
+    );
+    assert.match(unmetReason(criteria, [weakened]), /^Acceptance check: 1 of 2 criteria not met; existing tests weakened\.\n/);
+    assert.equal(qualityNotesSuffix([weakened, { kind: "other", note: "b" }]), "; 2 quality notes, 1 blocking");
+    assert.deepEqual(qualityNoteLines([weakened]), ["", "**Quality notes** (only weakened tests block):", "- Existing tests weakened or removed (blocks) (`src/ProjectList.test.tsx`): the sort test now expects descending ids"]);
     const note = acceptanceNote({ commit: "c", acceptance: { result: "met", commit: "c", at: "t", model: "claude-opus-5-5", summary: "Done.", criteria: [criteria[0], { ...criteria[1], verdict: "unclear" }] } });
     assert.deepEqual(note, [
       "**Acceptance check** (claude-opus-5-5): 1 of 2 criteria met, 1 unclear. Done.",
@@ -140,7 +176,7 @@ describe("acceptance check", () => {
     ]);
     assert.deepEqual(
       acceptanceNote({ commit: "c", acceptance: { result: "met", commit: "c", at: "t", criteria: [criteria[0]], qualityNotes: [{ kind: "duplication", note: "copies the cutting", file: "lib/documents.ts" }] } }).slice(-3),
-      ["", "**Quality notes** (they don't block):", "- Duplicated code (`lib/documents.ts`): copies the cutting"],
+      ["", "**Quality notes** (only weakened tests block):", "- Duplicated code (`lib/documents.ts`): copies the cutting"],
     );
     assert.deepEqual(qualityNoteLines([]), [], "no notes, no lines");
     assert.equal(qualityNotesSuffix([]), "");

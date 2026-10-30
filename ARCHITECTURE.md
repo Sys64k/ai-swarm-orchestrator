@@ -887,15 +887,27 @@ numbered criteria, the agent's summary (labelled a claim) and the diff against t
   added or changed, is `unmet` when the diff has no such change. `unclear` is for what the diff
   can't show (code outside it, a cut diff). Before, a reviewer could call absent tests
   `unclear`, which doesn't block, though the diff does show that they're missing.
-- **Quality notes, which never block.** `report_acceptance` also takes `quality_notes`: up to
+- **Quality notes, mostly not blocking.** `report_acceptance` also takes `quality_notes`: up to
   `MAX_QUALITY_NOTES` (5) concrete problems besides the criteria, each a kind
   (`QUALITY_NOTE_KINDS`: `duplication`, `dead-code`, `misleading-summary`, `tests-weakened`,
   `other`), a sentence and an optional file; `readQualityNotes` drops what it can't read. They
   go on `task.acceptance.qualityNotes`, the pull request (`qualityNoteLines`) and the history,
   and the build's job record counts them (`qualityNotes`), so track records show a model that
-  passes but cuts corners. They don't block because they're judgment calls; a criterion is the
+  passes but cuts corners. Most don't block because they're judgment calls; a criterion is the
   place for a must (the Architect writes reuse criteria, see
   [Planning flow](#planning-flow)).
+- **Weakened tests block.** A `tests-weakened` note (`BLOCKING_QUALITY_NOTES` in shared) makes
+  the verdict `unmet` even with every criterion met, and `unmetReason` tells the agent to put
+  the tests back and change the code instead. The prompt defines it narrowly: an existing test
+  deleted, skipped, loosened or expecting something else, unless the task asks for that
+  behaviour to change; a renamed or moved test that checks the same isn't one. Above the diff
+  the prompt lists the existing test files it modifies or deletes (`changedTestFiles`: `*.test.*`,
+  `*.spec.*`, `test/`, `tests/`, `__tests__/`), so a large diff can't bury one. It's an
+  ordinary rework round, so the round limit still ends a reviewer that's wrong each time.
+  Builders changing tests to fit their code was seen twice: gpt-oss deleting tests on the
+  local-model ladder, and a builder reversing aso-ui's project order and editing the test to
+  match. QA can't see it (the edited tests pass), and as a note that didn't block, it reached the
+  person's review.
 
 A verdict for a commit that's no longer the task's (a newer push, a cancel) is dropped. The
 check's tokens count toward the task's spend. Tried on the real history of aso-ui #99: it judged

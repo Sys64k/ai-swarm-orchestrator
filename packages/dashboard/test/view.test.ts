@@ -714,8 +714,13 @@ describe("acceptance check on the task page", () => {
         { criterion: "Titles are tidied", verdict: "met", label: "Met" },
         { criterion: "Has tests", verdict: "unclear", label: "Unclear", reason: "outside the diff" },
       ],
-      notes: [{ label: "Duplicated code", text: "lib/documents.ts: copies the cutting" }],
+      notes: [{ label: "Duplicated code", text: "lib/documents.ts: copies the cutting", blocks: false }],
     });
+  });
+
+  it("marks a weakened-tests note as the one that blocks", () => {
+    const weakened = { ...acceptance, result: "unmet" as const, qualityNotes: [...acceptance.qualityNotes, { kind: "tests-weakened" as const, note: "expects descending ids" }] };
+    assert.deepEqual(acceptanceView({ commit: "c", acceptance: weakened })!.notes.map((n) => [n.label, n.blocks]), [["Duplicated code", false], ["Existing tests weakened or removed", true]]);
   });
 
   it("shows nothing for an earlier commit's check, and says when it's checking or couldn't decide", () => {

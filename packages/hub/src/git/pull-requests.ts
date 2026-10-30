@@ -1,4 +1,4 @@
-import { createLogger, QUALITY_NOTE_LABEL, taskBranchName, type ChecksOverall, type CheckState, type QualityNote, type ReviewChecks } from "@aso/shared";
+import { createLogger, isBlockingNote, QUALITY_NOTE_LABEL, taskBranchName, type ChecksOverall, type CheckState, type QualityNote, type ReviewChecks } from "@aso/shared";
 import { acceptanceCounts } from "../llm/acceptance.js";
 import type { ReviewGate, ReviewOutcome, TaskManager, TaskRecord } from "../tasks.js";
 import { isBuild, testWriterModel } from "../jobs.js";
@@ -345,7 +345,7 @@ export function acceptanceNote(task: Pick<TaskRecord, "acceptance" | "commit">):
 /** The acceptance check's quality notes for the pull request, after a blank line; none without notes. */
 export function qualityNoteLines(notes: readonly QualityNote[]): string[] {
   if (!notes.length) return [];
-  return ["", "**Quality notes** (they don't block):", ...notes.map((n) => `- ${QUALITY_NOTE_LABEL[n.kind]}${n.file ? ` (\`${n.file}\`)` : ""}: ${n.note}`)];
+  return ["", "**Quality notes** (only weakened tests block):", ...notes.map((n) => `- ${QUALITY_NOTE_LABEL[n.kind]}${isBlockingNote(n) ? " (blocks)" : ""}${n.file ? ` (\`${n.file}\`)` : ""}: ${n.note}`)];
 }
 
 /**
