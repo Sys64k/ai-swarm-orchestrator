@@ -79,9 +79,10 @@ async function fakeProvider() {
     let raw = "";
     req.on("data", (c) => (raw += c));
     req.on("end", () => {
-      if (req.url?.endsWith("/models")) return void res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ data: [{ id: "bad-model" }, { id: "good-model" }] }));
+      if (req.url?.endsWith("/models")) return void res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ data: [{ id: "bad-model" }, { id: "good-model" }, { id: "capped-model" }] }));
       const model = (JSON.parse(raw) as { model: string }).model;
       calls.push(model);
+      if (model === "capped-model") return void res.writeHead(429, { "content-type": "application/json" }).end('{"error":{"type":"insufficient_quota","message":"You exceeded your current quota"}}');
       if (model === "bad-model") return void res.writeHead(400, { "content-type": "application/json" }).end('{"error":{"message":"Function call is missing a thought_signature"}}');
       res.writeHead(200, { "content-type": "text/event-stream" });
       res.end(`data: ${JSON.stringify({ model, choices: [{ delta: { content: `from ${model}` }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
@@ -144,6 +145,69 @@ describe("escalation (Hub)", () => {
           w.ws.close();
         },
         { llm: { adapter: new ScriptedModel(() => assert.fail("a task agent reached the Architect's model")), agentAdapter: fallback, agentModel: "claude-haiku-5-5", escalation: false } },
+      );
+    } finally {
+      if (saved === undefined) delete process.env.ASO_LLM_BASE_URL;
+      else process.env.ASO_LLM_BASE_URL = saved;
+      await provider.close();
+    }
+  });
+
+  it("moves a desk task off a provider on hold, and keeps the hold until that provider works again", async () => {
+    const provider = await fakeProvider();
+    const saved = process.env.ASO_LLM_BASE_URL;
+    process.env.ASO_LLM_BASE_URL = provider.url;
+    const fallback = new ScriptedModel(() => reply([text("from the default")], "end_turn"), "claude-haiku-5-5");
+    try {
+      await withHub(
+        async (ctx) => {
+          const w = await worker(ctx.port, "dev");
+          assert.equal((await call(ctx.port, "/api/desks", { target: "test#1", model: "capped-model" })).status, 200);
+          await postTask(ctx.port, { taskId: "greet", role: "backend", title: "Greet", description: "d" });
+
+          const held = await firstTurn(w, "greet");
+          assert.ok(held.outcome === "error" && !held.paused && !held.retryable, "not a wait: the task moves");
+          await waitFor(() => ctx.hub.tasks.get("greet")?.switchingModel === true);
+          w.send(createMessage("STATUS_UPDATE", "dev", { state: "failed", taskId: "greet", detail: "on hold" }));
+
+          const moved = await firstTurn(w, "greet");
+          assert.equal(moved.outcome, "ok");
+          const task = ctx.hub.tasks.get("greet")!;
+          assert.equal(task.reworkRound, 0, "a hold isn't a rework round");
+          assert.match(task.history.map((h) => h.event).join("\n"), /local\/capped-model can't be called now \(.* is on hold\); the task moves to another model/);
+
+          const llm = (await call(ctx.port, "/api/llm")).body;
+          assert.equal(llm.pausedProviders.length, 1, "the default's working calls don't lift another provider's hold");
+          assert.match(llm.pausedProviders[0].reason, /out of credit or quota/);
+          assert.equal(llm.paused.reason, llm.pausedProviders[0].reason, "older clients still see a hold");
+          w.ws.close();
+        },
+        { llm: { adapter: new ScriptedModel(() => assert.fail("a task agent reached the Architect's model")), agentAdapter: fallback, agentModel: "claude-haiku-5-5", escalation: false } },
+      );
+    } finally {
+      if (saved === undefined) delete process.env.ASO_LLM_BASE_URL;
+      else process.env.ASO_LLM_BASE_URL = saved;
+      await provider.close();
+    }
+  });
+
+  it("makes a task with its own model wait out its provider's hold", async () => {
+    const provider = await fakeProvider();
+    const saved = process.env.ASO_LLM_BASE_URL;
+    process.env.ASO_LLM_BASE_URL = provider.url;
+    try {
+      await withHub(
+        async (ctx) => {
+          const w = await worker(ctx.port, "dev");
+          await postTask(ctx.port, { taskId: "pinned", role: "backend", title: "Pinned", description: "d", model: "capped-model" });
+          const held = await firstTurn(w, "pinned");
+          assert.ok(held.outcome === "error" && held.paused && held.retryable, "it waits");
+          const task = ctx.hub.tasks.get("pinned")!;
+          assert.equal(task.switchingModel, undefined);
+          assert.equal(task.state, "in_progress");
+          w.ws.close();
+        },
+        { llm: { adapter: new ScriptedModel(() => assert.fail("not the Architect's model")), escalation: false } },
       );
     } finally {
       if (saved === undefined) delete process.env.ASO_LLM_BASE_URL;

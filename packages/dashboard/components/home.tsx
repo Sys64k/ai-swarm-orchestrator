@@ -5,7 +5,7 @@ import { usePoll } from "./use-poll.ts";
 import { Badge, Banner, Row, Section, TopBar } from "./ui.tsx";
 import { NeedsYou, WorkLists } from "./work-lists.tsx";
 import type { HubNode, HubUpdate, Llm, Plan, Project, Task } from "../lib/types.ts";
-import { formatUsd, hubUpdateView, projectSummary, workerViews } from "../lib/view.ts";
+import { formatUsd, hubUpdateView, pausedLines, projectSummary, workerViews } from "../lib/view.ts";
 
 /** Everything at a glance: what needs you, the projects, what's running, the workers. */
 export function Home() {
@@ -30,6 +30,11 @@ export function Home() {
       <main className="page page-wide">
         {error && <Banner tone="bad">Hub unreachable: {error}</Banner>}
         {llm.data && !llm.data.configured && <Banner tone="waiting">No model configured on the Hub: set ANTHROPIC_API_KEY.</Banner>}
+        {pausedLines(llm.data).map((line) => (
+          <Banner key={line} tone="waiting">
+            {line}
+          </Banner>
+        ))}
         {hub?.banner && (
           <Banner tone="bad">
             {hub.label}: {hub.detail}

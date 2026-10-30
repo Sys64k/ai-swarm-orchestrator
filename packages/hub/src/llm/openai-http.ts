@@ -13,6 +13,8 @@ export interface OpenAiBaseOptions {
   model: string;
   /** Sent as a Bearer token; local servers usually need none. */
   apiKey?: string;
+  /** The provider's label, for pauses; defaults to the address's host. */
+  provider?: string;
   maxTokens: number;
   /** Whether the model accepts images; without it, view_image results reach it as text only. */
   vision?: boolean;
@@ -20,6 +22,16 @@ export interface OpenAiBaseOptions {
   timeoutMs?: number;
   /** Injected fetch (tests). */
   fetch?: typeof fetch;
+}
+
+/** Whose account an adapter's calls use: its provider's label, else the address's host. */
+export function providerLabel(opts: Pick<OpenAiBaseOptions, "provider" | "baseUrl">): string {
+  if (opts.provider) return opts.provider;
+  try {
+    return new URL(opts.baseUrl).host;
+  } catch {
+    return opts.baseUrl;
+  }
 }
 
 /** An HTTP error as the Hub handles it: what to say, and whether trying again can help. */

@@ -346,12 +346,13 @@ export class Providers {
     // OpenAI's own newer models take tools with reasoning only on its Responses API; the other
     // OpenAI-compatible providers speak Chat Completions.
     if (p.preset === "openai") {
-      return new OpenAiResponsesAdapter({ baseUrl, model: parsed.model, apiKey: p.key, maxTokens: opts.maxTokens, vision: opts.vision ?? p.vision ?? false });
+      return new OpenAiResponsesAdapter({ baseUrl, model: parsed.model, apiKey: p.key, provider: p.label, maxTokens: opts.maxTokens, vision: opts.vision ?? p.vision ?? false });
     }
     return new OpenAiCompatibleAdapter({
       baseUrl,
       model: parsed.model,
       apiKey: p.key,
+      provider: p.label,
       maxTokens: opts.maxTokens,
       maxTokensField: PRESET_INFO[p.preset].maxTokensField,
       vision: opts.vision ?? p.vision ?? false,

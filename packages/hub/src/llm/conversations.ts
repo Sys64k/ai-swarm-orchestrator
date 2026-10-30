@@ -20,12 +20,12 @@ type TaskDirectory = ProjectSet["tasks"];
 type PlanDirectory = ProjectSet["plans"];
 import type { AgentTurn } from "../tasks.js";
 import { mayDispute, roleOf, writingTests } from "../tests-first.js";
-import { LlmError, type LlmAdapter } from "./adapter.js";
+import { LlmError, providerOf, type LlmAdapter } from "./adapter.js";
 import { priceUsage } from "./pricing.js";
 import { Semaphore } from "./semaphore.js";
 import { deskName, type DeskModels, type Route } from "./desk-models.js";
 import { MACHINE_PREFIX, type MachineModels } from "./machine-models.js";
-import { calledSpec, canSwitchFrom, roundModel, type EscalationPolicy, type RoundModel } from "./escalation.js";
+import { calledSpec, canonicalSpec, nextSpecAfter, roundModel, type EscalationPolicy, type RoundModel } from "./escalation.js";
 import { isFresh } from "../challengers.js";
 import { architectSystemPrompt, CONTINUE_PROMPT, planPrompt, systemPrompt, taskPrompt } from "./prompts.js";
 
@@ -87,9 +87,9 @@ export interface ConversationOptions {
     /** A call's estimated cost, by the machine whose agent made it. */
     record(nodeId: string, usd: number): void;
   };
-  /** Called when model calls go on hold (out of credit), and when they work again. */
-  onPause?: (reason: string) => void;
-  onResume?: () => void;
+  /** Called when a provider's calls go on hold (out of credit, a usage limit), and when they work again. */
+  onPause?: (provider: string, reason: string, until?: string) => void;
+  onResume?: (provider: string) => void;
   /** Drop idle conversations after this long. */
   idleTimeoutMs?: number;
   /** Saves conversations after every turn so agents can carry on after a Hub restart. */
@@ -169,10 +169,10 @@ export class ConversationManager {
   private readonly requests = new Map<string, { conversationId: string; turn: number }>();
   private readonly toolsByRole = new Map<string, Anthropic.Beta.BetaTool[]>();
   private readonly taskBudgetUsd: number;
-  /** Set while model calls are on hold (out of credit). */
-  private paused?: { reason: string; since: string };
-  private readonly onPause?: (reason: string) => void;
-  private readonly onResume?: () => void;
+  /** Providers whose calls are on hold (out of credit, a usage limit), by provider: the others go on. */
+  private readonly paused = new Map<string, { reason: string; since: string; until?: string }>();
+  private readonly onPause?: (provider: string, reason: string, until?: string) => void;
+  private readonly onResume?: (provider: string) => void;
   private readonly planBudgetUsd: number;
   private readonly maxTurns: number;
   private readonly idleTimeoutMs: number;
@@ -360,12 +360,48 @@ export class ConversationManager {
    * take the task, record this one as refused, so the failing attempt is requeued on that model.
    */
   private skipRefusedModel(conv: Conversation, error: string): void {
-    if (conv.subject.kind !== "task" || conv.testWriter) return;
+    const s = this.switchable(conv);
+    if (s?.next) this.tasks.recordModelRefused(s.taskId, s.spec, error);
+  }
+
+  /**
+   * A task conversation that may move to another model: the model it calls now, and the one its
+   * round would call without it (none when nothing else can take it). Not for a test writer or a
+   * task with its own model: they need theirs.
+   */
+  private switchable(conv: Conversation): { taskId: string; spec: string; next?: string } | undefined {
+    if (conv.subject.kind !== "task" || conv.testWriter) return undefined;
     const spec = calledSpec({ spec: conv.deskModel }, this.opts.defaultAgentSpec);
     const task = this.tasks.get(conv.subject.id);
-    if (!spec || !task || task.spec.model) return; // its own model: nowhere else to go
-    if (canSwitchFrom(this.opts.escalation?.(), task, this.ownModelOf(task.spec.taskId, conv.nodeId), this.opts.defaultAgentSpec, spec)) {
-      this.tasks.recordModelRefused(task.spec.taskId, spec, error);
+    if (!spec || !task || task.spec.model) return undefined;
+    const next = nextSpecAfter(this.opts.escalation?.(), task, this.ownModelOf(task.spec.taskId, conv.nodeId), this.opts.defaultAgentSpec, spec);
+    return { taskId: task.spec.taskId, spec, ...(next ? { next } : {}) };
+  }
+
+  /**
+   * A desk task whose model's provider is on hold: when its round can switch to a model whose
+   * provider isn't, record this one as refused for it, so the attempt is requeued there. Roles
+   * that need their model (the Architect, a test writer) and pinned tasks wait instead.
+   */
+  private moveFromPaused(conv: Conversation, provider: string): boolean {
+    const s = this.switchable(conv);
+    if (!s?.next) return false;
+    // A model whose provider the Hub can't tell may be on the same account: it waits instead.
+    const nextProvider = this.providerOfSpec(s.next);
+    if (nextProvider === undefined || this.paused.has(nextProvider)) return false;
+    this.tasks.recordModelRefused(s.taskId, s.spec, `${provider} is on hold`, "held");
+    return true;
+  }
+
+  /** The provider a model spec's calls go to; undefined when the Hub can't tell. */
+  private providerOfSpec(spec: string): string | undefined {
+    if (this.opts.defaultAgentSpec !== undefined && canonicalSpec(this.opts.defaultAgentSpec) === spec) return this.agentAdapter && providerOf(this.agentAdapter);
+    // A machine's own model is served by that machine, so it shares no account with anything else.
+    if (spec.startsWith(MACHINE_PREFIX)) return spec;
+    try {
+      return this.opts.deskModels && providerOf(this.opts.deskModels.route(spec).adapter);
+    } catch {
+      return undefined;
     }
   }
 
@@ -381,8 +417,16 @@ export class ConversationManager {
       queue: this.slots.status(),
       conversations: this.conversations.size,
       totals: { calls: this.totals.calls, costUsd: round(this.totals.costUsd), since: this.totals.since },
-      ...(this.paused ? { paused: { ...this.paused } } : {}),
+      ...this.pausedStatus(),
     };
+  }
+
+  /** `paused`: the oldest hold, as before there were several; `pausedProviders`: each one. */
+  private pausedStatus() {
+    if (!this.paused.size) return {};
+    // A Map keeps insertion order: the first is the oldest hold.
+    const holds = [...this.paused].map(([provider, p]) => ({ provider, ...p }));
+    return { paused: { reason: holds[0].reason, since: holds[0].since }, pausedProviders: holds };
   }
 
   /** Returns a protocol error string, or undefined if the request was taken for processing. */
@@ -490,16 +534,19 @@ export class ConversationManager {
       this.requests.delete(req.requestId);
       this.respond(conv.nodeId, { requestId: req.requestId, outcome: "error", error, retryable, ...(paused ? { paused } : {}) });
     };
+    let provider: string | undefined;
     try {
       const messages = [...conv.messages, userMessage];
       const route = this.routeFor(conv);
       if (!route) return fail("no LLM configured on the Hub for this agent", false);
+      provider = providerOf(route.adapter);
       const response = await route.slots.run(() => route.adapter.complete({ system: conv.system, tools: conv.tools, messages }));
 
-      if (this.paused) {
-        log.info(`model calls work again after waiting since ${this.paused.since}`);
-        this.paused = undefined;
-        this.onResume?.();
+      const hold = this.paused.get(provider);
+      if (hold) {
+        log.info(`${provider}'s model calls work again after waiting since ${hold.since}`);
+        this.paused.delete(provider);
+        this.onResume?.(provider);
       }
       const usage = priceUsage(response.model, response.tokens);
       this.totals.calls++;
@@ -557,13 +604,15 @@ export class ConversationManager {
       this.respond(conv.nodeId, result);
     } catch (err) {
       const e = err instanceof LlmError ? err : new LlmError((err as Error).message, false);
-      if (e.pause) {
-        // Nothing wrong with the work: hold everything until there is credit again.
-        if (!this.paused) {
-          this.paused = { reason: e.message, since: new Date().toISOString() };
-          log.warn(`model calls on hold: ${e.message}`);
-          this.onPause?.(e.message);
+      if (e.pause && provider) {
+        // Nothing wrong with the work: hold this provider's calls until it works again.
+        if (!this.paused.has(provider)) {
+          this.paused.set(provider, { reason: e.message, since: new Date().toISOString(), ...(e.until ? { until: e.until } : {}) });
+          log.warn(`${provider}'s model calls on hold: ${e.message}`);
+          this.onPause?.(provider, e.message, e.until);
         }
+        // A desk task that another provider's model can take moves there instead of waiting.
+        if (this.moveFromPaused(conv, provider)) return fail(`${provider} is on hold (${e.message}); the task moves to another model`, false);
         if (!conv.waitingNoted) conv.subject.recordEvent(`waiting: ${e.message}`);
         conv.waitingNoted = true;
         return fail(e.message, true, true);

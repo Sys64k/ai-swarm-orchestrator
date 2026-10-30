@@ -464,8 +464,8 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     concurrency: llm.concurrency,
     store,
     transcripts: projects.transcripts,
-    onPause: (reason) => void notifier?.send({ title: "ASO is waiting for model credit", body: reason, url: "/", tag: "llm-paused" }),
-    onResume: () => void notifier?.send({ title: "ASO is working again", body: "Model calls work again; waiting tasks and plans carry on.", url: "/", tag: "llm-paused" }),
+    onPause: (provider, reason) => void notifier?.send({ title: `ASO is waiting for ${provider}`, body: reason, url: "/", tag: `llm-paused-${provider}` }),
+    onResume: (provider) => void notifier?.send({ title: `${provider} works again`, body: `${provider}'s model calls work again; waiting tasks and plans carry on.`, url: "/", tag: `llm-paused-${provider}` }),
   });
   await conversations.restore();
 

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { describe, it } from "node:test";
 import Anthropic from "@anthropic-ai/sdk";
-import { AnthropicApiAdapter, classify, contextFull, CREDIT_MESSAGE, DEFAULT_PLAN_BUDGET_USD, describeCutOff, toolResultBlocks, withCutOffNote, LlmError, priceUsage, taskPrompt, TURN_WARNING, withTurnWarning, type LlmRequest } from "@aso/hub";
+import { AnthropicApiAdapter, classify, contextFull, CREDIT_MESSAGE, DEFAULT_PLAN_BUDGET_USD, describeCutOff, toolResultBlocks, withCutOffNote, LlmError, priceUsage, resetTime, usageLimitMessage, taskPrompt, TURN_WARNING, withTurnWarning, type LlmRequest } from "@aso/hub";
 import { CONVERSATION_MAX_IMAGE_BYTES, CONVERSATION_MAX_IMAGES, createMessage, type AgentMessage } from "@aso/shared";
 import { callModelWithRetry, startWorker, type ModelReply } from "@aso/worker";
 import {
@@ -287,6 +287,13 @@ describe("LLM gateway (Hub)", () => {
     const raw = JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "Your credit balance is too low to access the Anthropic API." } });
     const credit = classify(new Anthropic.APIError(undefined, undefined, raw, undefined));
     assert.deepEqual([credit.message, credit.retryable, credit.pause], [CREDIT_MESSAGE, true, "credit"]);
+    const capped = classify(
+      new Anthropic.BadRequestError(400, undefined, JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "You have reached your specified API usage limits. You will regain access on 2026-11-01 at 00:00 UTC." } }), new Headers()),
+    );
+    assert.deepEqual([capped.retryable, capped.pause, capped.until], [true, "credit", "2026-11-01T00:00:00.000Z"], "a spend limit waits, it doesn't fail the task");
+    assert.equal(capped.message, usageLimitMessage("2026-11-01T00:00:00.000Z"));
+    assert.match(capped.message, /^Anthropic API usage limit reached until 2026-11-01 00:00 UTC: raise it at console\.anthropic\.com/);
+    assert.equal(resetTime("no date here"), undefined);
     const other = classify(new Anthropic.APIError(undefined, undefined, JSON.stringify({ error: { message: "Overloaded" } }), undefined));
     assert.equal(other.message, "API error: Overloaded", "the API's own words, not its JSON");
 

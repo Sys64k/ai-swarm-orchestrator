@@ -26,8 +26,10 @@ export class LlmError extends Error {
   constructor(
     message: string,
     readonly retryable: boolean,
-    /** credit: the account ran out of credit; everything waits until it has some again. */
+    /** credit: the account ran out of credit or hit a usage limit; its provider's calls wait until it works again. */
     readonly pause?: "credit",
+    /** When the provider says access comes back (an ISO time), if it says. */
+    readonly until?: string,
   ) {
     super(message);
   }
@@ -35,6 +37,19 @@ export class LlmError extends Error {
 
 export const CREDIT_MESSAGE =
   "Anthropic credit balance is too low: add credits at console.anthropic.com (Settings → Billing). Work waits and resumes by itself";
+
+/** Anthropic's spend limit (console.anthropic.com → Settings → Limits): reached, calls fail until it resets or is raised. */
+const USAGE_LIMIT = /reached your specified API usage limits/i;
+
+/** "You will regain access on 2026-11-01 at 00:00 UTC" as an ISO time; undefined when the text names none. */
+export function resetTime(text: string): string | undefined {
+  const m = /regain access on (\d{4}-\d{2}-\d{2}) at (\d{2}:\d{2}) UTC/i.exec(text);
+  return m ? `${m[1]}T${m[2]}:00.000Z` : undefined;
+}
+
+export function usageLimitMessage(until: string | undefined): string {
+  return `Anthropic API usage limit reached${until ? ` until ${until.slice(0, 16).replace("T", " ")} UTC` : ""}: raise it at console.anthropic.com (Settings → Limits). Work on Anthropic models waits and resumes by itself`;
+}
 
 /** The API's own words: a streamed error arrives as its raw JSON body. */
 export function apiErrorText(message: string): string {
@@ -54,7 +69,14 @@ export const DEFAULT_MAX_TOKENS = 32_000;
 export interface LlmAdapter {
   readonly name: string;
   readonly model: string;
+  /** The account its calls go to ("Anthropic", a provider's label): an out-of-credit pause holds that account's calls only. */
+  readonly provider?: string;
   complete(request: LlmRequest): Promise<LlmResponse>;
+}
+
+/** Whose account an adapter's calls use: its provider, else its kind. */
+export function providerOf(adapter: LlmAdapter): string {
+  return adapter.provider ?? adapter.name;
 }
 
 /** Models that accept `fallbacks: "default"` (server-side retry on another model after a refusal). */
@@ -74,6 +96,7 @@ export interface AnthropicAdapterOptions {
 /** Official Anthropic API via @anthropic-ai/sdk. */
 export class AnthropicApiAdapter implements LlmAdapter {
   readonly name = "anthropic-api";
+  readonly provider = "Anthropic";
   readonly model: string;
   private readonly client: Pick<Anthropic, "beta">;
 
@@ -119,6 +142,10 @@ export class AnthropicApiAdapter implements LlmAdapter {
 
 export function classify(err: unknown): LlmError {
   if (err instanceof Anthropic.APIError && /credit balance is too low/i.test(err.message)) return new LlmError(CREDIT_MESSAGE, true, "credit");
+  if (err instanceof Anthropic.APIError && USAGE_LIMIT.test(err.message)) {
+    const until = resetTime(err.message);
+    return new LlmError(usageLimitMessage(until), true, "credit", until);
+  }
   if (err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError) {
     return new LlmError(`Anthropic API rejected the credentials: ${err.message}`, false);
   }

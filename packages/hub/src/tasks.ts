@@ -654,12 +654,13 @@ export class TaskManager {
    * failure (the worker reports it next) requeues the task instead of failing it, and later
    * rounds skip this model. It doesn't count as a rework round.
    */
-  recordModelRefused(taskId: string, spec: string, error: string): void {
+  recordModelRefused(taskId: string, spec: string, error: string, why: "refused" | "held" = "refused"): void {
     const task = this.tasks.get(taskId);
     if (!task || (task.state !== "assigned" && task.state !== "in_progress")) return;
     task.refusedModels = [...new Set([...(task.refusedModels ?? []), spec])];
     task.switchingModel = true;
-    this.note(task, `${spec} refused the request (${error.split("\n")[0].slice(0, 160)}); the task moves to another model`);
+    const what = why === "held" ? "can't be called now" : "refused the request";
+    this.note(task, `${spec} ${what} (${error.split("\n")[0].slice(0, 160)}); the task moves to another model`);
   }
 
   /**

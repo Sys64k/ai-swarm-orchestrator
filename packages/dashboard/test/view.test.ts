@@ -69,6 +69,7 @@ import {
   patchLines,
   currentTab,
   retryEditFromForm,
+  pausedLines,
   fileStatusLabel,
   formatBytes,
   screenshotList,
@@ -162,6 +163,14 @@ describe("pull request reviews", () => {
     assert.equal(currentTab(undefined, task("t", "in_progress"), true), "live");
     assert.equal(currentTab("screenshots", task("t", "awaiting_review", { screenshots: shots }), true), "screenshots");
     assert.deepEqual(["added", "deleted", "modified"].map((s) => fileStatusLabel(s as "added")), ["new · ", "deleted · ", ""]);
+  });
+
+  it("says which providers are on hold, and why", () => {
+    assert.deepEqual(pausedLines(undefined), []);
+    assert.deepEqual(
+      pausedLines({ pausedProviders: [{ provider: "Anthropic", reason: "usage limit", since: "2026-10-30T16:47:00.000Z", until: "2026-11-01T00:00:00.000Z" }, { provider: "Google Gemini", reason: "quota", since: "2026-10-30T17:00:00.000Z" }] }),
+      ["Anthropic is on hold: usage limit", "Google Gemini is on hold: quota"],
+    );
   });
 
   it("sends only what Edit and retry changed", () => {

@@ -5,7 +5,7 @@ import type {
   ModelSuggestion,
   ModelSuggestions,
   SuggestionRole,
-  Acceptance, Models, Price, Provider, ProviderPreset, CheckState, QualityNoteKind, DeployStatus, DiffFile, HubNode, HubUpdate, WorkerKey, Plan, PlannedTask, Project, ReviewChecks, Task, TaskDiff, TaskState, TrackRecordKey, TrackRecordRow, TranscriptEntry } from "./types.ts";
+  Acceptance, Llm, Models, Price, Provider, ProviderPreset, CheckState, QualityNoteKind, DeployStatus, DiffFile, HubNode, HubUpdate, WorkerKey, Plan, PlannedTask, Project, ReviewChecks, Task, TaskDiff, TaskState, TrackRecordKey, TrackRecordRow, TranscriptEntry } from "./types.ts";
 
 import { PROVIDER_ID } from "./hub-routes.ts";
 
@@ -1343,4 +1343,9 @@ export function retryEditFromForm(
     ...(newDescription && newDescription !== spec.description ? { description: newDescription } : {}),
     ...(criteria.join("\n") !== spec.acceptanceCriteria.join("\n") ? { acceptanceCriteria: criteria } : {}),
   };
+}
+
+/** One banner line per provider on hold: who, and the Hub's reason (which says until when, when the provider said). */
+export function pausedLines(llm: Pick<Llm, "pausedProviders"> | undefined): string[] {
+  return (llm?.pausedProviders ?? []).map((p) => `${p.provider} is on hold: ${p.reason}`);
 }
