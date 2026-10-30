@@ -22,6 +22,8 @@ describe("the local-model ladder", () => {
       assert.match(t.acceptanceCriteria.at(-1), /All existing tests still pass/);
     }
     assert.equal(tasks[0].title, "Word count helper", "variant A by default");
+    assert.match(tasks[1].description, /60 characters plus the `…`/, "level 2 says the project's convention");
+    assert.doesNotMatch(tasks[1].acceptanceCriteria.join("\n"), /still cut to TITLE_MAX_LENGTH after tidying/, "not the criterion two models failed on");
   });
 
   it("marks a tests-first run's tasks, and refuses a variant it doesn't have", () => {
