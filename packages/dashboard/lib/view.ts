@@ -204,10 +204,14 @@ export function checksSummary(checks: ReviewChecks): { text: string; tone: Tone 
 
 export type TaskTab = "live" | "changes" | "screenshots" | "details";
 
-/** The task page's tab: the person's choice, else the changes while a review waits, else the live view. */
-export function currentTab(chosen: TaskTab | undefined, task: Pick<Task, "state" | "review" | "commit" | "screenshots">): TaskTab {
+/**
+ * The task page's tab: the person's choice, else the changes while a review waits, else the live
+ * view. On a wide screen the details sit beside the tabs, so they aren't one.
+ */
+export function currentTab(chosen: TaskTab | undefined, task: Pick<Task, "state" | "review" | "commit" | "screenshots">, wide = false): TaskTab {
   if (chosen === "changes" && !hasChanges(task)) return "live"; // e.g. the work went back to an agent
   if (chosen === "screenshots" && !task.screenshots?.files.length) return "live"; // a later QA run took none
+  if (chosen === "details" && wide) return canReview(task) ? "changes" : "live";
   return chosen ?? (canReview(task) ? "changes" : "live");
 }
 

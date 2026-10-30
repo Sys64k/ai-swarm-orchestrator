@@ -23,42 +23,44 @@ export function ProjectPage({ id }: { id: string }) {
   return (
     <>
       <TopBar title={id} back="/" />
-      <main className="page">
+      <main className="page page-wide">
         <p className="muted small mono path">{project.data.dir}</p>
         {note && <p className="muted small">{note}</p>}
         {(tasks.error ?? plans.error) && <Banner tone="bad">{tasks.error ?? plans.error}</Banner>}
-        {deploy && (
-          <Section title="Deploy">
-            <p>
-              <Badge label={deploy.label} tone={deploy.tone} />
-              {deploy.detail && <span className="muted small"> {deploy.detail}</span>}
-            </p>
-            {deploy.output && (
-              <details>
-                <summary className="small">Output</summary>
-                <pre className="mono small deploy-output">{deploy.output}</pre>
-              </details>
-            )}
-            {deploy.canDeploy && (
-              <ActionButton
-                label="Deploy now"
-                variant="plain"
-                run={async () => {
-                  const r = await hubPost(`projects/${id}/deploy`);
-                  if (r.ok) project.refresh();
-                  return r.ok ? undefined : r.error;
-                }}
-              />
-            )}
-          </Section>
-        )}
         {empty && <p className="muted">Nothing here yet. Start with a plan: describe what you want built.</p>}
-        {ready && (
-          <>
-            <NeedsYou tasks={tasks.data!} plans={plans.data!} showProject={false} />
-            <WorkLists tasks={tasks.data!} plans={plans.data!} showProject={false} sections={["plans", "running", "queued", "done"]} />
-          </>
-        )}
+        <div className="columns">
+          <div className="column">
+            {deploy && (
+              <Section title="Deploy">
+                <p>
+                  <Badge label={deploy.label} tone={deploy.tone} />
+                  {deploy.detail && <span className="muted small"> {deploy.detail}</span>}
+                </p>
+                {deploy.output && (
+                  <details>
+                    <summary className="small">Output</summary>
+                    <pre className="mono small deploy-output">{deploy.output}</pre>
+                  </details>
+                )}
+                {deploy.canDeploy && (
+                  <ActionButton
+                    label="Deploy now"
+                    variant="plain"
+                    run={async () => {
+                      const r = await hubPost(`projects/${id}/deploy`);
+                      if (r.ok) project.refresh();
+                      return r.ok ? undefined : r.error;
+                    }}
+                  />
+                )}
+              </Section>
+            )}
+            {ready && <NeedsYou tasks={tasks.data!} plans={plans.data!} showProject={false} />}
+          </div>
+          <div className="column">
+            {ready && <WorkLists tasks={tasks.data!} plans={plans.data!} showProject={false} sections={["plans", "running", "queued", "done"]} />}
+          </div>
+        </div>
       </main>
       <Link href={`/plans/new?project=${id}`} className="fab">
         + New plan

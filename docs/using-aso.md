@@ -5,7 +5,10 @@ Planning work with the Architect, submitting tasks, the console, and what happen
 ## The console
 
 The console is the Hub's web UI at `http://<hub-ip>:7421`. It's designed for a phone first,
-and it works on a laptop too. On a phone, use **Add to Home Screen** to open it like an app.
+and uses the room on bigger screens: from 1200px wide the home, project, task, plan and track
+records pages put their sections side by side (a task's details next to its live view, for
+example), growing up to an ultrawide monitor. On a phone, use **Add to Home Screen** to open it
+like an app.
 
 - **Home.**
   - **Needs you** comes first: plans waiting for approval and failed tasks, across all
