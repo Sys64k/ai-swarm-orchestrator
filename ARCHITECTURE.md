@@ -1390,7 +1390,7 @@ failing it, without a rework round. A person's retry clears both.
 | `search` | `git grep -E` over tracked and untracked files; up to 300 matches |
 | `view_image` | Shows the model a PNG, JPEG, GIF or WebP in the checkout (e.g. a screenshot the agent saved with `run_command`), up to 2 MB and 8,000 px a side; the type is read from the bytes, not the name |
 | `write_file` / `edit_file` / `delete_file` | Exact-match edits (unique unless `replace_all`); protected files refused; reported via `FILE_OPERATION` |
-| `run_command` | argv without a shell, in the job sandbox; `CI=1`; default 120 s timeout (max 900); `git`, shells, `sudo` and `npm install`-style commands refused |
+| `run_command` | argv without a shell, in the job sandbox; `CI=1`; default 120 s timeout (max 900); `git`, shells, `sudo` and `npm install`-style commands refused. Shell syntax is refused before anything runs (`shellSyntax`: a pipe, `&&`, `;`, a redirection such as `2>&1` or `>out.txt`, or a whole command line as one item or one string), naming the command to run instead: weak models wrote `2>&1 \| head` out of habit, and the words reached the program as arguments |
 | `request_dependencies` | Adds up to 30 npm packages via the Hub in one commit; returns once installed and rebased |
 | `set_package_scripts` | Adds npm scripts via the Hub (creates package.json if missing), never changes an existing one; returns once rebased |
 | `finish` | Ends the loop with a summary, a commit message and, for a visible change, the views QA should screenshot (an empty `screenshots` list means none); refused if other calls in the same turn failed |

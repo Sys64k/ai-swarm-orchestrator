@@ -18,11 +18,14 @@ import {
 import { DependencyRejectedError, type DependencyRequest } from "../jobs.js";
 import type { CommandRunner } from "../sandbox.js";
 import { probeImage } from "./image.js";
+import { shellSyntax } from "./shell-syntax.js";
 
 const exec = promisify(execFile);
 
 /** Characters of tool output returned to the model per call. */
 export const TOOL_OUTPUT_LIMIT = 50_000;
+/** Characters of a command's output it returns: the tail, leaving room for the status line. */
+const COMMAND_OUTPUT_LIMIT = TOOL_OUTPUT_LIMIT - 200;
 const READ_DEFAULT_LINES = 2000;
 const LIST_LIMIT = 2000;
 const SEARCH_LIMIT_LINES = 300;
@@ -87,6 +90,10 @@ export class AgentTools {
       return done(`${call.name} is not available to the ${this.host.role} role`, true);
     }
 
+    // A command line as one string (`"npm test | head"`) fails the schema; say what to send instead.
+    if (call.name === "run_command" && typeof call.input.argv === "string") {
+      return done(shellSyntax([call.input.argv], COMMAND_OUTPUT_LIMIT) ?? `argv is a list of words, not one string: ${JSON.stringify([call.input.argv])}`, true);
+    }
     const parsed = AGENT_TOOLS[call.name].input.safeParse(call.input);
     if (!parsed.success) {
       return done(`invalid input for ${call.name}: ${parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ")}`, true);
@@ -247,6 +254,8 @@ export class AgentTools {
     { argv, timeout_sec = 120 }: AgentToolInput<"run_command">,
     done: (content: string, isError?: boolean) => ToolResult,
   ): Promise<ToolResult> {
+    const shell = shellSyntax(argv, COMMAND_OUTPUT_LIMIT);
+    if (shell) return done(shell, true);
     const program = path.basename(argv[0]);
     if (BLOCKED_PROGRAMS.has(program)) {
       return done(`${program} is not available to agents (version control happens when you call finish; there is no shell)`, true);
@@ -263,7 +272,7 @@ export class AgentTools {
     const status = result.timedOut
       ? `timed out after ${timeout_sec}s`
       : `exit code ${result.exitCode ?? result.signal}`;
-    return done(`${status} (${(result.durationMs / 1000).toFixed(1)}s)\n${tail(result.output, TOOL_OUTPUT_LIMIT - 200)}`, result.exitCode !== 0);
+    return done(`${status} (${(result.durationMs / 1000).toFixed(1)}s)\n${tail(result.output, COMMAND_OUTPUT_LIMIT)}`, result.exitCode !== 0);
   }
 
   private async setPackageScripts({ scripts }: AgentToolInput<"set_package_scripts">): Promise<string> {
