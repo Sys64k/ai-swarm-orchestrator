@@ -151,6 +151,11 @@ describe("pull request reviews", () => {
     const shots = { commit: "0123456789abcdef", at: "2026-10-18T10:00:00.000Z", files: [{ name: "desk_dark-mode.png", mediaType: "image/png", bytes: 35_400 }] };
     assert.equal(currentTab("screenshots", task("t", "awaiting_review", { screenshots: shots })), "screenshots");
     assert.equal(currentTab("screenshots", task("t", "awaiting_review")), "live", "a later QA run took none");
+    assert.equal(currentTab("details", task("t", "in_progress"), true), "live", "wide: the details are beside the tabs");
+    assert.equal(currentTab("details", waiting, true), "changes");
+    assert.equal(currentTab("changes", waiting, true), "changes");
+    assert.equal(currentTab(undefined, task("t", "in_progress"), true), "live");
+    assert.equal(currentTab("screenshots", task("t", "awaiting_review", { screenshots: shots }), true), "screenshots");
     assert.deepEqual(["added", "deleted", "modified"].map((s) => fileStatusLabel(s as "added")), ["new · ", "deleted · ", ""]);
   });
 

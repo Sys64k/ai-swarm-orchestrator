@@ -5,6 +5,7 @@ import { useState } from "react";
 import { hubAction, usePoll } from "./use-poll.ts";
 import { ChangesView, ReviewPanel } from "./review-panel.tsx";
 import { Terminal } from "./terminal.tsx";
+import { useWide } from "./use-wide.ts";
 import { ActionButton, Badge, Banner, LoadingPage, Section, TopBar } from "./ui.tsx";
 import type { Task } from "../lib/types.ts";
 import { acceptanceView, canReview, crewLine, currentTab, formatUsd, hasChanges, isLive, modelLine, reviewLink, reviewView, screenshotList, taskActions, taskBadge, testsFirstLine, timeAgo, type TaskTab } from "../lib/view.ts";
@@ -12,12 +13,13 @@ import { acceptanceView, canReview, crewLine, currentTab, formatUsd, hasChanges,
 export function TaskPage({ id }: { id: string }) {
   const { data: task, error, refresh } = usePoll<Task>(`tasks/${id}`);
   const [chosen, setTab] = useState<TaskTab>();
+  const wide = useWide();
 
   if (!task) return <LoadingPage title={id} back="/" error={error} />;
 
   const changes = hasChanges(task);
   const reviewing = canReview(task);
-  const tab = currentTab(chosen, task);
+  const tab = currentTab(chosen, task, wide);
 
   const live = isLive(task.state);
   const can = taskActions(task);
@@ -35,72 +37,79 @@ export function TaskPage({ id }: { id: string }) {
   return (
     <>
       <TopBar title={task.spec.title} back={task.planId ? `/plans/${task.planId}` : `/projects/${task.project}`} />
-      <main className="page">
-        <div className="hero">
-          <Badge {...taskBadge(task)} />
-          <div className="chips">
-            <Link href={`/projects/${task.project}`} className="chip chip-link">
-              {task.project}
-            </Link>
-            <span className="chip">{task.spec.role}</span>
-            {task.nodeId && live && <span className="chip">on {task.nodeId}</span>}
-            {task.llm.calls > 0 && <span className="chip">{task.llm.calls} turns · {formatUsd(task.llm.costUsd)}</span>}
-            {task.reworkRound > 0 && <span className="chip">rework {task.reworkRound}</span>}
-            {task.retries ? <span className="chip">retry {task.retries}</span> : null}
-          </div>
-          {task.state === "failed" && task.detail && <Banner tone="bad">{task.detail}</Banner>}
-          {task.supersededBy && (
-            <p className="muted small">
-              Superseded by <Link href={`/tasks/${task.supersededBy}`}>{task.supersededBy}</Link>, which does its job: there&apos;s nothing to retry.
-            </p>
-          )}
-          {crew && <p className="small">{crew}</p>}
-          {testsFirst && <p className="small">{testsFirst}</p>}
-          {task.state === "pending" && task.waitingReason && <p className="muted small">{task.waitingReason}</p>}
-          {review && (
-            <p className="muted small">
-              {review.text}
-              {review.error && <> · last try failed: {review.error}</>}
-            </p>
-          )}
-          <div className="actions">
-            {pr && (
-              <a href={pr.url} target="_blank" rel="noreferrer" className="button button-plain button-link">
-                {pr.label}
-              </a>
+      <main className="page page-wide columns columns-aside">
+        <div className="column column-sticky">
+          <div className="hero">
+            <Badge {...taskBadge(task)} />
+            <div className="chips">
+              <Link href={`/projects/${task.project}`} className="chip chip-link">
+                {task.project}
+              </Link>
+              <span className="chip">{task.spec.role}</span>
+              {task.nodeId && live && <span className="chip">on {task.nodeId}</span>}
+              {task.llm.calls > 0 && <span className="chip">{task.llm.calls} turns · {formatUsd(task.llm.costUsd)}</span>}
+              {task.reworkRound > 0 && <span className="chip">rework {task.reworkRound}</span>}
+              {task.retries ? <span className="chip">retry {task.retries}</span> : null}
+            </div>
+            {task.state === "failed" && task.detail && <Banner tone="bad">{task.detail}</Banner>}
+            {task.supersededBy && (
+              <p className="muted small">
+                Superseded by <Link href={`/tasks/${task.supersededBy}`}>{task.supersededBy}</Link>, which does its job: there&apos;s nothing to retry.
+              </p>
             )}
-            {can.retry && <ActionButton label="Retry" run={act("retry")} />}
-            {can.cancel && (
-              <ActionButton label="Cancel task" variant="danger" confirm="Cancel this task? A worker on it stops at its next step." run={act("cancel")} />
+            {crew && <p className="small">{crew}</p>}
+            {testsFirst && <p className="small">{testsFirst}</p>}
+            {task.state === "pending" && task.waitingReason && <p className="muted small">{task.waitingReason}</p>}
+            {review && (
+              <p className="muted small">
+                {review.text}
+                {review.error && <> · last try failed: {review.error}</>}
+              </p>
             )}
+            <div className="actions">
+              {pr && (
+                <a href={pr.url} target="_blank" rel="noreferrer" className="button button-plain button-link">
+                  {pr.label}
+                </a>
+              )}
+              {can.retry && <ActionButton label="Retry" run={act("retry")} />}
+              {can.cancel && (
+                <ActionButton label="Cancel task" variant="danger" confirm="Cancel this task? A worker on it stops at its next step." run={act("cancel")} />
+              )}
+            </div>
           </div>
+
+          {reviewing && <ReviewPanel taskId={id} onDone={refresh} />}
+          {wide && <Details task={task} />}
         </div>
 
-        {reviewing && <ReviewPanel taskId={id} onDone={refresh} />}
+        <div className="column">
+          <div className="tabs" role="tablist">
+            <button type="button" role="tab" aria-selected={tab === "live"} className="tab" onClick={() => setTab("live")}>
+              {live ? "Live" : "Transcript"}
+            </button>
+            {changes && (
+              <button type="button" role="tab" aria-selected={tab === "changes"} className="tab" onClick={() => setTab("changes")}>
+                Changes
+              </button>
+            )}
+            {shots.length > 0 && (
+              <button type="button" role="tab" aria-selected={tab === "screenshots"} className="tab" onClick={() => setTab("screenshots")}>
+                Screenshots
+              </button>
+            )}
+            {!wide && (
+              <button type="button" role="tab" aria-selected={tab === "details"} className="tab" onClick={() => setTab("details")}>
+                Details
+              </button>
+            )}
+          </div>
 
-        <div className="tabs" role="tablist">
-          <button type="button" role="tab" aria-selected={tab === "live"} className="tab" onClick={() => setTab("live")}>
-            {live ? "Live" : "Transcript"}
-          </button>
-          {changes && (
-            <button type="button" role="tab" aria-selected={tab === "changes"} className="tab" onClick={() => setTab("changes")}>
-              Changes
-            </button>
-          )}
-          {shots.length > 0 && (
-            <button type="button" role="tab" aria-selected={tab === "screenshots"} className="tab" onClick={() => setTab("screenshots")}>
-              Screenshots
-            </button>
-          )}
-          <button type="button" role="tab" aria-selected={tab === "details"} className="tab" onClick={() => setTab("details")}>
-            Details
-          </button>
+          {tab === "live" && <Terminal source={`tasks/${id}/transcript`} live={live} />}
+          {tab === "changes" && <ChangesView taskId={id} prUrl={pr?.url} />}
+          {tab === "screenshots" && <Screenshots shots={shots} commit={task.screenshots!.commit} />}
+          {tab === "details" && <Details task={task} />}
         </div>
-
-        {tab === "live" && <Terminal source={`tasks/${id}/transcript`} live={live} />}
-        {tab === "changes" && <ChangesView taskId={id} prUrl={pr?.url} />}
-        {tab === "screenshots" && <Screenshots shots={shots} commit={task.screenshots!.commit} />}
-        {tab === "details" && <Details task={task} />}
       </main>
     </>
   );

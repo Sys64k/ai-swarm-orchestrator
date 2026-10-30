@@ -1,4 +1,4 @@
-/* Mobile-first: one column, big tap targets; wider screens just get a centred column. */
+/* Mobile-first: one column, big tap targets; wide screens put sections side by side (see the end). */
 
 :root {
   --bg: #f6f7f9;
@@ -27,6 +27,7 @@
   --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
   --radius: 14px;
   --gutter: 16px;
+  --topbar-h: 56px;
   color-scheme: light dark;
 }
 
@@ -106,7 +107,7 @@ code,
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 56px;
+  min-height: var(--topbar-h);
   padding: env(safe-area-inset-top) var(--gutter) 0;
   background: color-mix(in srgb, var(--bg) 88%, transparent);
   backdrop-filter: blur(12px);
@@ -1015,5 +1016,85 @@ select.input {
   .price-form > .input:first-child,
   .price-form > .button {
     grid-column: 1 / -1;
+  }
+}
+
+/*
+ * Wide screens: from 1200px (WIDE_QUERY in use-wide.ts) a page marked page-wide puts its columns
+ * side by side instead of stacking them, and grows with the screen up to an ultrawide's width.
+ * Below that, columns are plain blocks and phones look as before.
+ */
+.column {
+  min-width: 0; /* harmless as a block; in a grid it lets long lines ellipsize instead of widening the track */
+}
+
+/* The same width as WIDE_QUERY in use-wide.ts, which decides whether the task page's details are a tab. */
+@media (min-width: 1200px) {
+  .page-wide {
+    max-width: 2600px;
+    padding-left: 32px;
+    padding-right: 32px;
+  }
+
+  .columns {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 40px;
+    align-items: start;
+  }
+
+  /* A column with nothing in it (no work needs you) gives its room to the others. */
+  .columns > .column:empty {
+    display: none;
+  }
+
+  .columns:has(> .column:empty) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* Details beside the live view: the view gets the room, the details stay in sight. */
+  .columns-aside {
+    grid-template-columns: minmax(360px, 2fr) minmax(0, 3fr);
+  }
+
+  .columns-filters {
+    grid-template-columns: 340px minmax(0, 1fr);
+  }
+
+  .column-sticky {
+    position: sticky;
+    top: calc(var(--topbar-h) + 16px);
+    max-height: calc(100vh - var(--topbar-h) - 32px);
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+
+  .columns-aside .tabs {
+    margin-top: 6px;
+  }
+
+  .prose {
+    max-width: 90ch;
+  }
+}
+
+/*
+ * An ultrawide: .columns-home gives its right column (.column-pair) two thirds, and that splits in
+ * two, so three columns in all. A task's live view gets two thirds too.
+ */
+@media (min-width: 2000px) {
+  .columns-home {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  }
+
+  .column-pair {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 40px;
+    align-items: start;
+  }
+
+  .columns-aside {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
   }
 }
