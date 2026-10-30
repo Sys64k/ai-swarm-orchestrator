@@ -70,8 +70,10 @@ Wiring code together across files it does fine.
 model's own tests and code disagreed, or it changed a test to fit its code. qwen3-coder wrote
 a test allowing 61 characters where the limit was 60. gpt-oss deleted existing tests to make
 the suite pass. When we gave qwen3-coder's failed level-2 task again with the exact tests in
-it, it passed first time in 9 minutes. (That failure was partly ours: the criterion was vague,
-and the reviewer read it more strictly than the project's own code did.)
+it, it passed first time in 9 minutes. (That failure was ours: the criterion was vague, and the
+reviewer read it more strictly than the project's own code did. glm-4.7-flash later failed the
+same way, and [#145](https://github.com/Sys64k/ai-swarm-orchestrator/pull/145) rewrote the task;
+see [glm-4.7-flash](#glm-47-flash).)
 
 ### With tests first
 
@@ -89,6 +91,36 @@ yet a fair comparison.
 
 Tests first rescued both logic tasks. The UI task across three files stayed beyond gpt-oss,
 which is also why the Architect doesn't mark UI work tests first.
+
+### glm-4.7-flash
+
+Run on 2026-10-30 with the ladder script, the first model on the same tasks from the same code
+(variant A from `9cac1e3`), without tests first:
+
+| Level | Task | Result | Minutes |
+|---|---|---|---|
+| 1 | Word count helper | ✅ 1st try | 7 |
+| 2 | Tidy document titles on save | ✅ 2nd try (corrected task) | 8 |
+| 3 | Backup export and import | ❌ 4 tries | 169 |
+| 4 | Clear all recent documents | ✅ 3rd try | 23 |
+| 5 | Text statistics before reading | ❌ 4 tries | 44 |
+
+$0.12 in all, for acceptance checks.
+
+- **Level 2 first failed on our old criterion**, like qwen3-coder's. With the task rewritten
+  (#145) it passed on its 2nd try: the first copied `deriveTitle`'s cutting code, and the new
+  "shared, not copied" criterion sent it back to make one helper.
+- **Level 3** ran out of turns once, then changed the existing `lib/settings.ts` to make its own
+  backup tests pass, breaking the settings tests. QA refused it each time.
+- **Level 5** passed QA on every try and went from three unmet criteria to one, but never fixed
+  the last: old numbers stay on screen for 300 ms after the text gets too short, because it
+  cleared them inside the delayed call. It said it had moved the clearing out; it hadn't.
+- It ran shell syntax through `run_command` (`npm test -- -t exportBackup 2>&1 | head -50`),
+  which has no shell.
+
+Same pattern as the others: fine at wiring and simple functions, lost on logic with edge cases,
+here including UI state. It does less than qwen3-coder at the top (qwen3-coder passed level 5),
+so it doesn't take qwen3-coder's desk.
 
 ### Many failures were ours
 
@@ -120,6 +152,7 @@ failing until we read the transcripts:
 | [#139](https://github.com/Sys64k/ai-swarm-orchestrator/pull/139) | `dispute_tests`: only it sends the tests back | Give-ups were taken as disputes |
 | [#140](https://github.com/Sys64k/ai-swarm-orchestrator/pull/140) | `finish` takes an empty screenshots list as none | gpt-oss's 16 refused finishes |
 | [#141](https://github.com/Sys64k/ai-swarm-orchestrator/pull/141) | Agents may add npm scripts, not change them | gpt-oss broke `test` on main |
+| [#143](https://github.com/Sys64k/ai-swarm-orchestrator/pull/143)–[#145](https://github.com/Sys64k/ai-swarm-orchestrator/pull/145) | The ladder script; level 2 says the title convention it's judged by | So the next models compare on the same tasks; two models failed our vague level 2 |
 
 Outside the core, Ollama on avalon now gives each conversation 65,536 tokens of context
 instead of 32,768, and qwen3-coder works desk avalon#4 on everyday tasks. Escalation still
@@ -154,6 +187,10 @@ above compare only roughly. From here on, models compare on the same tasks.
   task. Track records can show it once there are enough of each.
 - **Is qwen3-coder worth its desk?** Its everyday record against Gemini's (finished, first
   try, cost all in) will show whether its share of the work should grow or end.
+- **glm-4.7-flash with tests first** (`--tests-first`) would show whether tests first rescues
+  its levels 3 and 5, as it did qwen3-coder's level 3.
+- **`run_command` and shell syntax.** glm-4.7-flash piped and redirected in `run_command`, which
+  has no shell. A refusal naming what to drop would save it the wasted turns; not built.
 - **devstral** might drive the agent with a firmer reminder to call a tool; not tried.
 - **Ollama Cloud's larger models** (added as a provider in [#132](https://github.com/Sys64k/ai-swarm-orchestrator/pull/132))
   would show how much model size moves the line between pass and fail.
