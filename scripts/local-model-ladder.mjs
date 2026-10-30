@@ -122,15 +122,19 @@ const git = (dir, ...args) => execFileSync("git", ["-C", dir, ...args], { encodi
 
 /**
  * A fresh project for the run, seeded with `from` at `base`. The Hub creates it with one empty
- * commit; only then, and only in that new folder, is its main moved to the base.
+ * commit (a run that stopped before seeding leaves one like that, and it's used again); only
+ * then, and only in that folder, is its main moved to the base.
  */
 async function freshProject(call, name, from, base) {
-  const created = await call("/api/projects", { method: "POST", body: JSON.stringify({ name }) });
+  await call("/api/projects", { method: "POST", body: JSON.stringify({ name }) }).catch((err) => {
+    if (err.status !== 409) throw err;
+  });
   const dir = path.join(path.dirname(from), name);
-  if (git(dir, "rev-list", "--count", "HEAD") !== "1") throw new Error(`${dir} isn't the new, empty project: not touching it`);
-  git(dir, "fetch", "--quiet", from, base);
+  if (git(dir, "rev-list", "--count", "HEAD") !== "1") throw new Error(`${dir} isn't a new, empty project: not touching it`);
+  // Another repository's commit can only be fetched by its full id.
+  git(dir, "fetch", "--quiet", from, git(from, "rev-parse", `${base}^{commit}`));
   git(dir, "reset", "--quiet", "--hard", "FETCH_HEAD");
-  return created.id ?? name;
+  return name;
 }
 
 async function main() {
