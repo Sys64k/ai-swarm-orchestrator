@@ -153,6 +153,7 @@ failing until we read the transcripts:
 | [#140](https://github.com/Sys64k/ai-swarm-orchestrator/pull/140) | `finish` takes an empty screenshots list as none | gpt-oss's 16 refused finishes |
 | [#141](https://github.com/Sys64k/ai-swarm-orchestrator/pull/141) | Agents may add npm scripts, not change them | gpt-oss broke `test` on main |
 | [#143](https://github.com/Sys64k/ai-swarm-orchestrator/pull/143)–[#145](https://github.com/Sys64k/ai-swarm-orchestrator/pull/145) | The ladder script; level 2 says the title convention it's judged by | So the next models compare on the same tasks; two models failed our vague level 2 |
+| [#148](https://github.com/Sys64k/ai-swarm-orchestrator/pull/148) | Weakened existing tests send the work back | gpt-oss deleted tests to pass; a later builder changed a test to fit its code, and only a non-blocking note saw it |
 
 Outside the core, Ollama on avalon now gives each conversation 65,536 tokens of context
 instead of 32,768, and qwen3-coder works desk avalon#4 on everyday tasks. Escalation still

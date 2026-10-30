@@ -1,5 +1,5 @@
 import type Anthropic from "@anthropic-ai/sdk";
-import { createLogger, MAX_QUALITY_NOTES, QUALITY_NOTE_KINDS, type LlmUsage, type QualityNote, type QualityNoteKind, type TaskDiff } from "@aso/shared";
+import { createLogger, isBlockingNote, MAX_QUALITY_NOTES, QUALITY_NOTE_KINDS, type LlmUsage, type QualityNote, type QualityNoteKind, type TaskDiff } from "@aso/shared";
 import type { LlmAdapter } from "./adapter.js";
 import { priceUsage } from "./pricing.js";
 
@@ -54,7 +54,7 @@ const TOOL: Anthropic.Beta.BetaTool = {
       summary: { type: "string", description: "One or two sentences for the reviewer" },
       quality_notes: {
         type: "array",
-        description: `Concrete quality problems in the diff besides the criteria, at most ${MAX_QUALITY_NOTES}; none is fine. They don't block the work.`,
+        description: `Concrete quality problems in the diff besides the criteria, at most ${MAX_QUALITY_NOTES}; none is fine. Only tests-weakened sends the work back.`,
         items: {
           type: "object",
           properties: {
@@ -77,10 +77,24 @@ Judge each acceptance criterion against the diff only: what the change adds, rem
 - unclear: the diff can't show it either way (for example, it depends on code outside the diff, or the diff is cut).
 A criterion that asks for tests, or for a file to be added or changed, is unmet when the diff has no such change: the diff does show that.
 The tests already passed, so don't re-check that the code runs; check that it does what was asked.
-Then note quality problems the diff shows, which never block the work: duplication (logic copied where existing code
-could be reused), dead-code (unused or unreachable code added), misleading-summary (the agent's summary claims what the
-diff doesn't do), tests-weakened (existing tests removed, skipped or loosened), other (a concrete defect risk). Only
-concrete problems you can point at; not style preferences or suggestions. Answer only by calling report_acceptance.`;
+Then note quality problems the diff shows: duplication (logic copied where existing code could be reused), dead-code
+(unused or unreachable code added), misleading-summary (the agent's summary claims what the diff doesn't do), other (a
+concrete defect risk). These don't block the work. Only concrete problems you can point at; not style preferences or
+suggestions.
+One note does send the work back: tests-weakened, when the diff changes an existing test so that it checks less or
+expects something else: deleted or skipped, an assertion removed or loosened, an expected value changed. Not when the
+task's description or criteria ask for that behaviour to change (then the test should change), and not for a test
+renamed or moved that still checks the same. Name the test and what changed. Answer only by calling report_acceptance.`;
+
+/** A test file by its path: *.test.* or *.spec.*, or anything under a test, tests or __tests__ folder. */
+export function isTestFile(path: string): boolean {
+  return /\.(test|spec)\.[^/]+$/.test(path) || /(^|\/)(tests?|__tests__)\//.test(path);
+}
+
+/** The test files that were already there and the change modifies or deletes: where weakened tests hide. */
+export function changedTestFiles(diff: TaskDiff): string[] {
+  return diff.files.filter((f) => f.status !== "added" && isTestFile(f.path)).map((f) => `${f.path} (${f.status})`);
+}
 
 /** The diff as the reviewer reads it, cut to `limit` characters. */
 export function diffText(diff: TaskDiff, limit = ACCEPTANCE_DIFF_LIMIT): { text: string; cut: boolean } {
@@ -100,6 +114,7 @@ export function diffText(diff: TaskDiff, limit = ACCEPTANCE_DIFF_LIMIT): { text:
 
 export function acceptancePrompt(task: AcceptanceSubject, diff: TaskDiff): string {
   const { text, cut } = diffText(diff);
+  const tests = changedTestFiles(diff);
   return [
     `Task: ${task.spec.title}`,
     "",
@@ -108,6 +123,7 @@ export function acceptancePrompt(task: AcceptanceSubject, diff: TaskDiff): strin
     "Acceptance criteria:",
     ...task.spec.acceptanceCriteria.map((c, i) => `${i + 1}. ${c}`),
     ...(task.summary?.trim() ? ["", "The agent's own summary (a claim, not proof):", task.summary.trim()] : []),
+    ...(tests.length ? ["", "Existing test files this change modifies or deletes (check them for weakened tests):", ...tests.map((t) => `- ${t}`)] : []),
     "",
     cut ? "The diff (cut: parts are left out, so mark what you can't see as unclear):" : "The diff:",
     text,
@@ -191,24 +207,30 @@ export class AcceptanceChecker {
     const read = readVerdict(response.content, task.spec.acceptanceCriteria);
     // The model by the name the Hub calls it, as builds record theirs, so track records line up.
     if ("error" in read) return { result: "undecided", reason: read.error, model: adapter.model, usage };
-    const unmet = read.criteria.some((c) => c.verdict === "unmet");
+    const unmet = read.criteria.some((c) => c.verdict === "unmet") || read.qualityNotes.some(isBlockingNote);
     return { result: unmet ? "unmet" : "met", ...read, model: adapter.model, usage };
   }
 }
 
-/** What goes back to the agent when criteria are unmet. */
-export function unmetReason(criteria: CriterionVerdict[]): string {
+/** What goes back to the agent when criteria are unmet or existing tests were weakened. */
+export function unmetReason(criteria: CriterionVerdict[], notes: readonly QualityNote[] = []): string {
   const unmet = criteria.filter((c) => c.verdict === "unmet");
+  const weakened = notes.filter(isBlockingNote);
+  const problems = [unmet.length && `${unmet.length} of ${criteria.length} criteria not met`, weakened.length && "existing tests weakened"].filter(Boolean);
   return [
-    `Acceptance check: ${unmet.length} of ${criteria.length} criteria not met.`,
+    `Acceptance check: ${problems.join("; ")}.`,
     ...unmet.map((c) => `- ${c.criterion}\n  Missing: ${c.reason || "(no reason given)"}`),
+    ...weakened.map((n) => `- Existing tests weakened${n.file ? ` (${n.file})` : ""}: ${n.note}`),
+    ...(weakened.length ? ["Put those tests back as they were and change the code to pass them, not the tests to pass the code."] : []),
     "Do these before finishing; the tests passing isn't enough.",
   ].join("\n");
 }
 
-/** "; 2 quality notes" for the task's history after the counts, or nothing without notes. */
+/** "; 2 quality notes" (", 1 blocking" when one sent the work back) for the task's history, or nothing without notes. */
 export function qualityNotesSuffix(notes: readonly QualityNote[]): string {
-  return notes.length ? `; ${notes.length} quality note${notes.length === 1 ? "" : "s"}` : "";
+  if (!notes.length) return "";
+  const blocking = notes.filter(isBlockingNote).length;
+  return `; ${notes.length} quality note${notes.length === 1 ? "" : "s"}${blocking ? `, ${blocking} blocking` : ""}`;
 }
 
 /** "2 of 3 criteria met, 1 unclear": the same counts in the task's history and its pull request. */
