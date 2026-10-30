@@ -27,6 +27,7 @@ import { deployCommand, statusCommand } from "./commands/status.js";
 import { listWorkerKeysCommand, newWorkerKeyCommand, setWorkerKeyCommand, revokeWorkerKeyCommand } from "./commands/worker-keys.js";
 import { layout } from "./layout.js";
 import { approvePlanCommand, planCommand, rejectPlanCommand, replyPlanCommand } from "./commands/plan.js";
+import { taskDismissCommand } from "./commands/task-dismiss.js";
 import { taskRetryCommand } from "./commands/task-retry.js";
 import { startHubCommand } from "./commands/start-hub.js";
 import {
@@ -332,6 +333,15 @@ program
   .option("--criteria-file <path>", "the new acceptance criteria, one per line")
   .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
   .action(taskRetryCommand);
+
+program
+  .command("task-dismiss")
+  .description("Dismiss failed or cancelled tasks nobody will retry, so they leave Needs you (a retry brings one back)")
+  .argument("[taskIds...]")
+  .option("--failed", "every failed task still in Needs you")
+  .option("-P, --project <name>", "with --failed: only this project's")
+  .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
+  .action(taskDismissCommand);
 
 // Hidden: the Architect process that `start-hub` runs in tmux (same binary in every layout).
 program

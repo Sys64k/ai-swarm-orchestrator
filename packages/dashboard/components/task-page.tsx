@@ -30,7 +30,7 @@ export function TaskPage({ id }: { id: string }) {
   const crew = [crewLine(task), modelLine(task)].filter(Boolean).join(" · ");
   const testsFirst = testsFirstLine(task);
   const shots = screenshotList(task);
-  const act = (action: "cancel" | "retry") => async () => {
+  const act = (action: "cancel" | "retry" | "dismiss") => async () => {
     const err = await hubAction(`tasks/${id}/${action}`);
     refresh();
     return err;
@@ -79,6 +79,9 @@ export function TaskPage({ id }: { id: string }) {
                 <button type="button" className="button button-plain" onClick={() => setEditing(true)}>
                   Edit and retry
                 </button>
+              )}
+              {can.dismiss && (
+                <ActionButton label="Dismiss" variant="plain" confirm="Dismiss this task? It leaves Needs you; retrying it later brings it back." run={act("dismiss")} />
               )}
               {can.cancel && (
                 <ActionButton label="Cancel task" variant="danger" confirm="Cancel this task? A worker on it stops at its next step." run={act("cancel")} />

@@ -568,6 +568,10 @@ stateDiagram-v2
   node id: after a reported failure, or after `MAX_UPDATE_ATTEMPTS` (2) updates that brought it
   back on its old build, the Hub stops asking and shows `updateError`. A registration on the
   Hub's build clears the record. `ASO_AUTO_UPDATE=0` turns it off.
+- **Dismiss.** `POST /api/tasks/:id/dismiss` sets `dismissedAt` on a `failed` or `cancelled`
+  task a person is done with. The state stays (track records still count the failure); only
+  "needs someone" changes: the console's Needs you and the project's `tasks.failed` count leave
+  it out, as they do a superseded task. A retry clears it.
 - **Retry.** `POST /api/tasks/:id/retry` requeues a `failed` or `cancelled` task with fresh
   limits: rework rounds, node drops, QA attempts and budget. The budget counts from the retry
   (`budgetBaseUsd`), while `llm.costUsd` keeps the total. The branch keeps the previous

@@ -37,6 +37,7 @@ export interface Task {
   project: string;
   /** A newer task that does this one's job; this one can't be retried. */
   supersededBy?: string;
+  dismissedAt?: string;
   spec: {
     taskId: string;
     role: string;

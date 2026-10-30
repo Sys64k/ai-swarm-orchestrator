@@ -1085,7 +1085,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
         running: count(["assigned", "in_progress", "verifying", "awaiting_qa", "testing", "merging"]),
         reviewing: count(["awaiting_review"]),
         queued: count(["pending"]),
-        failed: count(["failed"]),
+        failed: list.filter((t) => t.state === "failed" && !t.dismissedAt && !t.supersededBy).length,
         merged: count(["merged"]),
       },
       plansAwaitingApproval: p.plans.list().filter((pl) => pl.state === "proposed").length,
@@ -1312,6 +1312,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     }
   };
   app.post("/api/tasks/:id/cancel", (c) => taskAction(c, (p, id) => p.tasks.cancel(id)));
+  app.post("/api/tasks/:id/dismiss", (c) => taskAction(c, (p, id) => p.tasks.dismiss(id)));
   app.post("/api/tasks/:id/retry", async (c) => {
     const req = await parsed(c, RetryTaskBodySchema, { optional: true });
     if (!req.ok) return c.json({ error: req.error }, 400);

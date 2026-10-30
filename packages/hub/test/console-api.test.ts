@@ -104,6 +104,22 @@ describe("cancel and retry", () => {
       w.ws.close();
     }));
 
+  it("dismisses a failed or cancelled task out of Needs you, and a retry brings it back", () =>
+    withHub(async (ctx) => {
+      await postTask(ctx.port, { taskId: "old", role: "backend", title: "Old", description: "x" });
+      assert.equal((await call(ctx.port, "/api/tasks/old/dismiss", "POST")).status, 409, "a queued task isn't done with");
+      await call(ctx.port, "/api/tasks/old/cancel", "POST");
+      const dismissed = await call(ctx.port, "/api/tasks/old/dismiss", "POST");
+      assert.equal(dismissed.status, 200);
+      assert.ok(dismissed.body.dismissedAt);
+      assert.equal(dismissed.body.history.at(-1).event, "dismissed by a person");
+      assert.equal((await call(ctx.port, "/api/tasks/old/dismiss", "POST")).status, 409, "already dismissed");
+      assert.equal((await call(ctx.port, "/api/tasks/nope/dismiss", "POST")).status, 404);
+
+      const retried = await call(ctx.port, "/api/tasks/old/retry", "POST");
+      assert.equal(retried.body.dismissedAt, undefined, "a retry brings it back");
+    }));
+
   it("fences the worker of a cancelled task and frees it for other work", () => {
     const model = new ScriptedModel(() => reply([toolUse("tu_1", "list_files", {})]));
     return withHub(
