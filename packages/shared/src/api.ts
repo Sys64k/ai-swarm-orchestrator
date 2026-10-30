@@ -774,7 +774,18 @@ export const LlmStatusSchema = z.object({
   paused: z
     .object({ reason: z.string(), since: Timestamp })
     .optional()
-    .describe("Model calls are on hold (the account ran out of credit); they resume once a call succeeds again"),
+    .describe("Deprecated: use pausedProviders. The oldest hold there, for clients that show one"),
+  pausedProviders: z
+    .array(
+      z.object({
+        provider: z.string().describe("The account on hold: \"Anthropic\", or a provider's label"),
+        reason: z.string(),
+        since: Timestamp,
+        until: Timestamp.optional().describe("When the provider says access comes back, if it says"),
+      }),
+    )
+    .optional()
+    .describe("Providers whose calls are on hold; the others' go on. Each resumes once one of its calls works again"),
 });
 
 export const PushStatusSchema = z.object({ publicKey: z.string(), devices: z.number().int() });

@@ -1430,13 +1430,22 @@ model's turn of thinking only) isn't a stop: the worker asks again, up to `MAX_E
   at 80 model turns (`--max-turns`), and each task at its budget (default $5, estimated). In
   the last 10 turns the Hub adds a note after the turn's tool results telling the agent how
   many are left and to wrap up (`withTurnWarning`).
-- **Out of credit is a hold, not a failure.** `classify` turns the API's "credit balance is
-  too low" (sent mid-stream as a raw JSON body with no status) into `LlmError(…, pause:
-  "credit")` with a plain message; other streamed errors also show the API's own words
-  (`apiErrorText`). The gateway then sets `paused` (in `GET /api/llm`), notes *waiting* once
-  in the task's or plan's history, calls `onPause` (a push notification) and answers the turn
-  with `paused: true`. `callModelWithRetry` on workers and the Architect then asks again every
-  60 s without using up its retries. The first call that works clears the hold (`onResume`).
+- **Out of credit is a hold, not a failure, per provider.** `classify` turns the API's "credit
+  balance is too low" (sent mid-stream as a raw JSON body with no status) and its spend limit
+  ("reached your specified API usage limits", with `resetTime` reading "regain access on …
+  UTC" into `until`) into `LlmError(…, pause: "credit")` with a plain message; `classifyHttp`
+  does the same for an OpenAI-compatible provider's 402/429 quota answers. Other streamed errors
+  show the API's own words (`apiErrorText`). Holds are kept per provider (`LlmAdapter.provider`:
+  "Anthropic", a provider's label, else the address's host), so one provider's working calls
+  don't lift another's hold. On a hold the gateway records it (`GET /api/llm`: `pausedProviders`,
+  and `paused`, the oldest, for older clients) and calls `onPause` (a push notification). Then
+  `moveFromPaused`: a desk task (not a test writer, not pinned) whose next round model belongs
+  to a provider not on hold gets the held model in `refusedModels` (`recordModelRefused(…,
+  "held")`) and a plain error, so the attempt is requeued there without a rework round. Anything
+  else notes *waiting* once in its history and gets `paused: true`; `callModelWithRetry` on
+  workers and the Architect asks again every 60 s without using up its retries. The first call
+  to that provider that works lifts its hold (`onResume`). A moved task keeps avoiding the held
+  model until a person retries it, which clears `refusedModels`.
 - **Unfinished work is kept.** When an agent is cut off (turn limit, budget, the model gone,
   it stopped without `finish`, or it disputed the tests), the worker commits what is in the
   checkout as `wip: unfinished (…)` and pushes it to `task/<id>` before reporting the failure

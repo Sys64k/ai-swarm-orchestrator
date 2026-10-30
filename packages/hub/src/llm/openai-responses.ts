@@ -1,7 +1,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { sseData } from "@aso/shared";
 import { LlmError, type LlmAdapter, type LlmRequest, type LlmResponse } from "./adapter.js";
-import { flattenToolResult, parseToolArguments, postForStream, TOOL_IMAGES_INTRO, type OpenAiBaseOptions } from "./openai-http.js";
+import { flattenToolResult, parseToolArguments, postForStream, providerLabel, TOOL_IMAGES_INTRO, type OpenAiBaseOptions } from "./openai-http.js";
 
 /**
  * OpenAI's own models through its Responses API. Its newer models take tools together with
@@ -157,9 +157,11 @@ export function finalResponse(body: string): ResponsesAnswer {
 export class OpenAiResponsesAdapter implements LlmAdapter {
   readonly name = "openai-responses";
   readonly model: string;
+  readonly provider: string;
 
   constructor(private readonly opts: OpenAiResponsesOptions) {
     this.model = opts.model;
+    this.provider = providerLabel(opts);
   }
 
   async complete(req: LlmRequest): Promise<LlmResponse> {

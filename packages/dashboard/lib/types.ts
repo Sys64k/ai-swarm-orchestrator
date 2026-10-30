@@ -213,6 +213,8 @@ export interface Llm {
   model: string | null;
   taskBudgetUsd: number;
   totals: { calls: number; costUsd: number };
+  /** Providers whose calls are on hold (out of credit, a usage limit); an older Hub sends none. */
+  pausedProviders?: Array<{ provider: string; reason: string; since: string; until?: string }>;
 }
 
 export type TranscriptEntry = { seq: number; at: string } & (

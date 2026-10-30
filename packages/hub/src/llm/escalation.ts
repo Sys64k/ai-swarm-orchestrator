@@ -80,9 +80,20 @@ export function canSwitchFrom(
   defaultSpec: string | undefined,
   refusedSpec: string,
 ): boolean {
+  return nextSpecAfter(policy, task, desk, defaultSpec, refusedSpec) !== undefined;
+}
+
+/** The model the task's round would call with `refusedSpec` ruled out too; undefined when that leaves it on `refusedSpec` or none. */
+export function nextSpecAfter(
+  policy: EscalationPolicy | undefined,
+  task: EscalationTask,
+  desk: string | undefined,
+  defaultSpec: string | undefined,
+  refusedSpec: string,
+): string | undefined {
   const next = roundModel(policy, { ...task, refusedModels: [...(task.refusedModels ?? []), refusedSpec] }, desk, defaultSpec);
   const spec = calledSpec(next, defaultSpec);
-  return spec !== undefined && spec !== refusedSpec;
+  return spec !== undefined && spec !== refusedSpec ? spec : undefined;
 }
 
 /**

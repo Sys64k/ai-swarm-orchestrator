@@ -2767,7 +2767,7 @@
             "description": "Model calls and their estimated cost, all tasks and plans together"
           },
           "paused": {
-            "description": "Model calls are on hold (the account ran out of credit); they resume once a call succeeds again",
+            "description": "Deprecated: use pausedProviders. The oldest hold there, for clients that show one",
             "type": "object",
             "properties": {
               "reason": {
@@ -2783,6 +2783,36 @@
               "since"
             ],
             "additionalProperties": false
+          },
+          "pausedProviders": {
+            "description": "Providers whose calls are on hold; the others' go on. Each resumes once one of its calls works again",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "provider": {
+                  "type": "string",
+                  "description": "The account on hold: \"Anthropic\", or a provider's label"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "since": {
+                  "type": "string",
+                  "description": "ISO 8601 time"
+                },
+                "until": {
+                  "description": "When the provider says access comes back, if it says",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "provider",
+                "reason",
+                "since"
+              ],
+              "additionalProperties": false
+            }
           }
         },
         "required": [

@@ -1,6 +1,6 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { LlmAdapter, LlmRequest, LlmResponse } from "./adapter.js";
-import { classifyHttp, flattenToolResult, parseToolArguments, postForStream, TOOL_IMAGES_INTRO, type OpenAiBaseOptions } from "./openai-http.js";
+import { classifyHttp, flattenToolResult, parseToolArguments, postForStream, providerLabel, TOOL_IMAGES_INTRO, type OpenAiBaseOptions } from "./openai-http.js";
 import { PROVIDER_DATA } from "./provider-data.js";
 import { accumulateChunks, sseData, type ChatAnswer, type ChatToolCall } from "@aso/shared";
 
@@ -129,9 +129,11 @@ export function fromChatAnswer(answer: ChatAnswer, requestedModel: string): LlmR
 export class OpenAiCompatibleAdapter implements LlmAdapter {
   readonly name = "openai-compatible";
   readonly model: string;
+  readonly provider: string;
 
   constructor(private readonly opts: OpenAiCompatibleOptions) {
     this.model = opts.model;
+    this.provider = providerLabel(opts);
   }
 
   async complete(req: LlmRequest): Promise<LlmResponse> {
