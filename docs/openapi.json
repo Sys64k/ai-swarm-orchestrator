@@ -747,7 +747,8 @@
               "failed": {
                 "type": "integer",
                 "minimum": -9007199254740991,
-                "maximum": 9007199254740991
+                "maximum": 9007199254740991,
+                "description": "Failed tasks that still need someone: not dismissed, not superseded"
               },
               "merged": {
                 "type": "integer",
@@ -1231,6 +1232,10 @@
           },
           "supersededBy": {
             "description": "A newer task that does this one's job (a newer sync of the API copy); this one can't be retried",
+            "type": "string"
+          },
+          "dismissedAt": {
+            "description": "When a person dismissed this failed or cancelled task: it no longer needs anyone; a retry brings it back",
             "type": "string"
           },
           "diffBase": {
@@ -6598,6 +6603,60 @@
           },
           "409": {
             "description": "Finished, or merging right now",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}/dismiss": {
+      "post": {
+        "operationId": "postTaskDismiss",
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Done with a failed or cancelled task: it no longer needs anyone (a retry brings it back)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Task"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "No such task",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not failed or cancelled, or already dismissed",
             "content": {
               "application/json": {
                 "schema": {

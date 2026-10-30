@@ -112,8 +112,12 @@ describe("pull request reviews", () => {
     assert.deepEqual(v.running.map((t) => t.spec.taskId), ["w"], "not listed as running too");
     assert.deepEqual(taskBadge(task("r", "awaiting_review")), { label: "Review", tone: "waiting" });
     assert.deepEqual(taskBadge({ state: "failed", supersededBy: "sync-hub-api-new" }), { label: "Superseded", tone: "muted" }, "not a failure to act on");
-    assert.deepEqual(taskActions(task("r", "awaiting_review")), { retry: false, cancel: true });
-    assert.deepEqual(taskActions({ state: "failed", supersededBy: "sync-hub-api-new" }), { retry: false, cancel: false }, "a superseded task has nothing to retry");
+    assert.deepEqual(taskActions(task("r", "awaiting_review")), { retry: false, cancel: true, dismiss: false });
+    assert.deepEqual(taskActions({ state: "failed", supersededBy: "sync-hub-api-new" }), { retry: false, cancel: false, dismiss: false }, "a superseded task has nothing to retry");
+    assert.deepEqual(taskActions({ state: "failed" }), { retry: true, cancel: false, dismiss: true });
+    assert.deepEqual(taskActions({ state: "cancelled", dismissedAt: "2026-10-30T16:00:00.000Z" }), { retry: true, cancel: false, dismiss: false }, "dismissed: still retryable");
+    assert.deepEqual(taskBadge({ state: "failed", dismissedAt: "2026-10-30T16:00:00.000Z" }), { label: "Dismissed", tone: "muted" });
+    assert.deepEqual(homeView([task("d", "failed", { dismissedAt: "2026-10-30T16:00:00.000Z" }), task("f", "failed")], []).attention.map((a) => a.id), ["f"], "a dismissed failure needs no one");
   });
 
   it("words each stage of the pull request", () => {
@@ -326,17 +330,17 @@ describe("home view", () => {
 });
 
 describe("what a person can do", () => {
-  it("offers retry for failed or cancelled tasks and cancel for unfinished ones", () => {
+  it("offers retry and dismiss for failed or cancelled tasks, and cancel for unfinished ones", () => {
     const states = ["pending", "in_progress", "merging", "merged", "failed", "cancelled"] as const;
     assert.deepEqual(
       states.map((state) => [state, isLive(state), taskActions({ state })]),
       [
-        ["pending", true, { retry: false, cancel: true }],
-        ["in_progress", true, { retry: false, cancel: true }],
-        ["merging", true, { retry: false, cancel: false }],
-        ["merged", false, { retry: false, cancel: false }],
-        ["failed", false, { retry: true, cancel: false }],
-        ["cancelled", false, { retry: true, cancel: false }],
+        ["pending", true, { retry: false, cancel: true, dismiss: false }],
+        ["in_progress", true, { retry: false, cancel: true, dismiss: false }],
+        ["merging", true, { retry: false, cancel: false, dismiss: false }],
+        ["merged", false, { retry: false, cancel: false, dismiss: false }],
+        ["failed", false, { retry: true, cancel: false, dismiss: true }],
+        ["cancelled", false, { retry: true, cancel: false, dismiss: true }],
       ],
     );
   });

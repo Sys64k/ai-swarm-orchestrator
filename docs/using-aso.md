@@ -31,6 +31,7 @@ like an app.
   - **Details** shows the description, acceptance criteria, files touched and history.
   - **Cancel** a task that's going the wrong way, or **Retry** a failed one. **Edit and retry**
     corrects its description or acceptance criteria first, for a criterion that can't be met.
+    **Dismiss** a failed or cancelled task nobody will retry: it leaves Needs you.
 - **Plan.**
   - Shows the requirement, the Architect's approach and the proposed tasks.
   - **Approve and start** or **Reject** from a bar at the bottom of the screen.
@@ -185,6 +186,11 @@ that contradicts the code, say. Correct it as you retry: *Edit and retry* on the
 `aso task-retry <taskId> --criteria-file <file>` (or `--criterion` per criterion, and
 `--description`). The agent is told what changed, works on from its branch, and the task's
 history keeps the old text. Tasks waiting on it carry on once it merges.
+
+**When you're done with a failure** (an experiment, work no longer wanted), dismiss it: *Dismiss*
+on the task page, or `aso task-dismiss <taskId...>`, or `aso task-dismiss --failed -P <project>`
+for all of a project's. It leaves Needs you and the project's failed count, and keeps its
+history; retrying it later brings it back.
 
 **If the Hub restarts** (redeploy, crash, reboot), it picks up where it left off. Tasks, plans
 and agent conversations are kept in its database (see
