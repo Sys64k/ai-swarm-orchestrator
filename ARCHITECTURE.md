@@ -571,7 +571,14 @@ stateDiagram-v2
 - **Retry.** `POST /api/tasks/:id/retry` requeues a `failed` or `cancelled` task with fresh
   limits: rework rounds, node drops, QA attempts and budget. The budget counts from the retry
   (`budgetBaseUsd`), while `llm.costUsd` keeps the total. The branch keeps the previous
-  attempt, and the agent gets a `rework` note saying why it is running again.
+  attempt, and the agent gets a `rework` note saying why it is running again. An optional body
+  (`RetryTaskBody`: `description`, `acceptanceCriteria`) corrects the task first:
+  `correctTask` (`task-edit.ts`) changes only what differs, adds to the rework note what changed,
+  and returns history lines holding the old text, the only record of it. The worker gets the
+  corrected spec with the assignment. It exists because a planned task with a wrong criterion
+  (one contradicting the code) failed every round, retries included, while its dependents
+  waited; editing at retry time, not any time, keeps a running agent's task from changing
+  under it.
 
 ### Tests-first tasks (`tests-first.ts`)
 

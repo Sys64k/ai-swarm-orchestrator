@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { hubAction, usePoll } from "./use-poll.ts";
+import { EditRetry } from "./edit-retry.tsx";
 import { ChangesView, ReviewPanel } from "./review-panel.tsx";
 import { Terminal } from "./terminal.tsx";
 import { useWide } from "./use-wide.ts";
@@ -14,6 +15,7 @@ export function TaskPage({ id }: { id: string }) {
   const { data: task, error, refresh } = usePoll<Task>(`tasks/${id}`);
   const [chosen, setTab] = useState<TaskTab>();
   const wide = useWide();
+  const [editing, setEditing] = useState(false);
 
   if (!task) return <LoadingPage title={id} back="/" error={error} />;
 
@@ -73,6 +75,11 @@ export function TaskPage({ id }: { id: string }) {
                 </a>
               )}
               {can.retry && <ActionButton label="Retry" run={act("retry")} />}
+              {can.retry && !editing && (
+                <button type="button" className="button button-plain" onClick={() => setEditing(true)}>
+                  Edit and retry
+                </button>
+              )}
               {can.cancel && (
                 <ActionButton label="Cancel task" variant="danger" confirm="Cancel this task? A worker on it stops at its next step." run={act("cancel")} />
               )}
@@ -80,6 +87,15 @@ export function TaskPage({ id }: { id: string }) {
           </div>
 
           {reviewing && <ReviewPanel taskId={id} onDone={refresh} />}
+          {editing && can.retry && (
+            <EditRetry
+              task={task}
+              onClose={() => {
+                setEditing(false);
+                refresh();
+              }}
+            />
+          )}
           {wide && <Details task={task} />}
         </div>
 

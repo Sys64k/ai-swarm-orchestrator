@@ -9,6 +9,7 @@ import {
   type TaskKind,
   type LlmUsage,
   type TaskSpec,
+  type RetryTaskBody,
   type TaskState,
   agentName,
   type CrewMemberSchema,
@@ -27,6 +28,7 @@ import type { NodeRegistry } from "./registry.js";
 import { DEFAULT_ROUTING_POLICIES, selectNode, type RoutingPolicies } from "./routing.js";
 import type { TranscriptInput } from "./transcripts.js";
 import type { Screenshots, ScreenshotSet } from "./screenshots.js";
+import { correctTask } from "./task-edit.js";
 import { acceptanceCounts, qualityNotesSuffix, unmetReason, type AcceptanceChecker } from "./llm/acceptance.js";
 import { disputeReason } from "./llm/prompts.js";
 import type { WorkerJob } from "./worker-scope.js";
@@ -342,14 +344,18 @@ export class TaskManager {
   /**
    * Queue a failed or cancelled task again with fresh limits (rework rounds, node drops,
    * budget). Its branch keeps the previous attempt, and the agent is told why it failed.
+   * `edit` corrects the task first (a criterion that can't be met, say): the agent is told what
+   * changed, and the history keeps what it was.
    */
-  retry(taskId: string): TaskRecord {
+  retry(taskId: string, edit: RetryTaskBody = {}): TaskRecord {
     const task = this.require(taskId);
     if (task.state !== "failed" && task.state !== "cancelled") {
       throw new TaskError(`task ${taskId} is ${task.state}; only failed or cancelled tasks can be retried`, "conflict");
     }
     if (task.supersededBy) throw new TaskError(`task ${taskId} was superseded by ${task.supersededBy}, which does its job; there's nothing to retry`, "conflict");
     const why = task.state === "failed" ? `the previous attempt failed: ${task.detail ?? "no detail"}` : "the previous attempt was cancelled";
+    const edited = correctTask(task.spec, edit);
+    task.spec = edited.spec;
     task.retries = (task.retries ?? 0) + 1;
     task.budgetBaseUsd = task.llm.costUsd;
     task.reworkRound = 0;
@@ -369,9 +375,10 @@ export class TaskManager {
     if (task.state === "failed") this.closeReview(task, "The task is being retried; its next attempt opens a new pull request.");
     task.review = undefined;
     task.conflicts = undefined;
-    task.rework = { round: 1, reason: `Retried by a person; ${why}. Your branch may already contain that attempt.` };
+    task.rework = { round: 1, reason: `Retried by a person; ${why}. Your branch may already contain that attempt.${edited.brief}` };
     task.state = "pending";
-    this.note(task, `retry ${task.retries} requested by a person`);
+    for (const line of edited.history) this.note(task, line);
+    this.note(task, `retry ${task.retries} requested by a person${edited.history.length ? ", with the task corrected" : ""}`);
     this.kick();
     return task;
   }

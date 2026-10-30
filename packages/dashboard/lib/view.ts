@@ -1320,3 +1320,24 @@ export function candidatesBody(role: ChallengerRole, typed: string): { role: Cha
 export function recentChanges<T>(log: readonly T[], n: number): T[] {
   return log.slice(-n).reverse();
 }
+
+/**
+ * What "Edit and retry" sends: only the parts that differ from the task, so an untouched form is a
+ * plain retry (the Hub's correctTask decides the same way). Criteria are one per line; a leading
+ * "- " or "1. " is dropped, as `aso task-retry --criteria-file` does.
+ */
+export function retryEditFromForm(
+  spec: { description: string; acceptanceCriteria: string[] },
+  description: string,
+  criteriaText: string,
+): { description?: string; acceptanceCriteria?: string[] } {
+  const newDescription = description.trim();
+  const criteria = criteriaText
+    .split("\n")
+    .map((line) => line.trim().replace(/^(?:[-*]|\d+[.)])\s+/, ""))
+    .filter(Boolean);
+  return {
+    ...(newDescription && newDescription !== spec.description ? { description: newDescription } : {}),
+    ...(criteria.join("\n") !== spec.acceptanceCriteria.join("\n") ? { acceptanceCriteria: criteria } : {}),
+  };
+}

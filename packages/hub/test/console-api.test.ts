@@ -78,6 +78,32 @@ describe("cancel and retry", () => {
       w.ws.close();
     }));
 
+  it("retries a task with its criteria corrected, telling the agent and keeping the old ones in the history", () =>
+    withHub(async (ctx) => {
+      await postTask(ctx.port, { taskId: "list", role: "frontend", title: "List", description: "Wide list", acceptanceCriteria: ["blog below shop", "no sideways scroll"] });
+      await call(ctx.port, "/api/tasks/list/cancel", "POST");
+      const send = (body: unknown) =>
+        fetch(`http://127.0.0.1:${ctx.port}/api/tasks/list/retry`, { method: "POST", headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" }, body: JSON.stringify(body) });
+
+      assert.equal((await send({ acceptanceCriteria: [""] })).status, 400, "an empty criterion is refused");
+      assert.equal(ctx.hub.tasks.get("list")!.state, "cancelled", "and nothing changed");
+
+      const res = await send({ acceptanceCriteria: ["keeps the order (sorted by id)", "no sideways scroll"] });
+      assert.equal(res.status, 200);
+      const task = ctx.hub.tasks.get("list")!;
+      assert.deepEqual(task.spec.acceptanceCriteria, ["keeps the order (sorted by id)", "no sideways scroll"]);
+      assert.equal(task.spec.description, "Wide list", "what wasn't sent stays");
+      assert.match(task.rework!.reason, /A person corrected the task since: its acceptance criteria changed\./);
+      const events = task.history.map((h) => h.event);
+      assert.ok(events.includes('acceptance criteria corrected by a person; they were: "blog below shop", "no sideways scroll"'));
+      assert.equal(events.at(-1), "retry 1 requested by a person, with the task corrected");
+
+      const w = await worker(ctx.port, "dev");
+      const assignment = await w.next();
+      assert.ok(assignment.type === "TASK_ASSIGNMENT" && assignment.payload.acceptanceCriteria[0] === "keeps the order (sorted by id)", "the agent works to the corrected task");
+      w.ws.close();
+    }));
+
   it("fences the worker of a cancelled task and frees it for other work", () => {
     const model = new ScriptedModel(() => reply([toolUse("tu_1", "list_files", {})]));
     return withHub(

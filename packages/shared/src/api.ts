@@ -364,6 +364,13 @@ export const DeskAssignmentBodySchema = DeskModelSettingsSchema.extend({
 export const ApproveTaskBodySchema = z.object({
   force: z.boolean().optional().describe("Merge even when the pull request's checks are failing, still running or can't be read"),
 });
+export const RetryTaskBodySchema = z
+  .object({
+    description: z.string().trim().min(1).max(20_000).optional().describe("The task's new description"),
+    acceptanceCriteria: z.array(z.string().trim().min(1)).max(20).optional().describe("The task's new acceptance criteria, replacing the old ones"),
+  })
+  .describe("Correct the task before it runs again, e.g. a criterion that can't be met; the agent is told what changed");
+export type RetryTaskBody = z.infer<typeof RetryTaskBodySchema>;
 export const RequestChangesBodySchema = z.object({
   message: z.string().trim().min(1).max(MAX_CHANGE_REQUEST_LENGTH).describe("What should change; the agent gets it as written"),
 });
