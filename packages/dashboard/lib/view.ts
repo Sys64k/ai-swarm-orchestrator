@@ -5,7 +5,7 @@ import type {
   ModelSuggestion,
   ModelSuggestions,
   SuggestionRole,
-  Acceptance, Llm, Models, Price, Provider, ProviderPreset, CheckState, QualityNoteKind, DeployStatus, DiffFile, HubNode, HubUpdate, Notices, WorkerKey, Plan, PlannedTask, Project, ReviewChecks, Task, TaskDiff, TaskState, TrackRecordKey, TrackRecordRow, TranscriptEntry } from "./types.ts";
+  Acceptance, Llm, Models, Price, Provider, ProviderPreset, CheckState, QualityNoteKind, DeployStatus, DiffFile, Diagnosis, DiagnosisAction, EvidenceSource, HubNode, HubUpdate, Notices, WorkerKey, Plan, PlannedTask, Project, ReviewChecks, Task, TaskDiff, TaskState, TrackRecordKey, TrackRecordRow, TranscriptEntry } from "./types.ts";
 
 import { PROVIDER_ID } from "./hub-routes.ts";
 
@@ -1375,4 +1375,94 @@ export function retryEditFromForm(
 /** One banner line per provider on hold: who, and the Hub's reason (which says until when, when the provider said). */
 export function pausedLines(llm: Pick<Llm, "pausedProviders"> | undefined): string[] {
   return (llm?.pausedProviders ?? []).map((p) => `${p.provider} is on hold: ${p.reason}`);
+}
+
+/** Mirrors DIAGNOSIS_CAUSE_LABEL, DIAGNOSIS_ACTION_LABEL and DIAGNOSIS_SOURCE_LABEL in @aso/shared. */
+const CAUSE_LABEL: Record<NonNullable<Diagnosis["cause"]>, string> = {
+  task: "The task was wrong or unclear",
+  model: "The model couldn't do it",
+  platform: "ASO itself got in the way",
+  unclear: "The evidence doesn't say",
+};
+
+const PROPOSAL_LABEL: Record<DiagnosisAction, string> = {
+  retry_with_correction: "Retry it with the task corrected",
+  retry: "Retry it",
+  dismiss: "Dismiss it",
+  platform_issue: "Report a problem in ASO itself",
+  none: "Nothing for now",
+};
+
+const SOURCE_LABEL: Record<EvidenceSource, string> = {
+  description: "Task",
+  criteria: "Criteria",
+  history: "History",
+  transcript: "Transcript",
+  qa: "QA",
+  acceptance: "Acceptance check",
+  diff: "Diff",
+};
+
+/** A task as the product owner's card reads it. */
+export type DiagnosableTask = { state: string; retries?: number; diagnosis?: Diagnosis };
+
+/** Whether `d` is the diagnosis of the task's current failure. Mirrors isCurrentDiagnosis in the Hub. */
+function isCurrentDiagnosis(task: DiagnosableTask, d: Diagnosis | undefined): boolean {
+  return task.state === "failed" && d?.attempt === (task.retries ?? 0);
+}
+
+export interface DiagnosisView {
+  /** What the card says first: under way, couldn't, or the cause; undefined when there is no diagnosis. */
+  headline?: string;
+  summary?: string;
+  /** Each quote, with where it is from; `unchecked` when the Hub didn't find it there. */
+  evidence: Array<{ source: string; quote: string; note?: string; unchecked: boolean }>;
+  proposal?: { label: string; why: string; details: string[] };
+  /** What a person did, or undefined while it waits for them. */
+  decision?: string;
+  /** Accept and Refuse are offered: a fresh proposal for this failure. */
+  canDecide: boolean;
+  /** Asking the product owner (again) is offered (see `canDiagnose`). */
+  canAsk: boolean;
+  footer?: string;
+}
+
+/**
+ * The product owner's card on a task page: empty (only perhaps an offer to ask) without a
+ * diagnosis. A diagnosis of an earlier failure (the task was retried since) is shown as history.
+ */
+export function diagnosisView(task: DiagnosableTask): DiagnosisView {
+  const d = task.diagnosis;
+  const canAsk = canDiagnose(task);
+  const empty = { evidence: [], canDecide: false, canAsk };
+  if (!d) return empty;
+  if (d.state === "diagnosing") return { ...empty, headline: "Reading why it failed…" };
+  if (d.state === "failed") return { ...empty, headline: `Couldn't diagnose it: ${d.error ?? "no reason"}.` };
+  const p = d.proposal;
+  const cost = d.costUsd === undefined ? undefined : formatUsd(d.costUsd);
+  return {
+    headline: d.cause ? CAUSE_LABEL[d.cause] : "Diagnosis",
+    summary: d.summary,
+    evidence: (d.evidence ?? []).map((e) => ({ source: SOURCE_LABEL[e.source], quote: e.quote, ...(e.note ? { note: e.note } : {}), unchecked: !e.found })),
+    proposal: p && {
+      label: PROPOSAL_LABEL[p.action],
+      why: p.why,
+      details: [
+        ...(p.description ? [`Description: ${p.description}`] : []),
+        ...(p.acceptanceCriteria ?? []).map((c, i) => `Criterion ${i + 1}: ${c}`),
+        ...(p.issue ? [`Issue: ${p.issue.title}`, p.issue.body] : []),
+      ],
+    },
+    decision: d.decision && `You ${d.decision.kind} this ${timeAgo(d.decision.at)}.`,
+    canDecide: isCurrentDiagnosis(task, d) && !d.decision && p !== undefined,
+    canAsk,
+    footer: [d.model, cost, timeAgo(d.at)].filter((x): x is string => x !== undefined).join(" · "),
+  };
+}
+
+/** Whether to offer asking the product owner about this failure: failed, and not already read (or being read). */
+export function canDiagnose(task: DiagnosableTask): boolean {
+  const d = task.diagnosis;
+  if (task.state !== "failed") return false;
+  return !d || d.state === "failed" || (d.state === "ready" && !isCurrentDiagnosis(task, d));
 }

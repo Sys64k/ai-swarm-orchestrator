@@ -15,6 +15,7 @@ import {
   type CrewMemberSchema,
   type ReviewChecks,
   type Acceptance,
+  type Diagnosis,
   type JobRecord,
   type TestsFirst,
   type JobResult,
@@ -31,6 +32,7 @@ import type { Screenshots, ScreenshotSet } from "./screenshots.js";
 import { correctTask } from "./task-edit.js";
 import { acceptanceCounts, qualityNotesSuffix, unmetReason, type AcceptanceChecker } from "./llm/acceptance.js";
 import { disputeReason } from "./llm/prompts.js";
+import { isCurrentDiagnosis } from "./llm/product-owner.js";
 import type { WorkerJob } from "./worker-scope.js";
 import type { JobOutcome } from "./track-record.js";
 import { addBuildUsage, endJob, failedBuildResult, markAcceptance, markOverturned, markQa, markVerified, openJob, startJob, type JobKind } from "./jobs.js";
@@ -81,6 +83,8 @@ export interface TaskRecord {
   qaSummary?: string;
   /** The check of the work against the acceptance criteria, after QA passed. */
   acceptance?: Acceptance;
+  /** The product owner's reading of its latest failure, and what a person did with its proposal. */
+  diagnosis?: Diagnosis;
   /** A tests-first task's phase: the test writer's, then the builder's against the tests it wrote. */
   testsFirst?: TestsFirst;
   /** What the project's screenshots script saved in the last passing QA run. */
@@ -356,6 +360,48 @@ export class TaskManager {
     task.dismissedAt = new Date().toISOString();
     this.note(task, "dismissed by a person");
     this.onChange?.();
+    return task;
+  }
+
+  /** Record the product owner's diagnosis of this failure (or that it is under way, or couldn't be made). */
+  setDiagnosis(taskId: string, diagnosis: Diagnosis): void {
+    const task = this.tasks.get(taskId);
+    if (!task) return;
+    task.diagnosis = diagnosis;
+    if (diagnosis.state === "ready") this.note(task, `product owner: ${diagnosis.cause}; proposes ${diagnosis.proposal?.action ?? "nothing"}`);
+    else if (diagnosis.state === "failed") this.note(task, `product owner couldn't diagnose it: ${diagnosis.error ?? "no reason"}`);
+    this.onChange?.();
+  }
+
+  /**
+   * A person's answer to the product owner's proposal for this failure. Accepting it does what it
+   * proposes: a retry (with the corrected description or criteria), or dismissing the task; the
+   * other proposals are only marked accepted.
+   */
+  decideDiagnosis(taskId: string, kind: "accepted" | "refused"): TaskRecord {
+    const task = this.require(taskId);
+    const d = task.diagnosis;
+    if (!d || d.state !== "ready" || !d.proposal) throw new TaskError(`task ${taskId} has no proposal from the product owner`, "conflict");
+    if (d.decision) throw new TaskError(`the product owner's proposal for task ${taskId} was already ${d.decision.kind}`, "conflict");
+    if (!isCurrentDiagnosis(task, d)) throw new TaskError(`task ${taskId} has moved on since the product owner's proposal`, "conflict");
+    const { action, description, acceptanceCriteria } = d.proposal;
+    if (kind === "accepted") {
+      switch (action) {
+        case "retry_with_correction":
+          this.retry(taskId, { description, acceptanceCriteria });
+          break;
+        case "retry":
+          this.retry(taskId);
+          break;
+        case "dismiss":
+          this.dismiss(taskId);
+          break;
+        // platform_issue and none: nothing for the Hub to do; the person files the issue.
+      }
+    }
+    // note() saves and tells clients.
+    d.decision = { kind, at: new Date().toISOString() };
+    this.note(task, `a person ${kind} the product owner's proposal (${action})`);
     return task;
   }
 

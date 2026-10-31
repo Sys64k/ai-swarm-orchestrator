@@ -47,7 +47,10 @@ export { Deployer, deployEnv, deployNotification, deployWorkDir, failedInCommand
 export { duration, WorkerWatch, WORKER_FORGET_MS, WORKER_OFFLINE_ALERT_MS } from "./push/workers.js";
 export { notableChanges, type ProjectState, type PushNotification } from "./push/changes.js";
 export { lastProgress, stuckTasks, STUCK_ALERT_MS } from "./push/stuck.js";
-export { DEFAULT_DAILY_SPEND_ALERT_USD, spendingNotice, spendLimitFromEnv } from "./push/spending.js";
+export { DEFAULT_DAILY_SPEND_ALERT_USD, spendingNotice, spendLimitFromEnv, usdFromEnv } from "./push/spending.js";
+export { diagnosisNotification } from "./push/changes.js";
+export { DEFAULT_PRODUCT_OWNER_DAILY_USD, diagnosisPrompt, failedDiagnosis, failureSources, isCurrentDiagnosis, PRODUCT_OWNER_OFF, ProductOwner, readDiagnosis, transcriptLine, transcriptTail, type DiagnosisReading, type FailedTask, type Sources } from "./llm/product-owner.js";
+export { Diagnoser, diagnosisBlocker, DIAGNOSIS_TRANSCRIPT_ENTRIES, newFailures } from "./diagnoser.js";
 export { DEFAULT_NOTICE_LIMIT, MAX_NOTICES, NoticeLog } from "./push/notices.js";
 export { encryptPayload, generateVapidKeys, sendPush, vapidAuthorization, MAX_PAYLOAD_BYTES, type PushResult, type VapidKeys } from "./push/web-push.js";
 export { hubUpdateNotification } from "./hub-update.js";

@@ -4,10 +4,15 @@ import type { PushNotification } from "./changes.js";
 /** The day's model spending worth a notice when none is configured. */
 export const DEFAULT_DAILY_SPEND_ALERT_USD = 25;
 
+/** A USD amount from the environment: a number from 0 up; anything else (unset, empty, negative, not a number) is `fallback`. */
+export function usdFromEnv(raw: string | undefined, fallback: number): number {
+  const n = raw === undefined || raw.trim() === "" ? NaN : Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
 /** The daily limit from the environment (`ASO_DAILY_SPEND_ALERT_USD`): a number of USD, 0 turning it off; else the default. */
 export function spendLimitFromEnv(raw: string | undefined): number {
-  const n = raw === undefined || raw.trim() === "" ? NaN : Number(raw);
-  return Number.isFinite(n) && n >= 0 ? n : DEFAULT_DAILY_SPEND_ALERT_USD;
+  return usdFromEnv(raw, DEFAULT_DAILY_SPEND_ALERT_USD);
 }
 
 /**

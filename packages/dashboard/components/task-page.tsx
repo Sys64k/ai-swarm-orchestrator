@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { hubAction, usePoll } from "./use-poll.ts";
+import { DiagnosisCard } from "./diagnosis.tsx";
 import { EditRetry } from "./edit-retry.tsx";
 import { ChangesView, ReviewPanel } from "./review-panel.tsx";
 import { Terminal } from "./terminal.tsx";
@@ -89,6 +90,7 @@ export function TaskPage({ id }: { id: string }) {
             </div>
           </div>
 
+          <DiagnosisCard task={task} onDone={refresh} />
           {reviewing && <ReviewPanel taskId={id} onDone={refresh} />}
           {editing && can.retry && (
             <EditRetry

@@ -97,7 +97,9 @@ import { isOutdated, NodeError, NodeRegistry, type NodeEntry, type NodeTransport
 import type { RoutingPolicies } from "./routing.js";
 import { Notifier, TEST_NOTIFICATION } from "./push/notifier.js";
 import { DEFAULT_NOTICE_LIMIT, MAX_NOTICES, NoticeLog } from "./push/notices.js";
-import { spendingNotice, spendLimitFromEnv } from "./push/spending.js";
+import { DEFAULT_PRODUCT_OWNER_DAILY_USD, PRODUCT_OWNER_OFF, ProductOwner } from "./llm/product-owner.js";
+import { Diagnoser } from "./diagnoser.js";
+import { spendingNotice, spendLimitFromEnv, usdFromEnv } from "./push/spending.js";
 import { stuckTasks } from "./push/stuck.js";
 import { WorkerWatch } from "./push/workers.js";
 import { Deployer, deployNotification, failedInCommand, HostDeployQueue } from "./deploy.js";
@@ -223,6 +225,12 @@ export interface HubOptions {
     /** The day's model spending (USD, UTC day) that is worth a notice; 0 turns it off. Default: ASO_DAILY_SPEND_ALERT_USD, else 25. */
     dailySpendAlertUsd?: number;
   };
+  /**
+   * The product owner: it reads why a task failed and proposes one thing to do, for a person to
+   * accept or refuse. `false` turns it off; `dailyUsd` caps its spending per UTC day (default
+   * ASO_PRODUCT_OWNER_DAILY_USD, else 5; 0 is off). `models` replaces its models (tests).
+   */
+  productOwner?: false | { dailyUsd?: number; models?: () => Promise<ReadonlyArray<LlmAdapter | undefined>> };
   llm?: {
     /** Defaults to the Anthropic API adapter when ANTHROPIC_API_KEY is set; otherwise no LLM. */
     adapter?: LlmAdapter;
@@ -304,6 +312,16 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
             const trial = task.spec.taskId ? challengerFor("reviewer", task.spec.taskId) : undefined;
             return [trial ? routeOf(trial)?.adapter : undefined, deskModels.roleRoute("reviewer")?.adapter, deskModels.roleRoute("architect")?.adapter, hubModel];
           });
+  // The product owner reads failures with the Architect's model, else --model.
+  const diagnoser =
+    opts.productOwner === false
+      ? undefined
+      : new Diagnoser(
+          new ProductOwner(opts.productOwner?.models ?? (async () => [deskModels.roleRoute("architect")?.adapter, await reviewModel]), {
+            dailyUsd: opts.productOwner?.dailyUsd ?? usdFromEnv(process.env.ASO_PRODUCT_OWNER_DAILY_USD, DEFAULT_PRODUCT_OWNER_DAILY_USD),
+          }),
+          (n) => void notifier?.notify(n),
+        );
   // A machine's worker-key scope (none for the Hub's own token); set once the keys are loaded below.
   let scopeOfNode: (nodeId: string) => KeyScope | undefined = () => undefined;
   // Counts a job's outcome on its machine's worker key (machines on the Hub's own token have none).
@@ -326,7 +344,10 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     deps: { installer: opts.dependencyInstaller, allow: opts.allowDependencies },
     sync: { enabled: opts.sync?.enabled, remote: opts.sync?.remote, token: opts.sync?.token, retryMs: opts.sync?.retryMs },
     pullRequests: opts.pullRequests,
-    onChange: (p) => notifier?.observe({ id: p.id, tasks: p.tasks.list(), plans: p.plans.list() }),
+    onChange: (p) => {
+      notifier?.observe({ id: p.id, tasks: p.tasks.list(), plans: p.plans.list() });
+      diagnoser?.watch(p);
+    },
     onMerged: (p) => deployer?.request(p),
     followMs: opts.sync?.followMs,
   });
@@ -1338,6 +1359,15 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
   };
   app.post("/api/tasks/:id/cancel", (c) => taskAction(c, (p, id) => p.tasks.cancel(id)));
   app.post("/api/tasks/:id/dismiss", (c) => taskAction(c, (p, id) => p.tasks.dismiss(id)));
+  // The product owner: ask it about a failure (one from before it watched, or again), and answer its proposal.
+  app.post("/api/tasks/:id/diagnose", (c) =>
+    taskAction(c, (p, id) => {
+      if (!diagnoser) throw new TaskError(PRODUCT_OWNER_OFF, "conflict");
+      return diagnoser.request(p, id);
+    }),
+  );
+  app.post("/api/tasks/:id/diagnosis/accept", (c) => taskAction(c, (p, id) => p.tasks.decideDiagnosis(id, "accepted")));
+  app.post("/api/tasks/:id/diagnosis/refuse", (c) => taskAction(c, (p, id) => p.tasks.decideDiagnosis(id, "refused")));
   app.post("/api/tasks/:id/retry", async (c) => {
     const req = await parsed(c, RetryTaskBodySchema, { optional: true });
     if (!req.ok) return c.json({ error: req.error }, 400);

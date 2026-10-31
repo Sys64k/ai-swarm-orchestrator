@@ -982,6 +982,39 @@ and one without screenshots removes it, so a reviewer never sees an older commit
 and a `default-src 'none'` CSP. The console shows them in the task's **Screenshots** tab. The
 pull request body lists them and, with `--console-url`, links to the task's page.
 
+### The product owner (`llm/product-owner.ts`)
+
+It reads why a task failed and proposes one thing to do, for a person to accept or refuse.
+
+- **When.** `ProjectSet`'s `onChange` runs `Diagnoser.watch` (`hub/src/diagnoser.ts`), whose
+  `newFailures` (pure) picks tasks that turned `failed`
+  since the last look, not dismissed or superseded, and without a diagnosis for this failure
+  (`diagnosis.attempt`, the task's `retries` when it failed). Records seen for the first time
+  (a Hub start) aren't news, so old failures cost nothing. `POST /api/tasks/:id/diagnose`
+  (`Diagnoser.request`, refused with the reason from `diagnosisBlocker`) asks about any failed
+  task. Diagnoses run one at a time, in order.
+- **What it reads.** `failureSources` gathers, per source: the description, the numbered
+  criteria, the last 40 history events and the failure, the end of the transcript (the last 300
+  entries, one compact line each, the end that fits 40,000 characters), the last two QA runs, the
+  acceptance verdict and notes, and the diff of `task/<id>` against main (40,000 characters).
+  `diagnosisPrompt` puts each under a heading naming its source, and the agent's summary as a
+  claim. One call, with one tool, `report_diagnosis`: a cause (`task`, `model`, `platform`,
+  `unclear`), a summary, quoted evidence and a proposal (`retry_with_correction` with the
+  corrected description or criteria, `retry`, `dismiss`, `platform_issue` with an issue's title
+  and body, `none`).
+- **Checked quotes.** `readDiagnosis` keeps what each proposal needs and marks each quote
+  `found` when it is in the source it names (whitespace aside), so a person can tell evidence
+  from invention. A correction that changes nothing is refused as unreadable.
+- **Models and budget.** `ProductOwner` asks the Architect's model, then `--model`; one that
+  fails hands over to the next. Its spending per UTC day is capped (`ASO_PRODUCT_OWNER_DAILY_USD`,
+  default $5, `0` off; in memory, so a restart starts the day's count again). Past it, or with
+  no model, the task gets a `failed` diagnosis saying why. The call's usage counts on the task.
+- **After.** The diagnosis is kept on the task only if it is still the failure that was read (not
+  retried or dismissed meanwhile), and a ready one is a notice ("why it failed", with the
+  proposal). `TaskDirectory.decideDiagnosis` takes the person's answer once, for the current
+  failure only: accepting a retry runs `retry` (with the correction through `correctTask`),
+  accepting dismiss runs `dismiss`, and the others are only marked.
+
 ### Pushing to origin
 
 `GitSync` (`git/sync.ts`) pushes `main` to the target repository's `origin` after each merge.
