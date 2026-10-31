@@ -11,16 +11,24 @@ export const DIAGNOSIS_TRANSCRIPT_ENTRIES = 300;
 
 type Watched = Pick<TaskRecord, "state" | "retries" | "dismissedAt" | "supersededBy" | "diagnosis"> & { spec: { taskId: string } };
 
+/** A reading the Hub was making when it stopped (seen for the first time, still diagnosing): make it again. */
+function interruptedReading(t: Watched, before: string | undefined): boolean {
+  return before === undefined && !t.dismissedAt && t.diagnosis?.state === "diagnosing" && isCurrentDiagnosis(t, t.diagnosis);
+}
+
+/** A task that failed since the last look and is still waiting for a reading. Seen for the first time (a Hub start), it's an old failure, not news. */
+function newlyFailed(t: Watched, before: string | undefined): boolean {
+  if (before === undefined || before === t.state || t.state !== "failed") return false;
+  return !t.dismissedAt && !t.supersededBy && !isCurrentDiagnosis(t, t.diagnosis);
+}
+
 /** The task ids that failed since the last look, for a diagnosis: not dismissed or superseded, nor diagnosed for this failure. */
 export function newFailures(seen: Map<string, string>, tasks: readonly Watched[]): string[] {
   const out: string[] = [];
   for (const t of tasks) {
     const before = seen.get(t.spec.taskId);
     seen.set(t.spec.taskId, t.state);
-    // Seen for the first time (a Hub start): an old failure, not news.
-    if (before === undefined || before === t.state || t.state !== "failed") continue;
-    if (t.dismissedAt || t.supersededBy || isCurrentDiagnosis(t, t.diagnosis)) continue;
-    out.push(t.spec.taskId);
+    if (interruptedReading(t, before) || newlyFailed(t, before)) out.push(t.spec.taskId);
   }
   return out;
 }

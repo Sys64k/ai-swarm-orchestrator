@@ -1846,7 +1846,7 @@ flowchart TD
   D -->|no, or can't tell| B["own clone, own HOME: checkout, npm ci, npm test, npm run package"]
   B -->|fails| F["failed.json (3 attempts), report failed"]
   B --> V["install into versions/&lt;version&gt;/ (running version untouched; reused if already there)"]
-  V --> W["waiting: until no task at work, no running deploy, no plan being made"]
+  V --> W["waiting: until swarmIdle, or after UPDATE_MAX_WAIT_MS (30 min) a quietMoment (restartReason): no model call in flight, no verifying or merging task, no plan being made, no failure being read, no running deploy"]
   W -->|"main moved"| P
   W --> A["pending.json (id, deadline); arm watchdog for that id in the running version (systemd-run, 15 min)"]
   A --> S["previous and current links, restart from a transient unit (undone if this process is still alive after RESTART_GRACE_MS)"]
@@ -1861,6 +1861,14 @@ flowchart TD
   is renamed into place. The service's `ExecStart` runs `current/node_modules/aso-cli/dist/aso.mjs`.
   Switching and rolling back replace the `current` link with one rename, so neither can leave a
   half-installed Hub, and a failed install changes nothing.
+- **A busy swarm still updates.** `swarmIdle` waits for nothing to be running at all. A swarm
+  with tasks always at work would never get there, so after `UPDATE_MAX_WAIT_MS` (30 min,
+  `ASO_UPDATE_MAX_WAIT_MIN`) `restartReason` also takes a `quietMoment`: no agent model call in
+  flight (`GET /api/llm` `queue.running`; a Hub that doesn't say counts as busy), no task `verifying` or `merging` (Hub-side steps that
+  would run again), no plan `planning`, no product owner reading a failure, no deploy running.
+  Agents between turns, and QA runs, carry on after the restart as after any other (jobs held,
+  conversations restored). A product owner reading cut off by any restart is made again
+  (`newFailures` picks up a current `diagnosing` diagnosis on the first look).
 - **The watchdog lives in the old version.** Code in the new version can't roll back a version
   that crashes at load or hangs, so before switching the running version starts
   `systemd-run --user --on-active=900 <its own CLI> hub-update-check --id <id>`

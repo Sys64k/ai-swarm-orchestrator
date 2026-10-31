@@ -174,6 +174,8 @@ describe("newFailures", () => {
       ["a"],
     );
     assert.deepEqual(newFailures(seen, [t("a", "failed")]), [], "once");
+    const interrupted = { attempt: 0, state: "diagnosing" as const, at: "2026-10-31T10:00:00.000Z" };
+    assert.deepEqual(newFailures(new Map(), [t("cut", "failed", { diagnosis: interrupted }), t("gone", "failed", { diagnosis: interrupted, dismissedAt: "x" })]), ["cut"], "a reading cut off by a restart is made again");
   });
 });
 
