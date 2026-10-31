@@ -80,6 +80,18 @@ export function spentOn(today: DaySpend | undefined, date: string): number {
 }
 const log = createLogger("llm");
 
+/** How long a provider may be unreachable before its calls are held: shorter outages are only retried. */
+export const UNREACHABLE_HOLD_MS = 60_000;
+
+/**
+ * Whether an error should hold its provider's calls now: a credit or usage limit at once; an
+ * unreachable provider once it has been unreachable since `since` for `UNREACHABLE_HOLD_MS`.
+ */
+export function shouldHold(pause: LlmError["pause"], since: number | undefined, now: number, holdMs: number): boolean {
+  if (pause === "credit") return true;
+  return pause === "unreachable" && since !== undefined && now - since >= holdMs;
+}
+
 /** A planning round's spend cap: enough for the Architect to read a large codebase before it plans. */
 export const DEFAULT_PLAN_BUDGET_USD = 3;
 
@@ -118,9 +130,11 @@ export interface ConversationOptions {
     /** A call's estimated cost, by the machine whose agent made it. */
     record(nodeId: string, usd: number): void;
   };
-  /** Called when a provider's calls go on hold (out of credit, a usage limit), and when they work again. */
+  /** Called when a provider's calls go on hold (out of credit, a usage limit, unreachable), and when they work again. */
   onPause?: (provider: string, reason: string, until?: string) => void;
   onResume?: (provider: string) => void;
+  /** How long a provider may be unreachable before its calls are held (default `UNREACHABLE_HOLD_MS`; tests shorten it). */
+  unreachableHoldMs?: number;
   /** Drop idle conversations after this long. */
   idleTimeoutMs?: number;
   /** Saves conversations after every turn so agents can carry on after a Hub restart. */
@@ -200,11 +214,14 @@ export class ConversationManager {
   private readonly requests = new Map<string, { conversationId: string; turn: number }>();
   private readonly toolsByRole = new Map<string, Anthropic.Beta.BetaTool[]>();
   private readonly taskBudgetUsd: number;
-  /** Providers whose calls are on hold (out of credit, a usage limit), by provider: the others go on. */
+  /** Providers whose calls are on hold (out of credit, a usage limit, unreachable), by provider: the others go on. */
   private readonly paused = new Map<string, { reason: string; since: string; until?: string }>();
+  /** Providers whose calls fail to reach them, since when (epoch ms); a call that works clears it. */
+  private readonly unreachableSince = new Map<string, number>();
   private readonly onPause?: (provider: string, reason: string, until?: string) => void;
   private readonly onResume?: (provider: string) => void;
   private readonly planBudgetUsd: number;
+  private readonly unreachableHoldMs: number;
   private readonly maxTurns: number;
   private readonly idleTimeoutMs: number;
   private readonly slots: Semaphore;
@@ -225,6 +242,7 @@ export class ConversationManager {
     this.onPause = opts.onPause;
     this.onResume = opts.onResume;
     this.planBudgetUsd = opts.planBudgetUsd ?? DEFAULT_PLAN_BUDGET_USD;
+    this.unreachableHoldMs = opts.unreachableHoldMs ?? UNREACHABLE_HOLD_MS;
     this.maxTurns = opts.maxTurns ?? 80;
     this.idleTimeoutMs = opts.idleTimeoutMs ?? 30 * 60_000;
     this.slots = new Semaphore(opts.concurrency ?? 4);
@@ -579,6 +597,7 @@ export class ConversationManager {
       provider = providerOf(route.adapter);
       const response = await route.slots.run(() => route.adapter.complete({ system: conv.system, tools: conv.tools, messages }));
 
+      this.unreachableSince.delete(provider);
       const hold = this.paused.get(provider);
       if (hold) {
         log.info(`${provider}'s model calls work again after waiting since ${hold.since}`);
@@ -642,7 +661,7 @@ export class ConversationManager {
       this.respond(conv.nodeId, result);
     } catch (err) {
       const e = err instanceof LlmError ? err : new LlmError((err as Error).message, false);
-      if (e.pause && provider) {
+      if (e.pause && provider && this.holdsAfter(provider, e.pause)) {
         // Nothing wrong with the work: hold this provider's calls until it works again.
         if (!this.paused.has(provider)) {
           this.paused.set(provider, { reason: e.message, since: new Date().toISOString(), ...(e.until ? { until: e.until } : {}) });
@@ -666,6 +685,13 @@ export class ConversationManager {
       conv.inflight = undefined;
       conv.lastActivity = Date.now();
     }
+  }
+
+  /** Whether a pause error leaves `provider`'s calls on hold: it is held already, or `shouldHold` says so now. */
+  private holdsAfter(provider: string, pause: NonNullable<LlmError["pause"]>): boolean {
+    const now = Date.now();
+    if (pause === "unreachable" && !this.unreachableSince.has(provider)) this.unreachableSince.set(provider, now);
+    return this.paused.has(provider) || shouldHold(pause, this.unreachableSince.get(provider), now, this.unreachableHoldMs);
   }
 
   /** Forget conversations that are idle or whose task moved on. */

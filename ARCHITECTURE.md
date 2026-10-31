@@ -1449,7 +1449,11 @@ model's turn of thinking only) isn't a stop: the worker asks again, up to `MAX_E
   balance is too low" (sent mid-stream as a raw JSON body with no status) and its spend limit
   ("reached your specified API usage limits", with `resetTime` reading "regain access on …
   UTC" into `until`) into `LlmError(…, pause: "credit")` with a plain message; `classifyHttp`
-  does the same for an OpenAI-compatible provider's 402/429 quota answers. Other streamed errors
+  does the same for an OpenAI-compatible provider's 402/429 quota answers. A provider that
+  can't be reached (`postForStream`'s failed fetch, Anthropic's `APIConnectionError`; not a
+  timeout, which reached it) is `pause: "unreachable"`: `shouldHold` holds it only once it has
+  been unreachable for `UNREACHABLE_HOLD_MS` (a minute, inside a worker's ~2 minutes of
+  retries), counted from its first failure and cleared by any call that works. Other streamed errors
   show the API's own words (`apiErrorText`). Holds are kept per provider (`LlmAdapter.provider`:
   "Anthropic", a provider's label, else the address's host), so one provider's working calls
   don't lift another's hold. On a hold the gateway records it (`GET /api/llm`: `pausedProviders`,

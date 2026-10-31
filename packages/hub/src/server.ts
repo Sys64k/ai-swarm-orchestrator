@@ -243,6 +243,8 @@ export interface HubOptions {
     juniorTries?: number;
     /** `false`: every round on the desk's model, no escalation. */
     escalation?: boolean;
+    /** How long a provider may be unreachable before its calls are held (tests). */
+    unreachableHoldMs?: number;
   };
 }
 
@@ -471,6 +473,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     planBudgetUsd: llm.planBudgetUsd,
     maxTurns: llm.maxTurns,
     concurrency: llm.concurrency,
+    unreachableHoldMs: llm.unreachableHoldMs,
     store,
     transcripts: projects.transcripts,
     onPause: (provider, reason) => void notifier?.notify({ title: `ASO is waiting for ${provider}`, body: reason, url: "/", tag: `llm-paused-${provider}` }),

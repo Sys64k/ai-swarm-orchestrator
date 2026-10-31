@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { describe, it } from "node:test";
 import Anthropic from "@anthropic-ai/sdk";
-import { AnthropicApiAdapter, classify, contextFull, CREDIT_MESSAGE, DEFAULT_PLAN_BUDGET_USD, describeCutOff, toolResultBlocks, withCutOffNote, LlmError, priceUsage, resetTime, usageLimitMessage, taskPrompt, TURN_WARNING, withTurnWarning, type LlmRequest } from "@aso/hub";
+import { AnthropicApiAdapter, classify, shouldHold, UNREACHABLE_HOLD_MS, contextFull, CREDIT_MESSAGE, DEFAULT_PLAN_BUDGET_USD, describeCutOff, toolResultBlocks, withCutOffNote, LlmError, priceUsage, resetTime, usageLimitMessage, taskPrompt, TURN_WARNING, withTurnWarning, type LlmRequest } from "@aso/hub";
 import { CONVERSATION_MAX_IMAGE_BYTES, CONVERSATION_MAX_IMAGES, createMessage, type AgentMessage } from "@aso/shared";
 import { callModelWithRetry, startWorker, type ModelReply } from "@aso/worker";
 import {
@@ -324,6 +324,55 @@ describe("LLM gateway (Hub)", () => {
         w.ws.close();
       },
       { llm: { adapter: model } },
+    );
+  });
+
+  it("holds a provider that stays unreachable, after a minute of retries, and carries on once it answers", async () => {
+    const gone = classify(new Anthropic.APIConnectionError({ message: "Connection error." }));
+    assert.deepEqual([gone.retryable, gone.pause], [true, "unreachable"]);
+    const slow = classify(new Anthropic.APIConnectionTimeoutError({ message: "Request timed out." }));
+    assert.deepEqual([slow.retryable, slow.pause], [true, undefined], "a timeout reached the API");
+
+    assert.equal(shouldHold("credit", undefined, 0, UNREACHABLE_HOLD_MS), true, "credit holds at once");
+    assert.equal(shouldHold("unreachable", 1000, 1000 + UNREACHABLE_HOLD_MS - 1, UNREACHABLE_HOLD_MS), false, "a short blip is only retried");
+    assert.equal(shouldHold("unreachable", 1000, 1000 + UNREACHABLE_HOLD_MS, UNREACHABLE_HOLD_MS), true);
+    assert.equal(shouldHold(undefined, 0, 10 * UNREACHABLE_HOLD_MS, UNREACHABLE_HOLD_MS), false);
+
+    let down = true;
+    const unreachable = "the model provider at http://avalon:11434/v1 is unreachable: fetch failed";
+    const model = new ScriptedModel(() => {
+      if (down) throw new LlmError(unreachable, true, "unreachable");
+      return reply([text("Thanks.")], "end_turn");
+    });
+    return withHub(
+      async (ctx) => {
+        const w = await implementer(ctx, "dev", "greet");
+        const conv = crypto.randomUUID();
+        const llm = async () => (await fetch(`http://127.0.0.1:${ctx.port}/api/llm`, { headers: { authorization: `Bearer ${TOKEN}` } })).json() as Promise<{ pausedProviders?: Array<{ reason: string }> }>;
+        w.send(prompt("dev", conv, 0));
+        const first = result(await w.next());
+        assert.ok(first.outcome === "error" && first.retryable && !first.paused, "the first failure is an ordinary retry");
+        assert.equal((await llm()).pausedProviders, undefined);
+
+        await new Promise((r) => setTimeout(r, 60));
+        w.send(prompt("dev", conv, 0));
+        const held = result(await w.next());
+        assert.ok(held.outcome === "error" && held.retryable && held.paused, "still unreachable after the hold delay: held");
+        assert.equal((await llm()).pausedProviders?.[0].reason, unreachable);
+        assert.equal(ctx.hub.tasks.get("greet")!.state, "in_progress", "the task waits; it doesn't fail");
+
+        down = false;
+        w.send(prompt("dev", conv, 0));
+        assert.equal(result(await w.next()).outcome, "ok");
+        assert.equal((await llm()).pausedProviders, undefined, "on again once it answers");
+
+        down = true;
+        w.send(prompt("dev", conv, 1));
+        const again = result(await w.next());
+        assert.ok(again.outcome === "error" && !again.paused, "a working call starts the count again");
+        w.ws.close();
+      },
+      { llm: { adapter: model, unreachableHoldMs: 50 } },
     );
   });
 
