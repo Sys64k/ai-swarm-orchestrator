@@ -2,8 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { hubGet, hubPost } from "./hub-client.ts";
-import { Banner, TopBar } from "./ui.tsx";
+import { usePoll } from "./use-poll.ts";
+import { Badge, Banner, Row, Section, TopBar } from "./ui.tsx";
 import { detectPushEnvironment, enablePush, pushSetup, type PushSetup } from "../lib/push.ts";
+import type { Notices } from "../lib/types.ts";
+import { noticeRows } from "../lib/view.ts";
 
 type Status = { setup: PushSetup; subscription: PushSubscription | null; on: boolean };
 
@@ -95,9 +98,12 @@ export function Notifications() {
     <>
       <TopBar title="Notifications" back="/" />
       <main className="page">
+        <NoticeList />
+        <h2 className="section-title">On this device</h2>
         <p className="muted">
-          Get a notification on this device when a plan is ready for your approval, a task or plan fails, all of a plan&apos;s
-          tasks are merged, or a worker machine goes offline and comes back. Tapping it opens the plan or task.
+          Get each of these as a notification on this device too: a plan ready for your approval, a task that fails or keeps
+          coming back, a provider on hold, a worker machine gone, a failed Hub update, the day&apos;s spending. Tapping it opens
+          the page it is about.
         </p>
         {error && <Banner tone="bad">{error}</Banner>}
         {!status && !error && <p className="muted">Checking this device…</p>}
@@ -125,6 +131,41 @@ export function Notifications() {
           ))}
       </main>
     </>
+  );
+}
+
+/** What the Hub has told you about, newest first, the unread ones marked New. */
+function NoticeList() {
+  const list = usePoll<Notices>("notices", 10_000);
+  const [error, setError] = useState<string>();
+  if (list.error) return <Banner tone="bad">Couldn&apos;t load the notices: {list.error}</Banner>;
+  if (!list.data) return <p className="muted">Loading…</p>;
+  const rows = noticeRows(list.data);
+  const markRead = async () => {
+    const r = await hubPost("notices/read", { upTo: rows[0].id });
+    setError(r.ok ? undefined : r.error);
+    list.refresh();
+  };
+  return (
+    <Section title="Notices" count={list.data.unread || undefined}>
+      {error && <Banner tone="bad">{error}</Banner>}
+      {rows.length === 0 ? (
+        <p className="muted">Nothing yet. The Hub lists here what it tells you about.</p>
+      ) : (
+        <div className="card-list">
+          {rows.map((r) => (
+            <Row key={r.id} href={r.href} title={r.title} sub={r.sub} badge={r.unread ? <Badge label="New" tone="waiting" /> : undefined} />
+          ))}
+        </div>
+      )}
+      {list.data.unread > 0 && (
+        <div className="actions">
+          <button type="button" className="button button-plain" onClick={markRead}>
+            Mark all read
+          </button>
+        </div>
+      )}
+    </Section>
   );
 }
 

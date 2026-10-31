@@ -21,5 +21,6 @@ Settings in `~/.config/aso/.env` and the environment.
 | `ANTHROPIC_API_KEY` | *(none)* | Hub only. Without it, agents fail tasks with "no LLM configured" |
 | *(file)* `.env` | — | Loaded on start: the shell's variables win, then `ASO_ENV_FILE`, then `~/.config/aso/.env`, then a source checkout's `.env`. See `.env.example` |
 | `ASO_MODEL`, `ASO_AGENT_MODEL`, `ASO_EFFORT`, `ASO_TASK_BUDGET`, `ASO_PLAN_BUDGET`, `ASO_MAX_TURNS`, `ASO_LLM_CONCURRENCY`, `ASO_ESCALATE_TO`, `ASO_JUNIOR_TRIES`, `ASO_ESCALATION` (`0`: off), `ASO_GATEWAY_PORT`, `ASO_GATEWAY_HOST`, `ASO_GATEWAY_URL`, `ASO_DOCKER_CLEANUP` (`0`: off), `ASO_AUTO_MERGE_SYNCS` (`0`: off), `ASO_PUBLIC_STATS`, `ASO_PUBLIC_STATS_PROJECTS` | see flags | Defaults for the LLM flags (also passed into the container) |
+| `ASO_DAILY_SPEND_ALERT_USD` | `25` | Hub only. A day's model spending (UTC day) worth a notice; `0` turns it off |
 | `ASO_PUSH_CONTACT` | project URL | Contact (`mailto:` or `https:`) sent to push services with notifications (VAPID `sub`) |
 | `ASO_UPDATE_SPEC` | `@aso/cli@latest` | Default source for `aso update` |

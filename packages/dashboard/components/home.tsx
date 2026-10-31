@@ -4,8 +4,8 @@ import Link from "next/link";
 import { usePoll } from "./use-poll.ts";
 import { Badge, Banner, Row, Section, TopBar } from "./ui.tsx";
 import { NeedsYou, WorkLists } from "./work-lists.tsx";
-import type { HubNode, HubUpdate, Llm, Plan, Project, Task } from "../lib/types.ts";
-import { formatUsd, hubUpdateView, pausedLines, projectSummary, workerViews } from "../lib/view.ts";
+import type { HubNode, HubUpdate, Llm, Notices, Plan, Project, Task } from "../lib/types.ts";
+import { formatUsd, hubUpdateView, pausedLines, projectSummary, unreadNotices, workerViews } from "../lib/view.ts";
 
 /** Everything at a glance: what needs you, the projects, what's running, the workers. */
 export function Home() {
@@ -15,6 +15,8 @@ export function Home() {
   const nodes = usePoll<HubNode[]>("nodes", 5000);
   const llm = usePoll<Llm>("llm", 10_000);
   const update = usePoll<HubUpdate>("hub/update", 10_000);
+  const notices = usePoll<Notices>("notices", 10_000);
+  const unread = unreadNotices(notices.data);
   // An older Hub has no update status: then nothing is shown.
   const hub = hubUpdateView(update.data);
 
@@ -39,6 +41,11 @@ export function Home() {
           <Banner tone="bad">
             {hub.label}: {hub.detail}
           </Banner>
+        )}
+        {unread && (
+          <div className="card-list">
+            <Row href="/notifications" title={unread.title} sub={unread.latest} badge={<Badge label="New" tone="waiting" />} />
+          </div>
         )}
         {!ready && !error && <p className="muted">Loading…</p>}
 
@@ -102,7 +109,7 @@ export function Home() {
         </div>
 
         <p className="footer-links">
-          <Link href="/notifications">Notifications</Link>
+          <Link href="/notifications">Notices and notifications</Link>
           <span aria-hidden> · </span>
           <Link href="/devices">Sign in another device</Link>
         </p>

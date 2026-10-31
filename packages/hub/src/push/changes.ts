@@ -32,7 +32,13 @@ export function notableChanges(seen: Map<string, string>, project: ProjectState)
     ...project.plans.filter((p) => changed(`plan:${p.planId}`, p.state)).map((p) => planNotification(project.id, p)),
     // A task waiting for review counts as changed once its pull request is open, not before.
     ...project.tasks.filter((t) => changed(`task:${t.spec.taskId}`, taskStage(t))).map((t) => taskNotification(project, t)),
+    // The first rework round is routine; from the second on, the task is struggling.
+    ...project.tasks.filter((t) => changed(`rework:${t.spec.taskId}`, String(t.reworkRound)) && t.reworkRound >= 2).map((t) => reworkNotification(project.id, t)),
   ].filter((n): n is PushNotification => n !== undefined);
+}
+
+function reworkNotification(project: string, task: TaskRecord): PushNotification {
+  return notification(project, `rework round ${task.reworkRound}`, [task.spec.title, task.rework?.reason && firstLine(task.rework.reason)], "task", task.spec.taskId);
 }
 
 function planNotification(project: string, plan: PlanRecord): PushNotification | undefined {
@@ -73,7 +79,7 @@ function planOf(project: ProjectState, taskId: string): PlanRecord | undefined {
 }
 
 /** One notification per task or plan: its console page and a tag so newer news replaces older. */
-function notification(project: string, what: string, lines: Array<string | undefined>, kind: "plan" | "task", id: string): PushNotification {
+export function notification(project: string, what: string, lines: Array<string | undefined>, kind: "plan" | "task", id: string): PushNotification {
   return {
     title: `${project}: ${what}`,
     body: clip(lines.filter(Boolean).join("\n"), 600),

@@ -409,18 +409,30 @@ the same account. The console works from anywhere at `https://<machine>.<tailnet
 
 `tailscale serve --bg` survives reboots. `tailscale serve --https=443 off` stops it.
 
-## Notifications on your phone
+## Notices, and notifications on your phone
 
-The Hub can notify your phone when:
+The Hub tells you when:
 - a plan is ready for your approval, or the Architect has questions,
 - a task fails, or planning fails,
+- a task comes back for a second rework round (and each round after): it is struggling,
+- a task at work has made no progress (no event, no model turn) for an hour,
 - all of a plan's tasks are merged (or a task submitted on its own is merged),
 - a project deployed, or its deploy failed (see [Deploying after a merge](github.md#deploying-after-a-merge)),
+- a model provider is on hold (out of credit, a usage limit), and when it works again,
 - a worker machine has been offline for 10 minutes, and again when it is back. The Hub
-  remembers its machines across restarts, so one that never reconnects is still reported.
+  remembers its machines across restarts, so one that never reconnects is still reported,
+- the Hub's own update finished or failed,
+- the day's model spending reached $25 (UTC day; `ASO_DAILY_SPEND_ALERT_USD` changes it,
+  `0` turns it off).
+
+**Every one of these is kept as a notice**, whether or not any device gets notifications: the
+console's **Notices and notifications** page lists them, newest first, and the home page shows
+how many are unread. `aso notices` prints them (`--unread`, `--read` to mark them read), and
+`GET /api/notices` gives them to any other client. The Hub keeps the latest 500 in
+`<projects root>/.aso/notices.json`.
 
 Tapping a notification opens that plan or task (or, for a worker, the home page) in the console. To turn them on, open the console
-at its **https** address (Tailscale, above), tap **Notifications** at the bottom of the home
+at its **https** address (Tailscale, above), tap **Notices and notifications** at the bottom of the home
 page, then **Turn on notifications**, and **Send a test**. Do this on each device you want
 notified.
 

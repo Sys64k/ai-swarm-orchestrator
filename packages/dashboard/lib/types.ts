@@ -190,6 +190,29 @@ export interface WorkerKey {
   connected: boolean;
 }
 
+/** One UTC day's model spending (`Llm.totals.today`); an older Hub sends none. */
+export interface DaySpend {
+  date: string;
+  costUsd: number;
+}
+
+/** Something the Hub told you about (`GET /api/notices`); also pushed to devices with notifications on. */
+export interface Notice {
+  id: string;
+  at: string;
+  title: string;
+  body: string;
+  /** The console page it is about. */
+  url: string;
+  tag: string;
+}
+
+export interface Notices {
+  /** Newest first. */
+  notices: Notice[];
+  unread: number;
+}
+
 /** The Hub's own update from its repository (`GET /api/hub/update`). */
 export interface HubUpdate {
   state: "off" | "current" | "building" | "waiting" | "restarting" | "updated" | "failed";
@@ -212,7 +235,7 @@ export interface Llm {
   configured: boolean;
   model: string | null;
   taskBudgetUsd: number;
-  totals: { calls: number; costUsd: number };
+  totals: { calls: number; costUsd: number; today?: DaySpend };
   /** Providers whose calls are on hold (out of credit, a usage limit); an older Hub sends none. */
   pausedProviders?: Array<{ provider: string; reason: string; since: string; until?: string }>;
 }

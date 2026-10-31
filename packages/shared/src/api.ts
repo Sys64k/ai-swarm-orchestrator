@@ -769,6 +769,10 @@ export const LlmStatusSchema = z.object({
       calls: z.number().int(),
       costUsd: z.number(),
       since: z.string().optional().describe("When counting began: kept across restarts when the Hub saves its state, else since it started"),
+      today: z
+        .object({ date: z.string().describe("The UTC day, YYYY-MM-DD"), costUsd: z.number() })
+        .optional()
+        .describe("The estimated cost of the day's model calls so far (UTC): what the daily spending notice goes by"),
     })
     .describe("Model calls and their estimated cost, all tasks and plans together"),
   paused: z
@@ -793,6 +797,29 @@ export const PushSubscribedSchema = z.object({ subscribed: z.literal(true), devi
 export const PushCheckSchema = z.object({ subscribed: z.boolean() });
 export const PushRemovedSchema = z.object({ removed: z.boolean(), devices: z.number().int() });
 export const PushTestResultSchema = z.object({ sent: z.number().int().describe("Devices that took it"), failed: z.array(z.string()) });
+
+/**
+ * Something the Hub tells you about: a plan to approve, a task that failed or keeps coming back,
+ * a provider on hold, a worker gone, a failed update, the day's spending. Each one is also pushed
+ * to the devices that turned notifications on; the Hub keeps the latest (`GET /api/notices`).
+ */
+export const NoticeSchema = z.object({
+  id: z.string(),
+  at: Timestamp,
+  title: z.string(),
+  body: z.string(),
+  url: z.string().describe("The console page it is about (always starts with a single /)"),
+  tag: z.string().describe("What it is about (a task, plan, provider, machine…): a newer notice with the same tag replaces it on a phone"),
+});
+export type Notice = z.infer<typeof NoticeSchema>;
+export const NoticesSchema = z.object({
+  notices: z.array(NoticeSchema).describe("Newest first"),
+  unread: z.number().int().describe("Notices since a person last marked them read"),
+});
+export type Notices = z.infer<typeof NoticesSchema>;
+export const NoticesReadBodySchema = z.strictObject({
+  upTo: z.string().min(1).max(100).optional().describe("The id of the newest notice to mark read, with all before it (default: all of them)"),
+});
 export const SignInCodeSchema = z.object({ code: z.string(), expiresAt: Timestamp });
 export const JoinCodeSchema = z.object({
   code: z.string(),

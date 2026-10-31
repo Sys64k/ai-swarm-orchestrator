@@ -52,6 +52,7 @@ import {
   PushEndpointSchema,
   PushSubscriptionSchema,
   PushTestSchema,
+  NoticesReadBodySchema,
   ApproveTaskBodySchema,
   CreatePlanBodySchema,
   CreateProjectBodySchema,
@@ -95,6 +96,9 @@ import { ProjectError, ProjectSet, type Project } from "./projects.js";
 import { isOutdated, NodeError, NodeRegistry, type NodeEntry, type NodeTransport, type Registration } from "./registry.js";
 import type { RoutingPolicies } from "./routing.js";
 import { Notifier, TEST_NOTIFICATION } from "./push/notifier.js";
+import { DEFAULT_NOTICE_LIMIT, MAX_NOTICES, NoticeLog } from "./push/notices.js";
+import { spendingNotice, spendLimitFromEnv } from "./push/spending.js";
+import { stuckTasks } from "./push/stuck.js";
 import { WorkerWatch } from "./push/workers.js";
 import { Deployer, deployNotification, failedInCommand, HostDeployQueue } from "./deploy.js";
 import { hubUpdateNotification } from "./hub-update.js";
@@ -214,6 +218,10 @@ export interface HubOptions {
     contact?: string;
     /** How long a worker machine may be gone before the alert (tests). */
     workerOfflineMs?: number;
+    /** How long a task at work may make no progress before the alert (default an hour). */
+    stuckMs?: number;
+    /** The day's model spending (USD, UTC day) that is worth a notice; 0 turns it off. Default: ASO_DAILY_SPEND_ALERT_USD, else 25. */
+    dailySpendAlertUsd?: number;
   };
   llm?: {
     /** Defaults to the Anthropic API adapter when ANTHROPIC_API_KEY is set; otherwise no LLM. */
@@ -331,7 +339,8 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
         : path.join(await projects.get("project")!.repo.gitDir(), "aso");
   const store = conversationDir ? hubStateStore(database, conversationDir) : undefined;
   const storageKind = () => (database ? "postgres" : store ? "files" : "memory");
-  notifier = await Notifier.open({ dir: conversationDir, subject: opts.push?.contact ?? (process.env.ASO_PUSH_CONTACT || undefined), send: opts.push?.send });
+  const notices = await NoticeLog.open({ dir: conversationDir });
+  notifier = await Notifier.open({ dir: conversationDir, subject: opts.push?.contact ?? (process.env.ASO_PUSH_CONTACT || undefined), send: opts.push?.send, notices });
   // Remember every record's current state, so only what changes from now on notifies.
   for (const p of projects.list()) notifier.observe({ id: p.id, tasks: p.tasks.list(), plans: p.plans.list() });
   const workerWatch = await WorkerWatch.open({ dir: conversationDir, alertMs: opts.push?.workerOfflineMs });
@@ -360,7 +369,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       dir: conversationDir,
       onResult: (project, status) => {
         if (failedInCommand(status)) projects.get(project)?.tasks.deployFailed(status.commit);
-        void notifier?.send(deployNotification(project, status));
+        void notifier?.notify(deployNotification(project, status));
       },
       run: hostDeploys?.run,
     });
@@ -464,8 +473,8 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     concurrency: llm.concurrency,
     store,
     transcripts: projects.transcripts,
-    onPause: (provider, reason) => void notifier?.send({ title: `ASO is waiting for ${provider}`, body: reason, url: "/", tag: `llm-paused-${provider}` }),
-    onResume: (provider) => void notifier?.send({ title: `${provider} works again`, body: `${provider}'s model calls work again; waiting tasks and plans carry on.`, url: "/", tag: `llm-paused-${provider}` }),
+    onPause: (provider, reason) => void notifier?.notify({ title: `ASO is waiting for ${provider}`, body: reason, url: "/", tag: `llm-paused-${provider}` }),
+    onResume: (provider) => void notifier?.notify({ title: `${provider} works again`, body: `${provider}'s model calls work again; waiting tasks and plans carry on.`, url: "/", tag: `llm-paused-${provider}` }),
   });
   await conversations.restore();
 
@@ -541,7 +550,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       );
       registry.send(msg.from, "REGISTRATION_ACK", { nodeId: msg.from });
       const back = workerWatch.registered(msg.from, p);
-      if (back) void notifier.send(back);
+      if (back) void notifier.notify(back);
       for (const project of projects.list()) project.tasks.nodeRegistered(msg.from, runningJobsOf(p));
       // After the jobs it still runs are handed back: an update waits for them.
       checkVersion(msg.from, p);
@@ -1067,8 +1076,21 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     const { endpoint } = req.data;
     if (endpoint !== undefined && !notifier!.has(endpoint)) return c.json({ error: "this device is not subscribed" }, 404);
     if (!notifier!.subscriptionCount) return c.json({ error: "no device has notifications turned on" }, 404);
-    const result = await notifier!.send(TEST_NOTIFICATION, endpoint);
+    const result = await notifier!.push(TEST_NOTIFICATION, endpoint);
     return c.json(result, result.sent ? 200 : 502);
+  });
+  // Everything the Hub has told you about, for the console, the CLI and other UIs.
+  app.get("/api/notices", (c) => {
+    const raw = c.req.query("limit");
+    const limit = raw === undefined ? DEFAULT_NOTICE_LIMIT : Number(raw);
+    if (!Number.isInteger(limit) || limit < 1 || limit > MAX_NOTICES) return c.json({ error: `limit must be a whole number from 1 to ${MAX_NOTICES}` }, 400);
+    return c.json(notices.list(limit));
+  });
+  app.post("/api/notices/read", async (c) => {
+    const req = await parsed(c, NoticesReadBodySchema, { optional: true });
+    if (!req.ok) return c.json({ error: req.error }, 400);
+    if (!notices.markRead(req.data.upTo)) return c.json({ error: "no such notice (it may be too old to be kept)" }, 404);
+    return c.json(notices.list());
   });
 
   const projectView = (p: Project) => {
@@ -1195,7 +1217,7 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     const next: HubUpdate = { ...req.data, current: running, at: new Date().toISOString() };
     const notification = hubUpdateNotification(hubUpdate, next);
     hubUpdate = next;
-    if (notification) void notifier.send(notification);
+    if (notification) void notifier.notify(notification);
     return c.json(hubUpdate);
   });
   app.post("/api/projects", async (c) => {
@@ -1428,8 +1450,17 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       const onOld = desksOnModel(desks, (d) => deskModels.modelOf(d), defaultAgentModel(), from);
       if (onOld.length) await deskModels.assign(onOld, spec);
     },
-    notify: (title, body) => void notifier.send({ title, body, url: "/", tag: "model-mix" }),
+    notify: (title, body) => void notifier.notify({ title, body, url: "/", tag: "model-mix" }),
     now: () => new Date(),
+  };
+  /** Tasks already told about as stuck, with the progress time they stalled at. */
+  const stuckTold = new Map<string, number>();
+  const dailySpendAlertUsd = opts.push?.dailySpendAlertUsd ?? spendLimitFromEnv(process.env.ASO_DAILY_SPEND_ALERT_USD);
+  /** What the sweep finds worth telling beyond state changes: stuck tasks, and the day's spending once. */
+  const watchNotices = (now = Date.now()) => {
+    const out = projects.list().flatMap((p) => stuckTasks(stuckTold, p.id, p.tasks.list(), now, opts.push?.stuckMs));
+    const spending = spendingNotice(conversations.spendToday(), dailySpendAlertUsd);
+    return spending && !notices.has(spending.tag) ? [...out, spending] : out;
   };
   /** The auto-tuning round running now, so rounds never overlap. */
   let tuningRound: Promise<void> | undefined;
@@ -1444,13 +1475,14 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     }
     for (const p of projects.list()) p.tasks.sweepDetached();
     conversations.sweep();
-    for (const n of workerWatch.check()) void notifier.send(n);
+    for (const n of workerWatch.check()) void notifier.notify(n);
+    for (const n of watchNotices()) void notifier.notify(n);
     tuningRound ??= Promise.all(CHALLENGER_ROLES.map((role) => tuneRole(role, tunerDeps)))
       .then(() => undefined)
       .catch((err: Error) => log.warn(`auto-tuning failed: ${err.message}`))
       .finally(() => (tuningRound = undefined));
     // Often enough for whichever of these delays is shortest (tests shorten them).
-  }, Math.min(15_000, nodeTimeoutMs, opts.reclaimGraceMs ?? Infinity, opts.push?.workerOfflineMs ?? Infinity));
+  }, Math.min(15_000, nodeTimeoutMs, opts.reclaimGraceMs ?? Infinity, opts.push?.workerOfflineMs ?? Infinity, opts.push?.stuckMs ?? Infinity));
   sweep.unref();
 
   /** The worker gateway's listener (its rules are all in gateway.ts). */
@@ -1493,6 +1525,8 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
       if (gateway) await new Promise<void>((resolve) => gateway.server.close(() => resolve()));
       // The nodes' disconnects above save the machines' last-seen times; don't return mid-write.
       await workerWatch.flush();
+      await notices.flush();
     },
   };
 }
+

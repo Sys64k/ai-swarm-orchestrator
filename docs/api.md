@@ -61,6 +61,8 @@ Answers can gain fields over time: clients should ignore fields they don't know.
 | `GET` | `/api/push` | Push notifications: the Hub's public key (`applicationServerKey`) and how many devices are subscribed |
 | `POST` | `/api/push/subscriptions`, `/check`, `/delete` | Add a device's `PushSubscription` (https endpoint, `p256dh`, `auth`), ask whether one is subscribed, remove one |
 | `POST` | `/api/push/test` | Send a test notification, to `{ "endpoint" }` or every device |
+| `GET` | `/api/notices` | What the Hub has told you about (the same as its push notifications, kept whether or not any device gets them), newest first, with the unread count. `?limit=` (default 50, at most 500) |
+| `POST` | `/api/notices/read` | Mark notices read: `{ "upTo": "<notice id>" }` marks that one and all before it; no body marks all. 404 for an unknown id |
 | `POST` | `/api/sign-in-codes`, `/api/sign-in-codes/redeem` | Create a one-time console sign-in code (10 minutes, single use) / use one up. The console redeems codes server-side |
 | `POST` | `/api/plans` | Start a plan: `{ "requirement": "..." }` → `201` with `planId` |
 | `GET` | `/api/plans`, `/api/plans/:id` | Plans with state, summary, proposed tasks, cost |

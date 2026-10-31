@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { hubPath } from "../lib/hub-routes.ts";
 import { describe, it } from "node:test";
 import {
+  noticeRows,
+  unreadNotices,
   acceptanceView,
   testsFirstLine,
   formatUsd,
@@ -942,5 +944,45 @@ describe("trials", () => {
     assert.equal(hubPath("POST", ["models", "challengers"]), "/api/models/challengers");
     assert.equal(trialLength(10, 10), "about 100 tasks");
     assert.equal(trialLength(30, 10), "about 34 tasks");
+  });
+});
+
+describe("notices", () => {
+  const now = Date.parse("2026-10-31T12:00:00Z");
+  const notice = (id: string, minutesAgo: number, url = `/tasks/${id}`) => ({
+    id,
+    at: new Date(now - minutesAgo * 60_000).toISOString(),
+    title: `shop: ${id}`,
+    body: "API\nnpm test failed",
+    url,
+    tag: `task-${id}`,
+  });
+
+  it("lists them newest first, marking the unread ones", () => {
+    const rows = noticeRows({ notices: [notice("b", 5), notice("a", 120)], unread: 1 }, now);
+    assert.deepEqual(rows, [
+      { id: "b", href: "/tasks/b", title: "shop: b", sub: "5 min ago · API · npm test failed", unread: true },
+      { id: "a", href: "/tasks/a", title: "shop: a", sub: "2 h ago · API · npm test failed", unread: false },
+    ]);
+  });
+
+  it("keeps links inside the console", () => {
+    const [far, protocolRelative] = noticeRows({ notices: [notice("x", 1, "https://evil.example"), notice("y", 1, "//evil.example")], unread: 0 }, now);
+    assert.equal(far.href, "/");
+    assert.equal(protocolRelative.href, "/");
+  });
+
+  it("counts the unread for the home page", () => {
+    assert.equal(unreadNotices(undefined), undefined);
+    assert.equal(unreadNotices({ notices: [], unread: 0 }), undefined);
+    assert.deepEqual(unreadNotices({ notices: [notice("a", 1)], unread: 1 }), { title: "1 unread notice", latest: "Latest: shop: a" });
+    assert.equal(unreadNotices({ notices: [notice("a", 1), notice("b", 2)], unread: 2 })?.title, "2 unread notices");
+  });
+
+  it("reaches the Hub's notices through the proxy", () => {
+    assert.equal(hubPath("GET", ["notices"]), "/api/notices");
+    assert.equal(hubPath("POST", ["notices", "read"]), "/api/notices/read");
+    assert.equal(hubPath("GET", ["notices", "read"]), undefined);
+    assert.equal(hubPath("POST", ["notices"]), undefined);
   });
 });
