@@ -84,12 +84,14 @@ Opus wrote the tests, then the local model wrote the code ([Tests first](using-a
 | Backup export/import (level 3) | qwen3-coder | ❌ 4 tries | ✅ 1st try, 12 min | $0.49 |
 | Search documents (level 3) | gpt-oss | ❌ gave up | ✅ 2nd try, 9 min | $0.49 |
 | Rename a document (level 4, UI) | gpt-oss | ❌ gave up | ❌ 3 rework rounds | $0.71 |
+| Backup export/import (level 3) | glm-4.7-flash | ❌ 4 tries | ✅ 1st try, 14 min | $0.58 average |
+| Text statistics (level 5) | glm-4.7-flash | ❌ 4 tries | ✅ 2 rework rounds, 17 min | $0.58 average |
 
 Almost all of that cost is Opus writing the tests (about $0.48); the local model is free. For
 scale, the swarm's Gemini tasks cost $1.88 each all in, but those are other tasks, so this isn't
 yet a fair comparison.
 
-Tests first rescued both logic tasks. The UI task across three files stayed beyond gpt-oss,
+Tests first rescued all four logic tasks. The UI task across three files stayed beyond gpt-oss,
 which is also why the Architect doesn't mark UI work tests first.
 
 ### glm-4.7-flash
@@ -121,6 +123,35 @@ $0.12 in all, for acceptance checks.
 Same pattern as the others: fine at wiring and simple functions, lost on logic with edge cases,
 here including UI state. It does less than qwen3-coder at the top (qwen3-coder passed level 5),
 so it doesn't take qwen3-coder's desk.
+
+With tests first (`--tests-first`, project `ladder-glm-4-7-flash-tf`, run 2026-10-30 and 31):
+
+| Level | Task | Result | Minutes |
+|---|---|---|---|
+| 1 | Word count helper | ✅ 1st try | 4 |
+| 2 | Tidy document titles on save | ✅ 1 rework round | 7 |
+| 3 | Backup export and import | ✅ 1st try | 14 |
+| 4 | Clear all recent documents | ✅ 2 rework rounds | 132 |
+| 5 | Text statistics before reading | ✅ 2 rework rounds | 17 |
+
+All five passed, against three without tests first. $2.89 for the five tasks ($0.58 per finished
+task), nearly all of it Opus writing the tests, plus $0.12 for acceptance checks.
+
+- **Levels 4 and 5 were each cut off once by us**, not the model: avalon was shut down mid-run,
+  and level 4 was cancelled once to let a Hub update in. Minutes count the run that finished.
+- **Level 3**, its worst level before, passed first time: with the tests already written it had
+  no reason to change `lib/settings.ts`.
+- **Level 4** ran out of its 80 turns once, then failed QA because it hadn't added the
+  `Recent documents` region the tests look for. It fixed that on the next round.
+- **Level 5** passed QA every time, and the acceptance check sent it back twice on the criterion
+  it never met before. The first time, an in-flight request could still bring back numbers for
+  short text. The second time, the 20-character limit was measured on normalized text instead
+  of pasted text. It fixed both: the tests didn't catch either, and the acceptance check did.
+- Levels 4 and 5 merged with one criterion left unclear (not unmet), and with 3 and 1 quality
+  notes. Worth reading before giving it real work.
+
+Tests first takes glm-4.7-flash from three levels to five, the same as qwen3-coder without tests
+first, but it took more rework rounds to get there.
 
 ### Many failures were ours
 
@@ -189,8 +220,8 @@ above compare only roughly. From here on, models compare on the same tasks.
   task. Track records can show it once there are enough of each.
 - **Is qwen3-coder worth its desk?** Its everyday record against Gemini's (finished, first
   try, cost all in) will show whether its share of the work should grow or end.
-- **glm-4.7-flash with tests first** (`--tests-first`) would show whether tests first rescues
-  its levels 3 and 5, as it did qwen3-coder's level 3.
+- **qwen3-coder with all five levels tests first** would show whether glm-4.7-flash with tests
+  first is a match for it, or still behind.
 - **devstral** might drive the agent with a firmer reminder to call a tool; not tried.
 - **Ollama Cloud's larger models** (added as a provider in [#132](https://github.com/Sys64k/ai-swarm-orchestrator/pull/132))
   would show how much model size moves the line between pass and fail.
