@@ -1015,6 +1015,13 @@ It reads why a task failed and proposes one thing to do, for a person to accept 
   failure only: accepting a retry runs `retry` (with the correction through `correctTask`),
   accepting dismiss runs `dismiss`, and the others are only marked.
 
+- **Track record.** A reading of an earlier failure moves to `pastDiagnoses` (`withDiagnosis`,
+  the last 10) instead of being overwritten. `productOwnerRecord` (`product-owner-record.ts`,
+  pure, `GET /api/product-owner`) counts over them: readings and costs, decisions (accepted,
+  refused, still waiting, or never answered because the task moved on), causes, proposals and
+  what was done with each, quotes not found, and, for accepted retries, `retryOutcome`: merged
+  on that retry, failed or cancelled again (or retried once more), or still going.
+
 ### Pushing to origin
 
 `GitSync` (`git/sync.ts`) pushes `main` to the target repository's `origin` after each merge.

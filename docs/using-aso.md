@@ -206,6 +206,11 @@ the cause was, quoting its evidence, and proposes one thing to do:
   One it didn't find is marked *not found there*: don't trust that part.
 - **From the CLI:** `aso task-diagnosis <taskId>` prints it; `--accept`, `--refuse`, and
   `--again` to ask again (for a failure from before it watched, or after it couldn't).
+- **Its track record** shows how far to trust it: how often you accept its proposals, whether
+  the retries you accepted merged or failed again, what it put failures down to, and how many of
+  its quotes the Hub didn't find. It's on the console's *Track records* page (narrowed by project
+  and period), from `aso product-owner` (`-P`, `--since`), and `GET /api/product-owner`. It
+  counts each task's last 10 diagnoses.
 - **Cost.** One model call per failure, counted on the task, about $0.10–0.50 with Opus. It
   stops for the day at $5 (`ASO_PRODUCT_OWNER_DAILY_USD`; `0` turns it off). Failures from
   before the Hub started, dismissed tasks and superseded ones aren't read by themselves.

@@ -46,6 +46,7 @@ import {
   PushSubscriptionSchema,
   PushTestResultSchema,
   NoticesSchema,
+  ProductOwnerRecordSchema,
   NoticesReadBodySchema,
   PushTestSchema,
   RedeemSignInCodeBodySchema,
@@ -122,6 +123,7 @@ export const ANSWER_SCHEMAS = {
   PushRemoved: PushRemovedSchema,
   PushTestResult: PushTestResultSchema,
   Notices: NoticesSchema,
+  ProductOwnerRecord: ProductOwnerRecordSchema,
   SignInCode: SignInCodeSchema,
   JoinCode: JoinCodeSchema,
   WorkerKeyJoined: WorkerKeyJoinedSchema,
@@ -242,6 +244,11 @@ const PLANS: ApiOperation[] = [
 
 const TASKS: ApiOperation[] = [
   { method: "get", path: "/api/tasks", tag: "Tasks", summary: "All tasks", query: projectQuery, responses: { 200: ok(["Task"]) } },
+  {
+    method: "get", path: "/api/product-owner", tag: "Tasks", summary: "The product owner's track record: what it read, what people did with its proposals, whether its retries worked",
+    query: { project: "Only this project's tasks", since: "Only diagnoses made since then (a date or time)" },
+    responses: { 200: ok("ProductOwnerRecord"), 400: err("Invalid query") },
+  },
   {
     method: "get", path: "/api/track-records", tag: "Tasks", summary: "How models, machines, desks, roles, projects or task levels have done with their jobs",
     query: {

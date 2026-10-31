@@ -97,6 +97,9 @@ prints them and reads your answers (an empty answer rejects the plan).
 - `aso plan-approve <planId>` approves a proposed plan.
 - `aso plan-reply <planId> <message...>` answers questions or asks for changes.
 - `aso plan-reject <planId>` rejects a plan.
+- `aso product-owner` prints the product owner's track record: what it read, what you did with
+  its proposals, whether the retries you accepted merged, and how many quotes weren't found
+  (`-P <project>`, `--since <date>`).
 - `aso task-diagnosis <taskId>` prints the product owner's reading of why a task failed: the
   cause, its evidence (`!` marks a quote the Hub didn't find in its source) and its proposal.
   `--accept` does what it proposes, `--refuse` refuses it, `--again` asks it again.

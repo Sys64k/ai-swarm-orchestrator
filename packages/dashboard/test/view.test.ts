@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { hubPath } from "../lib/hub-routes.ts";
 import { describe, it } from "node:test";
 import {
+  productOwnerLines,
+  productOwnerPath,
   canDiagnose,
   diagnosisView,
   noticeRows,
@@ -1043,5 +1045,44 @@ describe("the product owner's card", () => {
       assert.equal(hubPath("POST", ["tasks", "t-1", ...path.split("/")]), `/api/tasks/t-1/${path}`);
       assert.equal(hubPath("GET", ["tasks", "t-1", ...path.split("/")]), undefined);
     }
+  });
+});
+
+describe("the product owner's track record", () => {
+  const zero = { proposed: 0, accepted: 0, refused: 0 };
+  const record = {
+    diagnosed: 5,
+    couldNot: 1,
+    costUsd: 1.04,
+    decisions: { accepted: 3, refused: 1, waiting: 1, unanswered: 0 },
+    causes: { task: 3, model: 2, platform: 0, unclear: 0 },
+    actions: { retry_with_correction: { proposed: 3, accepted: 3, refused: 0 }, retry: zero, dismiss: { proposed: 2, accepted: 0, refused: 1 }, platform_issue: zero, none: zero },
+    retries: { accepted: 3, merged: 2, failedAgain: 1, underway: 0 },
+    quotes: { total: 12, notFound: 1 },
+  };
+
+  it("reads as one line per finding", () => {
+    assert.deepEqual(productOwnerLines(record), [
+      { label: "Read", text: "5 failures, couldn't read 1, $1.04" },
+      { label: "Answered", text: "75% accepted (3 of 4), 1 waiting for you" },
+      { label: "Its retries", text: "2 of 3 merged, 1 failed again" },
+      { label: "Causes", text: "the task was wrong or unclear 3, the model couldn't do it 2" },
+      { label: "Proposals", text: "retry it with the task corrected 3 (3 accepted, 0 refused); dismiss it 2 (0 accepted, 1 refused)" },
+      { label: "Quotes", text: "1 of 12 not found in their source" },
+    ]);
+  });
+
+  it("shows nothing before it has read anything, and says when nothing was answered", () => {
+    assert.deepEqual(productOwnerLines({ ...record, diagnosed: 0, couldNot: 0 }), []);
+    assert.deepEqual(productOwnerLines({ ...record, diagnosed: 0 }), [{ label: "Read", text: "0 failures, couldn't read 1, $1.04" }], "only what it couldn't read");
+    const fresh = productOwnerLines({ ...record, decisions: { accepted: 0, refused: 0, waiting: 2, unanswered: 0 }, retries: { accepted: 0, merged: 0, failedAgain: 0, underway: 0 } });
+    assert.equal(fresh[1].text, "none yet, 2 waiting for you");
+    assert.equal(fresh[2].text, "none accepted yet");
+  });
+
+  it("asks the Hub with the page's filters", () => {
+    assert.equal(productOwnerPath(), "product-owner");
+    assert.equal(productOwnerPath({ project: "shop", since: "2026-10-01" }), "product-owner?project=shop&since=2026-10-01");
+    assert.equal(hubPath("GET", ["product-owner"]), "/api/product-owner");
   });
 });

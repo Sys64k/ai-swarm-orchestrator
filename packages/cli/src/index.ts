@@ -30,6 +30,7 @@ import { approvePlanCommand, planCommand, rejectPlanCommand, replyPlanCommand } 
 import { taskDismissCommand } from "./commands/task-dismiss.js";
 import { noticesCommand } from "./commands/notices.js";
 import { taskDiagnosisCommand } from "./commands/task-diagnosis.js";
+import { productOwnerCommand } from "./commands/product-owner.js";
 import { taskRetryCommand } from "./commands/task-retry.js";
 import { startHubCommand } from "./commands/start-hub.js";
 import {
@@ -344,6 +345,14 @@ program
   .option("-P, --project <name>", "with --failed: only this project's")
   .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
   .action(taskDismissCommand);
+
+program
+  .command("product-owner")
+  .description("The product owner's track record: what it read of failed tasks, what you did with its proposals, whether its retries worked")
+  .option("-P, --project <name>", "only this project's tasks")
+  .option("--since <date>", "only diagnoses since then, e.g. 2026-10-01")
+  .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
+  .action(productOwnerCommand);
 
 program
   .command("task-diagnosis")

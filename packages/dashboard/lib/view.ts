@@ -5,7 +5,7 @@ import type {
   ModelSuggestion,
   ModelSuggestions,
   SuggestionRole,
-  Acceptance, Llm, Models, Price, Provider, ProviderPreset, CheckState, QualityNoteKind, DeployStatus, DiffFile, Diagnosis, DiagnosisAction, EvidenceSource, HubNode, HubUpdate, Notices, WorkerKey, Plan, PlannedTask, Project, ReviewChecks, Task, TaskDiff, TaskState, TrackRecordKey, TrackRecordRow, TranscriptEntry } from "./types.ts";
+  Acceptance, Llm, Models, Price, Provider, ProviderPreset, CheckState, QualityNoteKind, DeployStatus, DiffFile, Diagnosis, DiagnosisAction, EvidenceSource, HubNode, HubUpdate, Notices, ProductOwnerRecord, WorkerKey, Plan, PlannedTask, Project, ReviewChecks, Task, TaskDiff, TaskState, TrackRecordKey, TrackRecordRow, TranscriptEntry } from "./types.ts";
 
 import { PROVIDER_ID } from "./hub-routes.ts";
 
@@ -1465,4 +1465,36 @@ export function canDiagnose(task: DiagnosableTask): boolean {
   const d = task.diagnosis;
   if (task.state !== "failed") return false;
   return !d || d.state === "failed" || (d.state === "ready" && !isCurrentDiagnosis(task, d));
+}
+
+/** The product owner's track record as the track records page lists it: one line per finding; empty when it has tried nothing. */
+export function productOwnerLines(r: ProductOwnerRecord): Array<{ label: string; text: string }> {
+  const read = `${r.diagnosed} failure${r.diagnosed === 1 ? "" : "s"}${r.couldNot ? `, couldn't read ${r.couldNot}` : ""}, ${formatUsd(r.costUsd)}`;
+  if (r.diagnosed === 0) return r.couldNot ? [{ label: "Read", text: read }] : [];
+  const d = r.decisions;
+  const t = r.retries;
+  const answered = d.accepted + d.refused;
+  const waiting = d.waiting ? `, ${d.waiting} waiting for you` : "";
+  const unanswered = d.unanswered ? `, ${d.unanswered} never answered` : "";
+  const accepted = answered ? `${Math.round((100 * d.accepted) / answered)}% accepted (${d.accepted} of ${answered})` : "none yet";
+  const causes = (Object.keys(r.causes) as Array<keyof typeof r.causes>).filter((c) => r.causes[c] > 0).map((c) => `${CAUSE_LABEL[c].toLowerCase()} ${r.causes[c]}`);
+  const proposals = (Object.keys(r.actions) as DiagnosisAction[])
+    .filter((a) => r.actions[a].proposed > 0)
+    .map((a) => `${PROPOSAL_LABEL[a].toLowerCase()} ${r.actions[a].proposed} (${r.actions[a].accepted} accepted, ${r.actions[a].refused} refused)`);
+  return [
+    { label: "Read", text: read },
+    { label: "Answered", text: `${accepted}${waiting}${unanswered}` },
+    { label: "Its retries", text: t.accepted ? `${t.merged} of ${t.accepted} merged, ${t.failedAgain} failed again${t.underway ? `, ${t.underway} still going` : ""}` : "none accepted yet" },
+    { label: "Causes", text: causes.join(", ") },
+    { label: "Proposals", text: proposals.join("; ") },
+    { label: "Quotes", text: r.quotes.total ? `${r.quotes.notFound} of ${r.quotes.total} not found in their source` : "none" },
+  ];
+}
+
+/** The Hub path for the product owner's track record, narrowed like the track records page. */
+export function productOwnerPath(filters: Pick<TrackRecordFilters, "project" | "since"> = {}): string {
+  const q = new URLSearchParams();
+  for (const k of ["project", "since"] as const) if (filters[k]) q.set(k, filters[k]);
+  const query = q.toString();
+  return `product-owner${query ? `?${query}` : ""}`;
 }

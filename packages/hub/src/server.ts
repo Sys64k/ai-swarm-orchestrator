@@ -66,6 +66,7 @@ import {
   SyncBodySchema,
   type AgentMessage,
   TrackRecordQuerySchema,
+  ProductOwnerRecordQuerySchema,
   ModelSuggestionsQuerySchema,
   type PublicStats,
   type PublicStatsShare,
@@ -99,6 +100,7 @@ import { Notifier, TEST_NOTIFICATION } from "./push/notifier.js";
 import { DEFAULT_NOTICE_LIMIT, MAX_NOTICES, NoticeLog } from "./push/notices.js";
 import { DEFAULT_PRODUCT_OWNER_DAILY_USD, PRODUCT_OWNER_OFF, ProductOwner } from "./llm/product-owner.js";
 import { Diagnoser } from "./diagnoser.js";
+import { productOwnerRecord } from "./product-owner-record.js";
 import { spendingNotice, spendLimitFromEnv, usdFromEnv } from "./push/spending.js";
 import { stuckTasks } from "./push/stuck.js";
 import { WorkerWatch } from "./push/workers.js";
@@ -1022,6 +1024,12 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     }
     c.header("Cache-Control", `public, max-age=${PUBLIC_STATS_CACHE_SEC}`);
     return c.json(shared.stats);
+  });
+  /** How the product owner has done: what it read, what people did with its proposals, and whether its retries worked. */
+  app.get("/api/product-owner", (c) => {
+    const query = ProductOwnerRecordQuerySchema.safeParse(c.req.query());
+    if (!query.success) return c.json({ error: query.error.issues.map((i) => `${i.path.join(".") || "query"}: ${i.message}`).join("; ") }, 400);
+    return c.json(productOwnerRecord(tasks.list(), query.data));
   });
   app.get("/api/track-records", (c) => {
     const query = TrackRecordQuerySchema.safeParse(c.req.query());

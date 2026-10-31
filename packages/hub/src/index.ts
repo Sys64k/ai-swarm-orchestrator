@@ -1,6 +1,6 @@
 export { startHub, type HubOptions, type HubHandle } from "./server.js";
 export { isOutdated, nodeActions, NodeError, NodeRegistry, type NodeAction, type NodeActions, type NodeEntry, type Registration, type Heartbeat } from "./registry.js";
-export { TaskManager, TaskError, DEFAULT_QA, type QaOptions, type ReviewGate, type ReviewInfo, type ReviewOutcome, type TaskRecord, type TaskState } from "./tasks.js";
+export { TaskManager, TaskError, DEFAULT_QA, withDiagnosis, type QaOptions, type ReviewGate, type ReviewInfo, type ReviewOutcome, type TaskRecord, type TaskState } from "./tasks.js";
 export {
   HubRepository,
   HubRepoError,
@@ -50,6 +50,7 @@ export { lastProgress, stuckTasks, STUCK_ALERT_MS } from "./push/stuck.js";
 export { DEFAULT_DAILY_SPEND_ALERT_USD, spendingNotice, spendLimitFromEnv, usdFromEnv } from "./push/spending.js";
 export { diagnosisNotification } from "./push/changes.js";
 export { DEFAULT_PRODUCT_OWNER_DAILY_USD, diagnosisPrompt, failedDiagnosis, failureSources, isCurrentDiagnosis, PRODUCT_OWNER_OFF, ProductOwner, readDiagnosis, transcriptLine, transcriptTail, type DiagnosisReading, type FailedTask, type Sources } from "./llm/product-owner.js";
+export { productOwnerRecord, retryOutcome } from "./product-owner-record.js";
 export { Diagnoser, diagnosisBlocker, DIAGNOSIS_TRANSCRIPT_ENTRIES, newFailures } from "./diagnoser.js";
 export { DEFAULT_NOTICE_LIMIT, MAX_NOTICES, NoticeLog } from "./push/notices.js";
 export { encryptPayload, generateVapidKeys, sendPush, vapidAuthorization, MAX_PAYLOAD_BYTES, type PushResult, type VapidKeys } from "./push/web-push.js";

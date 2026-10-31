@@ -228,6 +228,10 @@ describe("the product owner on the Hub", () => {
       assert.deepEqual(accepted.spec.acceptanceCriteria, ["Projects stay sorted by id", "Tests cover it"]);
       assert.equal(accepted.diagnosis.decision.kind, "accepted");
       assert.equal((await call(hub.port, "/api/tasks/blog/diagnosis/refuse", {})).status, 409, "already answered");
+      const record = (await call(hub.port, "/api/product-owner")).body;
+      assert.deepEqual([record.diagnosed, record.decisions.accepted, record.retries.accepted], [1, 1, 1], "its track record");
+      assert.equal((await call(hub.port, "/api/product-owner?since=soon")).status, 400);
+      assert.equal((await call(hub.port, "/api/product-owner?project=elsewhere")).body.diagnosed, 0);
       assert.equal(model.requests.length, 1, "one call per failure");
     } finally {
       await close();
@@ -249,6 +253,7 @@ describe("the product owner on the Hub", () => {
       const again = await diagnosisOf(hub.port, "blog", "ready");
       assert.equal(again.diagnosis.decision, undefined, "a fresh proposal");
       assert.equal(again.diagnosis.cause, "task");
+      assert.equal(again.pastDiagnoses, undefined, "a second reading of the same failure replaces the first");
 
       await call(hub.port, "/api/tasks", { taskId: "live", project: "shop", role: "backend", title: "t", description: "d" });
       assert.equal((await call(hub.port, "/api/tasks/live/diagnose", {})).status, 409, "only failed tasks");
