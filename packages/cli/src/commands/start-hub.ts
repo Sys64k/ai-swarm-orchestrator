@@ -8,7 +8,7 @@ import { startDeployRunner, type DeployRunner } from "../deploy-runner.js";
 import { hubProver, startDiscoveryResponder, type DiscoveryResponder } from "../discovery-responder.js";
 import { HUB_SERVICE, runsAsSystemdService } from "../service.js";
 import { sanitizeUrl } from "@aso/hub";
-import { HubUpdater, updatePaths } from "../self-update.js";
+import { HubUpdater, updateMaxWaitMs, updatePaths } from "../self-update.js";
 import { armUpdateWatchdog, restartHubService } from "../systemd.js";
 import { DockerCleanup, projectIds } from "../docker-cleanup.js";
 
@@ -404,6 +404,7 @@ function hubUpdater(opts: StartHubOptions, token: string): HubUpdater | undefine
     current: layout.version(),
     armWatchdog: armUpdateWatchdog,
     restart: restartHubService,
+    maxWaitMs: updateMaxWaitMs(process.env.ASO_UPDATE_MAX_WAIT_MIN),
   });
 }
 

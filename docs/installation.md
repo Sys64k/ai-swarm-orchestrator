@@ -315,8 +315,13 @@ repository's `main` itself:
 2. **It installs the package beside the running version** (`~/.local/share/aso/hub/versions/`).
    The service runs whichever version `~/.local/share/aso/hub/current` points at.
 3. **It waits until a restart interrupts nothing:** no task assigned, at work, in QA or being
-   merged, no deploy running and no plan being made. If `main` moved meanwhile, it starts over
-   with the newer commit.
+   merged, no model call under way, no deploy running, no plan being made and no failure being
+   read by the product owner. A swarm that is never idle still updates: after 30 minutes
+   (`ASO_UPDATE_MAX_WAIT_MIN`; `0` means at once) it restarts at the first quiet moment between
+   model turns. Agents at work then carry on after the restart, as they do after any (their jobs
+   are held for 5 minutes and their conversations kept); only a Hub-side step (an acceptance check,
+   a merge), a plan being made, a deploy or a failure being read still holds it back. If `main`
+   moved meanwhile, it starts over with the newer commit.
 4. **The running version arms a watchdog** (a systemd timer outside the Hub service), points
    `current` at the new version, and restarts the service.
 5. **The new version confirms itself** once it has answered as itself for a minute. If it

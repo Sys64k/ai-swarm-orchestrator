@@ -13,6 +13,11 @@ const log = createLogger("update");
 export const UPDATE_POLL_MS = 5 * 60_000;
 /** How often it checks whether the swarm is idle, while an update waits for that. */
 export const IDLE_POLL_MS = 30_000;
+/**
+ * How long an update waits for the swarm to be idle before it takes a quiet moment between model
+ * turns instead: agents carry on across a Hub restart, so a swarm that is never idle still updates.
+ */
+export const UPDATE_MAX_WAIT_MS = 30 * 60_000;
 /** How long a new version has to confirm itself (the Docker image is built in that time too) before it is rolled back. */
 export const CONFIRM_DEADLINE_SEC = 15 * 60;
 /** Where the Hub's versions and the updater's files live, written into the service unit so every process agrees. */
@@ -68,13 +73,58 @@ export function onlyDocumentation(changedFiles: readonly string[]): boolean {
   return changedFiles.length > 0 && changedFiles.every(isDocumentation);
 }
 
-/** Whether a restart would interrupt nothing: no task at work, no deploy running, no plan being made. */
-export function swarmIdle(
-  tasks: ReadonlyArray<{ state: TaskState }>,
-  projects: ReadonlyArray<{ deploy?: { last?: { state: string } } }>,
-  plans: ReadonlyArray<{ state: string }>,
-): boolean {
-  return !tasks.some((t) => TASK_AT_WORK[t.state]) && !projects.some((p) => p.deploy?.last?.state === "running") && !plans.some((p) => p.state === "planning");
+/** `ASO_UPDATE_MAX_WAIT_MIN`: minutes an update waits for an idle swarm before taking a quiet moment between model turns; unset or invalid, the default. */
+export function updateMaxWaitMs(raw: string | undefined): number | undefined {
+  const min = raw === undefined || raw.trim() === "" ? NaN : Number(raw);
+  return Number.isFinite(min) && min >= 0 ? min * 60_000 : undefined;
+}
+
+/** What the updater reads of the Hub to decide when to restart it. */
+export interface SwarmState {
+  tasks: ReadonlyArray<{ state: TaskState; diagnosis?: { state: string } }>;
+  projects: ReadonlyArray<{ deploy?: { last?: { state: string } } }>;
+  plans: ReadonlyArray<{ state: string }>;
+  /** Model calls the Hub is making for agents right now. */
+  modelCalls: number;
+}
+
+/** Task states where the Hub itself is doing the work (an acceptance check, a merge): a restart would run it again. Both are in TASK_AT_WORK too. */
+const HUB_STEPS: ReadonlySet<TaskState> = new Set(["verifying", "merging"]);
+
+/**
+ * Whether a restart would lose nothing, even with agents at work: no model call in flight (an
+ * agent between turns carries on after the restart), no Hub-side step, no plan being made, no
+ * product owner reading a failure, no deploy running.
+ */
+export function quietMoment(s: SwarmState): boolean {
+  return (
+    s.modelCalls === 0 &&
+    !s.tasks.some((t) => HUB_STEPS.has(t.state) || t.diagnosis?.state === "diagnosing") &&
+    !s.projects.some((p) => p.deploy?.last?.state === "running") &&
+    !s.plans.some((p) => p.state === "planning")
+  );
+}
+
+/** Whether a restart would interrupt nothing at all: a quiet moment with no task at work either. */
+export function swarmIdle(s: SwarmState): boolean {
+  return quietMoment(s) && !s.tasks.some((t) => TASK_AT_WORK[t.state]);
+}
+
+/** The swarm as the Hub's API reports it. Model calls it doesn't report count as one under way: unknown is busy. */
+export function swarmState(tasks: unknown, projects: unknown, plans: unknown, llm: unknown): SwarmState {
+  const running = (llm as { queue?: { running?: unknown } } | null)?.queue?.running;
+  return {
+    tasks: tasks as SwarmState["tasks"],
+    projects: projects as SwarmState["projects"],
+    plans: plans as SwarmState["plans"],
+    modelCalls: typeof running === "number" ? running : 1,
+  };
+}
+
+/** Why to restart now: the swarm is idle, or, once it has waited `maxWaitMs` for that, it is at a quiet moment; undefined: wait. */
+export function restartReason(s: SwarmState, waitedMs: number, maxWaitMs = UPDATE_MAX_WAIT_MS): "idle" | "quiet" | undefined {
+  if (swarmIdle(s)) return "idle";
+  return waitedMs >= maxWaitMs && quietMoment(s) ? "quiet" : undefined;
 }
 
 /**
@@ -179,6 +229,8 @@ export interface UpdaterOptions {
   restart: () => void;
   pollMs?: number;
   idlePollMs?: number;
+  /** How long to wait for an idle swarm before restarting at a quiet moment instead (default `UPDATE_MAX_WAIT_MS`). */
+  maxWaitMs?: number;
   stableMs?: number;
   restartGraceMs?: number;
 }
@@ -186,7 +238,8 @@ export interface UpdaterOptions {
 /**
  * Keeps a Hub installed with `--update-from` on its repository's main. Every `pollMs` it looks for
  * a newer commit, builds and tests it in its own clone, installs it beside the running version,
- * waits until a restart interrupts nothing, arms a watchdog in the running (known good) version,
+ * waits until a restart interrupts nothing (or, after `maxWaitMs`, only agents between model
+ * turns, who carry on), arms a watchdog in the running (known good) version,
  * switches `current` and restarts. The new version confirms once it has answered as itself for
  * `stableMs`; if it never does, the watchdog switches back. Each step is reported to the Hub.
  */
@@ -291,8 +344,11 @@ export class HubUpdater {
     }
 
     await this.report({ state: "waiting", target: sha });
-    while (!this.stopped && !(await this.idle())) await sleep(this.opts.idlePollMs ?? IDLE_POLL_MS);
+    const waitFrom = Date.now();
+    let reason: "idle" | "quiet" | undefined;
+    while (!this.stopped && !(reason = await this.ready(Date.now() - waitFrom))) await sleep(this.opts.idlePollMs ?? IDLE_POLL_MS);
     if (this.stopped) return;
+    if (reason === "quiet") log.info(`the swarm has been busy for ${Math.round((Date.now() - waitFrom) / 60_000)} min: restarting between model turns (agents carry on)`);
     if ((await this.remoteMain()) !== sha) return; // main moved while waiting: the next pass takes the newer one
 
     const id = randomUUID();
@@ -384,12 +440,13 @@ export class HubUpdater {
     return built.version;
   }
 
-  private async idle(): Promise<boolean> {
+  /** Why to restart now, or undefined to wait (see `restartReason`). */
+  private async ready(waitedMs: number): Promise<"idle" | "quiet" | undefined> {
     try {
-      const [tasks, projects, plans] = await Promise.all([this.get("/api/tasks"), this.get("/api/projects"), this.get("/api/plans")]);
-      return swarmIdle(tasks as Array<{ state: TaskState }>, projects as Array<{ deploy?: { last?: { state: string } } }>, plans as Array<{ state: string }>);
+      const [tasks, projects, plans, llm] = await Promise.all([this.get("/api/tasks"), this.get("/api/projects"), this.get("/api/plans"), this.get("/api/llm")]);
+      return restartReason(swarmState(tasks, projects, plans, llm), waitedMs, this.opts.maxWaitMs);
     } catch {
-      return false; // the Hub is down or busy: wait
+      return undefined; // the Hub is down or busy: wait
     }
   }
 

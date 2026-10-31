@@ -95,7 +95,8 @@ export async function withHub(
     git(repoDir, "push", "--quiet", "origin", "main");
   }
   // Port 0: test files run in parallel processes, so let the OS pick free ports.
-  const hub = await startHub({ targetDir: repoDir, port: 0, host: "127.0.0.1", token: TOKEN, ...hubOpts });
+  // The product owner would spend a test's scripted model calls on its failures: on only when a test asks.
+  const hub = await startHub({ targetDir: repoDir, port: 0, host: "127.0.0.1", token: TOKEN, productOwner: false, ...hubOpts });
   const port = hub.port;
   try {
     await fn({ hub, port, repoDir, originDir, gitUrl: `http://127.0.0.1:${port}/git/project.git` });

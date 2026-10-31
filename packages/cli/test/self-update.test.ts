@@ -7,7 +7,7 @@ import { describe, it } from "node:test";
 import { startHub } from "@aso/hub";
 import type { Exec } from "../dist/exec.js";
 import { HubVersions } from "../dist/hub-versions.js";
-import { buildEnv, HubUpdater, isBuildOf, isDocumentation, onlyDocumentation, rollbackUnconfirmed, swarmIdle, type UpdatePaths } from "../dist/self-update.js";
+import { buildEnv, HubUpdater, isBuildOf, isDocumentation, onlyDocumentation, quietMoment, restartReason, rollbackUnconfirmed, swarmState, swarmIdle, updateMaxWaitMs, UPDATE_MAX_WAIT_MS, type UpdatePaths } from "../dist/self-update.js";
 
 delete process.env.ANTHROPIC_API_KEY; // tests must never reach the real API
 
@@ -466,11 +466,39 @@ describe("update helpers", () => {
     assert.equal(isBuildOf("0.1.0", "840bcd7a1b2c3d4e5f60718293a4b5c6d7e8f901"), false);
   });
 
-  it("calls the swarm idle only with no task at work, no deploy running and no plan being made", () => {
-    assert.equal(swarmIdle([{ state: "merged" }, { state: "pending" }, { state: "awaiting_review" }], [{ deploy: { last: { state: "succeeded" } } }, {}], [{ state: "proposed" }]), true);
-    for (const state of ["assigned", "in_progress", "verifying", "awaiting_qa", "testing", "merging"] as const) assert.equal(swarmIdle([{ state }], [], []), false, state);
-    assert.equal(swarmIdle([], [{ deploy: { last: { state: "running" } } }], []), false);
-    assert.equal(swarmIdle([], [], [{ state: "planning" }]), false);
+  it("calls the swarm idle only with no task at work, no model call, no deploy running, no plan being made and no failure being read", () => {
+    const swarm = (extra: Partial<Parameters<typeof swarmIdle>[0]>) => ({ tasks: [], projects: [], plans: [], modelCalls: 0, ...extra });
+    assert.equal(swarmIdle(swarm({ tasks: [{ state: "merged" }, { state: "pending" }, { state: "awaiting_review" }], projects: [{ deploy: { last: { state: "succeeded" } } }, {}], plans: [{ state: "proposed" }] })), true);
+    for (const state of ["assigned", "in_progress", "verifying", "awaiting_qa", "testing", "merging"] as const) assert.equal(swarmIdle(swarm({ tasks: [{ state }] })), false, state);
+    assert.equal(swarmIdle(swarm({ projects: [{ deploy: { last: { state: "running" } } }] })), false);
+    assert.equal(swarmIdle(swarm({ plans: [{ state: "planning" }] })), false);
+    assert.equal(swarmIdle(swarm({ tasks: [{ state: "failed", diagnosis: { state: "diagnosing" } }] })), false, "the product owner reading a failure");
+    assert.equal(swarmIdle(swarm({ modelCalls: 1 })), false);
+  });
+
+  it("restarts a swarm that is never idle at a quiet moment between model turns, once it has waited long enough", () => {
+    const swarm = (extra: Partial<Parameters<typeof swarmIdle>[0]>) => ({ tasks: [], projects: [], plans: [], modelCalls: 0, ...extra });
+    const working = swarm({ tasks: [{ state: "in_progress" }, { state: "testing" }, { state: "assigned" }] });
+    assert.equal(quietMoment(working), true, "agents between turns and QA runs carry on after a restart");
+    assert.equal(restartReason(working, UPDATE_MAX_WAIT_MS - 1), undefined, "still waiting for idle");
+    assert.equal(restartReason(working, UPDATE_MAX_WAIT_MS), "quiet");
+    assert.equal(restartReason(working, 5, 5), "quiet", "a custom wait");
+    for (const busy of [
+      swarm({ ...working, modelCalls: 2 }),
+      swarm({ tasks: [{ state: "verifying" }] }),
+      swarm({ tasks: [{ state: "merging" }] }),
+      swarm({ plans: [{ state: "planning" }] }),
+      swarm({ projects: [{ deploy: { last: { state: "running" } } }] }),
+      swarm({ tasks: [{ state: "failed", diagnosis: { state: "diagnosing" } }] }),
+    ]) assert.equal(restartReason(busy, 10 * UPDATE_MAX_WAIT_MS), undefined, JSON.stringify(busy));
+    assert.equal(restartReason(swarm({}), 0), "idle", "an idle swarm at once");
+    assert.equal(swarmState([], [], [], { queue: { running: 0, waiting: 0, limit: 4 } }).modelCalls, 0);
+    assert.equal(swarmState([], [], [], { queue: { running: 3 } }).modelCalls, 3);
+    assert.equal(swarmState([], [], [], {}).modelCalls, 1, "a Hub that doesn't say counts as busy");
+    assert.equal(restartReason(swarmState([], [], [], {}), 10 * UPDATE_MAX_WAIT_MS), undefined);
+    assert.equal(updateMaxWaitMs("10"), 600_000);
+    assert.equal(updateMaxWaitMs("0"), 0, "0: at the first quiet moment");
+    for (const raw of [undefined, "", "-1", "soon"]) assert.equal(updateMaxWaitMs(raw), undefined, String(raw));
   });
 
   it("builds with its own home and only a few of the Hub's variables", () => {
