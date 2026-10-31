@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { hubPath } from "../lib/hub-routes.ts";
 import { describe, it } from "node:test";
 import {
+  canDiagnose,
+  diagnosisView,
   noticeRows,
   unreadNotices,
   acceptanceView,
@@ -984,5 +986,62 @@ describe("notices", () => {
     assert.equal(hubPath("POST", ["notices", "read"]), "/api/notices/read");
     assert.equal(hubPath("GET", ["notices", "read"]), undefined);
     assert.equal(hubPath("POST", ["notices"]), undefined);
+  });
+});
+
+describe("the product owner's card", () => {
+  const ready = {
+    attempt: 0,
+    state: "ready" as const,
+    at: new Date(Date.now() - 120_000).toISOString(),
+    model: "claude-opus-5-5",
+    costUsd: 0.21,
+    cause: "task" as const,
+    summary: "The criterion contradicted the sort order.",
+    evidence: [
+      { source: "acceptance" as const, quote: "sorted by id", note: "what the reviewer saw", found: true },
+      { source: "transcript" as const, quote: "made up", found: false },
+    ],
+    proposal: { action: "retry_with_correction" as const, why: "Ask for the order the code has.", acceptanceCriteria: ["Sorted by id"] },
+  };
+
+  it("shows the cause, the evidence (flagging quotes the Hub didn't find) and the proposal to answer", () => {
+    const v = diagnosisView({ state: "failed", diagnosis: ready });
+    assert.equal(v.headline, "The task was wrong or unclear");
+    assert.deepEqual(v.evidence, [
+      { source: "Acceptance check", quote: "sorted by id", note: "what the reviewer saw", unchecked: false },
+      { source: "Transcript", quote: "made up", unchecked: true },
+    ]);
+    assert.deepEqual(v.proposal, { label: "Retry it with the task corrected", why: "Ask for the order the code has.", details: ["Criterion 1: Sorted by id"] });
+    assert.equal(v.canDecide, true);
+    assert.equal(v.footer, "claude-opus-5-5 · $0.21 · 2 min ago");
+  });
+
+  it("stops offering answers once decided or once the task moved on", () => {
+    const decided = diagnosisView({ state: "failed", diagnosis: { ...ready, decision: { kind: "refused", at: new Date().toISOString() } } });
+    assert.deepEqual([decided.canDecide, decided.decision, decided.canAsk], [false, "You refused this just now.", false]);
+    assert.equal(diagnosisView({ state: "pending", retries: 1, diagnosis: ready }).canDecide, false, "retried since");
+    const earlier = diagnosisView({ state: "failed", retries: 1, diagnosis: ready });
+    assert.deepEqual([earlier.canDecide, earlier.canAsk], [false, true], "an earlier failure's: ask about this one");
+  });
+
+  it("says when it is reading or couldn't, and when to offer asking", () => {
+    assert.deepEqual(diagnosisView({ state: "failed" }), { evidence: [], canDecide: false, canAsk: true });
+    assert.deepEqual(diagnosisView({ state: "merged" }), { evidence: [], canDecide: false, canAsk: false });
+    assert.equal(diagnosisView({ state: "failed", diagnosis: { attempt: 0, state: "diagnosing", at: "x" } }).headline, "Reading why it failed…");
+    assert.equal(diagnosisView({ state: "failed", diagnosis: { attempt: 0, state: "failed", at: "x", error: "no model is configured" } }).headline, "Couldn't diagnose it: no model is configured.");
+    assert.equal(canDiagnose({ state: "failed" }), true);
+    assert.equal(canDiagnose({ state: "merged" }), false);
+    assert.equal(canDiagnose({ state: "failed", diagnosis: ready }), false, "already read");
+    assert.equal(canDiagnose({ state: "failed", diagnosis: { attempt: 0, state: "diagnosing", at: "x" } }), false);
+    assert.equal(canDiagnose({ state: "failed", diagnosis: { attempt: 0, state: "failed", at: "x" } }), true, "try again");
+    assert.equal(canDiagnose({ state: "failed", retries: 1, diagnosis: ready }), true, "a newer failure");
+  });
+
+  it("reaches the product owner's routes through the proxy", () => {
+    for (const path of ["diagnose", "diagnosis/accept", "diagnosis/refuse"]) {
+      assert.equal(hubPath("POST", ["tasks", "t-1", ...path.split("/")]), `/api/tasks/t-1/${path}`);
+      assert.equal(hubPath("GET", ["tasks", "t-1", ...path.split("/")]), undefined);
+    }
   });
 });

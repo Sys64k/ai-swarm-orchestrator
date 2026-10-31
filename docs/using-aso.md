@@ -187,6 +187,29 @@ that contradicts the code, say. Correct it as you retry: *Edit and retry* on the
 `--description`). The agent is told what changed, works on from its branch, and the task's
 history keeps the old text. Tasks waiting on it carry on once it merges.
 
+**The product owner tells you why a task failed.** When a task fails, the Hub's product owner
+(the Architect's model) reads what happened: the task and its criteria, its history, the end of
+its agents' transcript, the QA output, the acceptance check and its branch's diff. It says what
+the cause was, quoting its evidence, and proposes one thing to do:
+
+| Cause | Meaning | Usual proposal |
+|---|---|---|
+| The task | Its description or criteria were wrong, vague, or contradicted the code | Retry with the task corrected (it writes the correction) |
+| The model | The task was clear, and the model didn't manage it | Retry, or dismiss |
+| The platform | ASO itself got in the way: a tool, the worker, QA's setup, a provider | An issue to file on ASO, or retry after an outage |
+| Unclear | The evidence doesn't say | Nothing, and what's missing |
+
+- **You decide.** The task page shows it under *Product owner* with **Accept** and **Refuse**,
+  and you get a notice (and a push) "why it failed". Accepting does what it proposes: the retry,
+  with its correction, or dismissing the task. Nothing happens without you.
+- **Check it.** Every quote names its source, and the Hub checks that the quote is really there.
+  One it didn't find is marked *not found there*: don't trust that part.
+- **From the CLI:** `aso task-diagnosis <taskId>` prints it; `--accept`, `--refuse`, and
+  `--again` to ask again (for a failure from before it watched, or after it couldn't).
+- **Cost.** One model call per failure, counted on the task, about $0.10–0.50 with Opus. It
+  stops for the day at $5 (`ASO_PRODUCT_OWNER_DAILY_USD`; `0` turns it off). Failures from
+  before the Hub started, dismissed tasks and superseded ones aren't read by themselves.
+
 **When you're done with a failure** (an experiment, work no longer wanted), dismiss it: *Dismiss*
 on the task page, or `aso task-dismiss <taskId...>`, or `aso task-dismiss --failed -P <project>`
 for all of a project's. It leaves Needs you and the project's failed count, and keeps its

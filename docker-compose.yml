@@ -59,6 +59,7 @@ services:
       ASO_JUNIOR_TRIES: "${ASO_JUNIOR_TRIES:-2}"
       ASO_ESCALATION: "${ASO_ESCALATION:-1}"
       ASO_DAILY_SPEND_ALERT_USD: "${ASO_DAILY_SPEND_ALERT_USD:-}"
+      ASO_PRODUCT_OWNER_DAILY_USD: "${ASO_PRODUCT_OWNER_DAILY_USD:-}"
       # `host`: deploy commands are handed to `aso start-hub --docker` on the host (the container has no Docker).
       ASO_DEPLOY_RUNNER: "${ASO_DEPLOY_RUNNER:-}"
       # Set: the worker gateway listens on 7423 in the container (published above).

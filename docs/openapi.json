@@ -1373,6 +1373,171 @@
             "additionalProperties": false,
             "description": "The check of the work against the task's acceptance criteria, after QA passed"
           },
+          "diagnosis": {
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991,
+                "description": "The task's retries when it failed: a later failure gets its own diagnosis"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "diagnosing",
+                  "ready",
+                  "failed"
+                ],
+                "description": "failed: the product owner couldn't read the failure (see error)"
+              },
+              "at": {
+                "type": "string",
+                "description": "ISO 8601 time"
+              },
+              "model": {
+                "type": "string"
+              },
+              "costUsd": {
+                "type": "number"
+              },
+              "error": {
+                "type": "string"
+              },
+              "cause": {
+                "description": "task: the task or its criteria were wrong or unclear; model: the model couldn't do it; platform: ASO itself got in the way",
+                "type": "string",
+                "enum": [
+                  "task",
+                  "model",
+                  "platform",
+                  "unclear"
+                ]
+              },
+              "summary": {
+                "type": "string"
+              },
+              "evidence": {
+                "description": "What the diagnosis rests on, quoted, so a person can check it",
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "description",
+                        "criteria",
+                        "history",
+                        "transcript",
+                        "qa",
+                        "acceptance",
+                        "diff"
+                      ]
+                    },
+                    "quote": {
+                      "type": "string",
+                      "description": "Copied from the source"
+                    },
+                    "note": {
+                      "description": "What it shows",
+                      "type": "string"
+                    },
+                    "found": {
+                      "type": "boolean",
+                      "description": "Whether the Hub found the quote in that source: false means it can't be trusted as quoted"
+                    }
+                  },
+                  "required": [
+                    "source",
+                    "quote",
+                    "found"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "proposal": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "retry_with_correction",
+                      "retry",
+                      "dismiss",
+                      "platform_issue",
+                      "none"
+                    ]
+                  },
+                  "why": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "description": "retry_with_correction: the corrected description",
+                    "type": "string"
+                  },
+                  "acceptanceCriteria": {
+                    "description": "retry_with_correction: the corrected criteria",
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "issue": {
+                    "description": "platform_issue: an issue to file on ASO itself",
+                    "type": "object",
+                    "properties": {
+                      "title": {
+                        "type": "string"
+                      },
+                      "body": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "title",
+                      "body"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "action",
+                  "why"
+                ],
+                "additionalProperties": false
+              },
+              "decision": {
+                "description": "What a person did with the proposal",
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "accepted",
+                      "refused"
+                    ]
+                  },
+                  "at": {
+                    "type": "string",
+                    "description": "ISO 8601 time"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "at"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "attempt",
+              "state",
+              "at"
+            ],
+            "additionalProperties": false,
+            "description": "The product owner's reading of why the task failed, with one proposal for a person to accept or refuse"
+          },
           "testsFirst": {
             "type": "object",
             "properties": {
@@ -6718,6 +6883,168 @@
           },
           "409": {
             "description": "Finished, or merging right now",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}/diagnose": {
+      "post": {
+        "operationId": "postTaskDiagnose",
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Ask the product owner why a failed task failed (it does by itself for failures while it runs); the answer lands in the task's diagnosis",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Task"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "No such task",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not failed, already being diagnosed, or the product owner is off or out of today's budget",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}/diagnosis/accept": {
+      "post": {
+        "operationId": "postTaskDiagnosisAccept",
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Accept the product owner's proposal: a retry (with its correction) or dismissing the task is done now",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Task"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "No such task",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "No proposal, already answered, or the task moved on",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}/diagnosis/refuse": {
+      "post": {
+        "operationId": "postTaskDiagnosisRefuse",
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Refuse the product owner's proposal",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Task"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "No such task",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "No proposal, already answered, or the task moved on",
             "content": {
               "application/json": {
                 "schema": {

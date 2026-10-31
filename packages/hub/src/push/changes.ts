@@ -1,3 +1,4 @@
+import { DIAGNOSIS_ACTION_LABEL, type Diagnosis } from "@aso/shared";
 import type { PlanRecord } from "../plans.js";
 import type { TaskRecord } from "../tasks.js";
 
@@ -96,4 +97,10 @@ function firstLine(text: string): string {
 
 function clip(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+/** The product owner's diagnosis of a failed task: what happened, and what it proposes for you to accept or refuse. */
+export function diagnosisNotification(project: string, task: TaskRecord, d: Diagnosis): PushNotification {
+  const proposal = d.proposal && DIAGNOSIS_ACTION_LABEL[d.proposal.action];
+  return notification(project, "why it failed", [task.spec.title, d.summary, proposal && `Proposes: ${proposal.charAt(0).toLowerCase()}${proposal.slice(1)}`], "task", task.spec.taskId);
 }

@@ -97,6 +97,9 @@ prints them and reads your answers (an empty answer rejects the plan).
 - `aso plan-approve <planId>` approves a proposed plan.
 - `aso plan-reply <planId> <message...>` answers questions or asks for changes.
 - `aso plan-reject <planId>` rejects a plan.
+- `aso task-diagnosis <taskId>` prints the product owner's reading of why a task failed: the
+  cause, its evidence (`!` marks a quote the Hub didn't find in its source) and its proposal.
+  `--accept` does what it proposes, `--refuse` refuses it, `--again` asks it again.
 - `aso notices` prints what the Hub has told you about (the same as its push notifications),
   newest first, the unread ones marked `●`: `-n <count>` (default 20), `--unread` for only those,
   `--read` to mark the ones shown read.

@@ -608,6 +608,71 @@ export const AcceptanceSchema = z
   })
   .describe("The check of the work against the task's acceptance criteria, after QA passed");
 export type Acceptance = z.infer<typeof AcceptanceSchema>;
+/** What the product owner says went wrong (`cause`). */
+export const DIAGNOSIS_CAUSES = ["task", "model", "platform", "unclear"] as const;
+/** What it proposes. retry_with_correction comes with the corrected description or criteria; platform_issue with an issue to file. */
+export const DIAGNOSIS_ACTIONS = ["retry_with_correction", "retry", "dismiss", "platform_issue", "none"] as const;
+export const DIAGNOSIS_SOURCES = ["description", "criteria", "history", "transcript", "qa", "acceptance", "diff"] as const;
+
+/** How the console, the CLI and notifications say each cause, proposal and source. */
+export const DIAGNOSIS_CAUSE_LABEL: Record<(typeof DIAGNOSIS_CAUSES)[number], string> = {
+  task: "The task was wrong or unclear",
+  model: "The model couldn't do it",
+  platform: "ASO itself got in the way",
+  unclear: "The evidence doesn't say",
+};
+export const DIAGNOSIS_ACTION_LABEL: Record<(typeof DIAGNOSIS_ACTIONS)[number], string> = {
+  retry_with_correction: "Retry it with the task corrected",
+  retry: "Retry it",
+  dismiss: "Dismiss it",
+  platform_issue: "Report a problem in ASO itself",
+  none: "Nothing for now",
+};
+export const DIAGNOSIS_SOURCE_LABEL: Record<(typeof DIAGNOSIS_SOURCES)[number], string> = {
+  description: "Task",
+  criteria: "Criteria",
+  history: "History",
+  transcript: "Transcript",
+  qa: "QA",
+  acceptance: "Acceptance check",
+  diff: "Diff",
+};
+
+export const DiagnosisSchema = z
+  .object({
+    attempt: z.number().int().describe("The task's retries when it failed: a later failure gets its own diagnosis"),
+    state: z.enum(["diagnosing", "ready", "failed"]).describe("failed: the product owner couldn't read the failure (see error)"),
+    at: Timestamp,
+    model: z.string().optional(),
+    costUsd: z.number().optional(),
+    error: z.string().optional(),
+    cause: z.enum(DIAGNOSIS_CAUSES).optional().describe("task: the task or its criteria were wrong or unclear; model: the model couldn't do it; platform: ASO itself got in the way"),
+    summary: z.string().optional(),
+    evidence: z
+      .array(
+        z.object({
+          source: z.enum(DIAGNOSIS_SOURCES),
+          quote: z.string().describe("Copied from the source"),
+          note: z.string().optional().describe("What it shows"),
+          found: z.boolean().describe("Whether the Hub found the quote in that source: false means it can't be trusted as quoted"),
+        }),
+      )
+      .optional()
+      .describe("What the diagnosis rests on, quoted, so a person can check it"),
+    proposal: z
+      .object({
+        action: z.enum(DIAGNOSIS_ACTIONS),
+        why: z.string(),
+        description: z.string().optional().describe("retry_with_correction: the corrected description"),
+        acceptanceCriteria: z.array(z.string()).optional().describe("retry_with_correction: the corrected criteria"),
+        issue: z.object({ title: z.string(), body: z.string() }).optional().describe("platform_issue: an issue to file on ASO itself"),
+      })
+      .optional(),
+    decision: z.object({ kind: z.enum(["accepted", "refused"]), at: Timestamp }).optional().describe("What a person did with the proposal"),
+  })
+  .describe("The product owner's reading of why the task failed, with one proposal for a person to accept or refuse");
+export type Diagnosis = z.infer<typeof DiagnosisSchema>;
+
 export const TaskSchema = z.object({
   spec: TaskSpecSchema,
   project: z.string(),
@@ -636,6 +701,7 @@ export const TaskSchema = z.object({
   mainCommit: z.string().optional(),
   qaSummary: z.string().optional(),
   acceptance: AcceptanceSchema.optional(),
+  diagnosis: DiagnosisSchema.optional(),
   testsFirst: TestsFirstSchema.optional(),
   screenshots: z
     .object({

@@ -32,6 +32,26 @@ export interface HistoryEntry {
   event: string;
 }
 
+export type DiagnosisAction = "retry_with_correction" | "retry" | "dismiss" | "platform_issue" | "none";
+export type EvidenceSource = "description" | "criteria" | "history" | "transcript" | "qa" | "acceptance" | "diff";
+
+/** The product owner's reading of why a task failed, with one proposal (`GET /api/tasks/:id`: `diagnosis`). */
+export interface Diagnosis {
+  /** The task's retries when it failed. */
+  attempt: number;
+  state: "diagnosing" | "ready" | "failed";
+  at: string;
+  model?: string;
+  costUsd?: number;
+  error?: string;
+  cause?: "task" | "model" | "platform" | "unclear";
+  summary?: string;
+  /** `found`: whether the Hub found the quote in that source. */
+  evidence?: Array<{ source: EvidenceSource; quote: string; note?: string; found: boolean }>;
+  proposal?: { action: DiagnosisAction; why: string; description?: string; acceptanceCriteria?: string[]; issue?: { title: string; body: string } };
+  decision?: { kind: "accepted" | "refused"; at: string };
+}
+
 export interface Task {
   /** The project (folder in the Hub's projects root) the task belongs to. */
   project: string;
@@ -72,6 +92,8 @@ export interface Task {
   review?: { pr?: { number: number; url: string }; error?: string; rounds: number };
   /** The check of its work against the acceptance criteria, after QA passed. */
   acceptance?: Acceptance;
+  /** The product owner's reading of its latest failure; an older Hub sends none. */
+  diagnosis?: Diagnosis;
   waitingReason?: string;
   detail?: string;
   createdAt: string;

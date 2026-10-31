@@ -29,6 +29,7 @@ import { layout } from "./layout.js";
 import { approvePlanCommand, planCommand, rejectPlanCommand, replyPlanCommand } from "./commands/plan.js";
 import { taskDismissCommand } from "./commands/task-dismiss.js";
 import { noticesCommand } from "./commands/notices.js";
+import { taskDiagnosisCommand } from "./commands/task-diagnosis.js";
 import { taskRetryCommand } from "./commands/task-retry.js";
 import { startHubCommand } from "./commands/start-hub.js";
 import {
@@ -343,6 +344,16 @@ program
   .option("-P, --project <name>", "with --failed: only this project's")
   .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
   .action(taskDismissCommand);
+
+program
+  .command("task-diagnosis")
+  .description("The product owner's reading of why a task failed, with its evidence and proposal; accept or refuse the proposal")
+  .argument("<taskId>")
+  .option("--accept", "do what it proposes (a retry, with its correction, or dismissing the task)")
+  .option("--refuse", "refuse its proposal")
+  .option("--again", "ask it (again) about this failure")
+  .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
+  .action(taskDiagnosisCommand);
 
 program
   .command("notices")

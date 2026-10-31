@@ -266,6 +266,15 @@ const TASKS: ApiOperation[] = [
     responses: { 201: ok("Task", "Queued"), ...noProject, 400: err("Invalid task, a model the Hub doesn't know, or several projects and none named"), 409: err("The task id is taken") },
   },
   { method: "post", path: "/api/tasks/{id}/cancel", tag: "Tasks", summary: "Stop a task (closes its pull request)", responses: act("Task", "task", "Finished, or merging right now") },
+  {
+    method: "post", path: "/api/tasks/{id}/diagnose", tag: "Tasks", summary: "Ask the product owner why a failed task failed (it does by itself for failures while it runs); the answer lands in the task's diagnosis",
+    responses: act("Task", "task", "Not failed, already being diagnosed, or the product owner is off or out of today's budget"),
+  },
+  {
+    method: "post", path: "/api/tasks/{id}/diagnosis/accept", tag: "Tasks", summary: "Accept the product owner's proposal: a retry (with its correction) or dismissing the task is done now",
+    responses: act("Task", "task", "No proposal, already answered, or the task moved on"),
+  },
+  { method: "post", path: "/api/tasks/{id}/diagnosis/refuse", tag: "Tasks", summary: "Refuse the product owner's proposal", responses: act("Task", "task", "No proposal, already answered, or the task moved on") },
   { method: "post", path: "/api/tasks/{id}/dismiss", tag: "Tasks", summary: "Done with a failed or cancelled task: it no longer needs anyone (a retry brings it back)", responses: act("Task", "task", "Not failed or cancelled, or already dismissed") },
   {
     method: "post", path: "/api/tasks/{id}/retry", tag: "Tasks", summary: "Queue a failed or cancelled task again with fresh limits, optionally with its description or criteria corrected", body: "RetryTask", optionalBody: true,
