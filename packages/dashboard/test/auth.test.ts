@@ -80,6 +80,8 @@ describe("Hub proxy allowlist", () => {
     assert.equal(hubPath("GET", ["plans", "plan-1a2b", "reply"]), undefined);
     assert.equal(hubPath("GET", ["tasks", "api-1", "transcript"]), "/api/tasks/api-1/transcript");
     assert.equal(hubPath("POST", ["tasks", "api-1", "retry"]), "/api/tasks/api-1/retry");
+    assert.equal(hubPath("POST", ["tasks", "api-1", "dismiss"]), "/api/tasks/api-1/dismiss", "the task page's Dismiss button");
+    assert.equal(hubPath("GET", ["tasks", "api-1", "dismiss"]), undefined);
     assert.equal(hubPath("POST", ["tasks", "api-1", "cancel"]), "/api/tasks/api-1/cancel");
     for (const view of ["diff", "checks"]) assert.equal(hubPath("GET", ["tasks", "api-1", view]), `/api/tasks/api-1/${view}`);
     for (const decision of ["approve", "request-changes"]) assert.equal(hubPath("POST", ["tasks", "api-1", decision]), `/api/tasks/api-1/${decision}`);
