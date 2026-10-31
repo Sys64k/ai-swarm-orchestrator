@@ -26,8 +26,12 @@ export class LlmError extends Error {
   constructor(
     message: string,
     readonly retryable: boolean,
-    /** credit: the account ran out of credit or hit a usage limit; its provider's calls wait until it works again. */
-    readonly pause?: "credit",
+    /**
+     * Why its provider's calls should wait until one works again: `credit`, the account ran out
+     * of credit or hit a usage limit (at once); `unreachable`, the provider can't be reached
+     * (after a grace period, see `shouldHold`: a short blip is only retried).
+     */
+    readonly pause?: "credit" | "unreachable",
     /** When the provider says access comes back (an ISO time), if it says. */
     readonly until?: string,
   ) {
@@ -151,6 +155,10 @@ export function classify(err: unknown): LlmError {
   }
   if (err instanceof Anthropic.RateLimitError) return new LlmError(`rate limited: ${err.message}`, true);
   if (err instanceof Anthropic.BadRequestError) return new LlmError(`bad request: ${err.message}`, false);
+  // A timeout reached the API but got no answer in time; any other connection error didn't reach it.
+  if (err instanceof Anthropic.APIConnectionError && !(err instanceof Anthropic.APIConnectionTimeoutError)) {
+    return new LlmError(`Anthropic API unreachable: ${err.message}`, true, "unreachable");
+  }
   if (err instanceof Anthropic.InternalServerError || err instanceof Anthropic.APIConnectionError) {
     return new LlmError(`Anthropic API unavailable: ${err.message}`, true);
   }

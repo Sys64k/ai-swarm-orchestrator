@@ -110,10 +110,11 @@ prohibited outright.
 | Model turns per task attempt or planning round | 80 | `--max-turns` |
 | Concurrent model requests | 2 | `--llm-concurrency` |
 
-**Running out of credit, or into a usage limit, doesn't fail work.** When a provider's account
-runs out of credit or quota, or hits the spend limit set in its console (Anthropic's *You have
-reached your specified API usage limits*), the Hub puts that provider's calls on hold. Other
-providers' calls go on.
+**Running out of credit, into a usage limit, or a provider going away doesn't fail work.** When a
+provider's account runs out of credit or quota, or hits the spend limit set in its console
+(Anthropic's *You have reached your specified API usage limits*), the Hub puts that provider's
+calls on hold. So it does when a provider can't be reached for a minute, say a local model's
+machine that was shut down: shorter outages are only retried. Other providers' calls go on.
 
 - A desk task moves to a model whose provider isn't on hold, when its round has one (the
   default agent model, or the escalation ladder's), without using a rework round.
@@ -122,8 +123,8 @@ providers' calls go on.
 - Waiting work says so in its history (*waiting: Anthropic API usage limit reached until
   2026-11-01 00:00 UTC…*), the console shows a banner per provider on hold with the time it
   comes back if the provider said, `GET /api/llm` lists them (`pausedProviders`), and your phone
-  gets a notification. Once credit is added or the limit raised, the next call to that provider
-  works and its work carries on, with a second notification.
+  gets a notification. Once credit is added, the limit raised or the machine back, the next call
+  to that provider works and its work carries on, with a second notification.
 
 The dashboard and `GET /api/llm` show calls and estimated spend; each task shows its own
 turns and cost. Estimates use the Hub's price table. Your Console billing is authoritative.

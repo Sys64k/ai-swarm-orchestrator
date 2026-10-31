@@ -221,7 +221,17 @@ describe("OpenAI-compatible models: over HTTP", () => {
       await provider.close();
     }
     const gone = new OpenAiCompatibleAdapter({ baseUrl: "http://127.0.0.1:1/v1", model: "m", maxTokens: 100 });
-    await assert.rejects(gone.complete({ system: "s", tools: [], messages: [{ role: "user", content: "x" }] }), (e: unknown) => e instanceof LlmError && e.retryable && /unreachable/.test(e.message));
+    await assert.rejects(
+      gone.complete({ system: "s", tools: [], messages: [{ role: "user", content: "x" }] }),
+      (e: unknown) => e instanceof LlmError && e.retryable && e.pause === "unreachable" && /unreachable/.test(e.message),
+      "a server that can't be reached holds its provider's calls once it stays so",
+    );
+    const slow = new OpenAiCompatibleAdapter({ baseUrl: "http://127.0.0.1:1/v1", model: "m", maxTokens: 100, fetch: async () => Promise.reject(Object.assign(new Error("timed out"), { name: "TimeoutError" })) });
+    await assert.rejects(
+      slow.complete({ system: "s", tools: [], messages: [{ role: "user", content: "x" }] }),
+      (e: unknown) => e instanceof LlmError && e.retryable && e.pause === undefined && /no complete answer in time/.test(e.message),
+      "a server that answers too slowly was reached: only retried",
+    );
   });
 
   it("lets the Hub run its agents on an OpenAI-compatible model while the Architect stays on Claude", async () => {

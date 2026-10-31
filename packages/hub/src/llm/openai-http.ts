@@ -63,8 +63,10 @@ export async function postForStream(opts: OpenAiBaseOptions, path: string, body:
     });
     text = await res.text();
   } catch (err) {
-    const reason = (err as Error).name === "TimeoutError" ? "no complete answer in time" : (err as Error).message;
-    throw new LlmError(`the model provider at ${opts.baseUrl} is unreachable: ${reason}`, true);
+    const where = `the model provider at ${opts.baseUrl}`;
+    // A timeout reached the server but got no answer in time; anything else didn't reach it (down, shut off, no route).
+    if ((err as Error).name === "TimeoutError") throw new LlmError(`${where} gave no complete answer in time`, true);
+    throw new LlmError(`${where} is unreachable: ${(err as Error).message}`, true, "unreachable");
   }
   if (!res.ok) throw classifyHttp(res.status, text);
   return text;
