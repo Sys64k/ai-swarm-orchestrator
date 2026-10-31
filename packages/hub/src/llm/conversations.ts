@@ -32,20 +32,51 @@ import { architectSystemPrompt, CONTINUE_PROMPT, planPrompt, systemPrompt, taskP
 /** The model usage totals, kept across restarts. */
 const TOTALS_KEY = "llm-totals";
 
+/** One UTC day's model spending. */
+export interface DaySpend {
+  /** YYYY-MM-DD, UTC. */
+  date: string;
+  costUsd: number;
+}
+
 /** Model calls and their estimated cost, all tasks and plans together, since `since`. */
 export interface UsageTotals {
   calls: number;
   costUsd: number;
   since: string;
+  /** The cost of the latest UTC day with any calls. */
+  today?: DaySpend;
 }
+
+const count = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0;
 
 /** Saved totals, if they are usable: counts that are non-negative numbers (`since` defaults to `now`). */
 export function parseTotals(saved: unknown, now: string): UsageTotals | undefined {
   if (typeof saved !== "object" || saved === null) return undefined;
-  const { calls, costUsd, since } = saved as Record<string, unknown>;
-  const count = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0;
+  const { calls, costUsd, since, today } = saved as Record<string, unknown>;
   if (!count(calls) || !count(costUsd)) return undefined;
-  return { calls, costUsd, since: typeof since === "string" && !Number.isNaN(Date.parse(since)) ? since : now };
+  const day = today as Partial<DaySpend> | undefined;
+  return {
+    calls,
+    costUsd,
+    since: typeof since === "string" && !Number.isNaN(Date.parse(since)) ? since : now,
+    ...(typeof day?.date === "string" && count(day.costUsd) ? { today: { date: day.date, costUsd: day.costUsd } } : {}),
+  };
+}
+
+/** The UTC day of `at`, YYYY-MM-DD. */
+export function utcDay(at: Date): string {
+  return at.toISOString().slice(0, 10);
+}
+
+/** `today` with `costUsd` added: a new day starts from zero. */
+export function addToDay(today: DaySpend | undefined, date: string, costUsd: number): DaySpend {
+  return { date, costUsd: (today?.date === date ? today.costUsd : 0) + costUsd };
+}
+
+/** What has been spent on `date`: nothing when the last day with calls was another one. */
+export function spentOn(today: DaySpend | undefined, date: string): number {
+  return today?.date === date ? today.costUsd : 0;
 }
 const log = createLogger("llm");
 
@@ -416,9 +447,15 @@ export class ConversationManager {
       maxTurns: this.maxTurns,
       queue: this.slots.status(),
       conversations: this.conversations.size,
-      totals: { calls: this.totals.calls, costUsd: round(this.totals.costUsd), since: this.totals.since },
+      totals: { calls: this.totals.calls, costUsd: round(this.totals.costUsd), since: this.totals.since, today: this.spendToday() },
       ...this.pausedStatus(),
     };
+  }
+
+  /** The estimated cost of the current UTC day's model calls so far. */
+  spendToday(now = new Date()): DaySpend {
+    const date = utcDay(now);
+    return { date, costUsd: round(spentOn(this.totals.today, date)) };
   }
 
   /** `paused`: the oldest hold, as before there were several; `pausedProviders`: each one. */
@@ -551,6 +588,7 @@ export class ConversationManager {
       const usage = priceUsage(response.model, response.tokens);
       this.totals.calls++;
       this.totals.costUsd += usage.costUsd;
+      this.totals.today = addToDay(this.totals.today, utcDay(new Date()), usage.costUsd);
       this.store?.saveValue(TOTALS_KEY, this.totals);
       conv.subject.recordUsage(usage);
       this.opts.spend?.record(conv.nodeId, usage.costUsd);

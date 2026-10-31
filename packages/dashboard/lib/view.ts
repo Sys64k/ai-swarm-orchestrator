@@ -5,7 +5,7 @@ import type {
   ModelSuggestion,
   ModelSuggestions,
   SuggestionRole,
-  Acceptance, Llm, Models, Price, Provider, ProviderPreset, CheckState, QualityNoteKind, DeployStatus, DiffFile, HubNode, HubUpdate, WorkerKey, Plan, PlannedTask, Project, ReviewChecks, Task, TaskDiff, TaskState, TrackRecordKey, TrackRecordRow, TranscriptEntry } from "./types.ts";
+  Acceptance, Llm, Models, Price, Provider, ProviderPreset, CheckState, QualityNoteKind, DeployStatus, DiffFile, HubNode, HubUpdate, Notices, WorkerKey, Plan, PlannedTask, Project, ReviewChecks, Task, TaskDiff, TaskState, TrackRecordKey, TrackRecordRow, TranscriptEntry } from "./types.ts";
 
 import { PROVIDER_ID } from "./hub-routes.ts";
 
@@ -947,6 +947,33 @@ export function timeAgo(iso: string, now = Date.now()): string {
   const h = Math.round(m / 60);
   if (h < 24) return `${h} h ago`;
   return `${Math.round(h / 24)} d ago`;
+}
+
+/** A notice as the console lists it. */
+export interface NoticeRow {
+  id: string;
+  href: string;
+  title: string;
+  sub: string;
+  unread: boolean;
+}
+
+/** The notices as rows, newest first; the first `unread` of them are new. Links stay inside the console. */
+export function noticeRows(list: Notices, now = Date.now()): NoticeRow[] {
+  return list.notices.map((n, i) => ({
+    id: n.id,
+    href: n.url.startsWith("/") && !n.url.startsWith("//") ? n.url : "/",
+    title: n.title,
+    sub: `${timeAgo(n.at, now)} · ${n.body.split("\n").join(" · ")}`,
+    unread: i < list.unread,
+  }));
+}
+
+/** The home page's line about unread notices ("3 unread notices", and the latest's title), or nothing when all are read. */
+export function unreadNotices(list: Notices | undefined): { title: string; latest: string } | undefined {
+  const n = list?.unread ?? 0;
+  if (!list || n === 0) return undefined;
+  return { title: `${n} unread notice${n === 1 ? "" : "s"}`, latest: `Latest: ${list.notices[0].title}` };
 }
 
 export function firstLine(text: string, max = 120): string {

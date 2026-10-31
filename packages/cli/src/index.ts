@@ -28,6 +28,7 @@ import { listWorkerKeysCommand, newWorkerKeyCommand, setWorkerKeyCommand, revoke
 import { layout } from "./layout.js";
 import { approvePlanCommand, planCommand, rejectPlanCommand, replyPlanCommand } from "./commands/plan.js";
 import { taskDismissCommand } from "./commands/task-dismiss.js";
+import { noticesCommand } from "./commands/notices.js";
 import { taskRetryCommand } from "./commands/task-retry.js";
 import { startHubCommand } from "./commands/start-hub.js";
 import {
@@ -342,6 +343,15 @@ program
   .option("-P, --project <name>", "with --failed: only this project's")
   .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
   .action(taskDismissCommand);
+
+program
+  .command("notices")
+  .description("What the Hub has told you about (failed tasks, plans to approve, providers on hold, workers gone, spending), newest first")
+  .option("-n, --limit <count>", "at most this many", "20")
+  .option("--unread", "only the unread ones")
+  .option("--read", "then mark the ones shown read")
+  .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
+  .action(noticesCommand);
 
 // Hidden: the Architect process that `start-hub` runs in tmux (same binary in every layout).
 program

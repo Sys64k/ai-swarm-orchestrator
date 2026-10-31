@@ -3,6 +3,7 @@ import path from "node:path";
 import { createLogger, PushSubscriptionSchema, type PushSubscriptionJson } from "@aso/shared";
 import { notableChanges, type ProjectState, type PushNotification } from "./changes.js";
 import { JsonFileWriter } from "./json-file.js";
+import type { NoticeLog } from "./notices.js";
 import { generateVapidKeys, sendPush, type PushResult, type VapidKeys } from "./web-push.js";
 
 const log = createLogger("push");
@@ -37,6 +38,8 @@ export interface NotifierOptions {
   subject?: string;
   /** Replaces the real delivery (tests). */
   send?: typeof sendPush;
+  /** Where `notify` keeps what it tells. */
+  notices?: NoticeLog;
 }
 
 /**
@@ -109,11 +112,18 @@ export class Notifier {
 
   /** Notify about whatever changed in `project` since the last look (see `notableChanges`). */
   observe(project: ProjectState): void {
-    for (const n of notableChanges(this.seen, project)) void this.send(n);
+    // Fire and forget: a failed delivery is logged, and the notice is kept either way.
+    for (const n of notableChanges(this.seen, project)) void this.notify(n);
   }
 
-  /** Send to every device, or only to `endpoint`. Resolves once all deliveries are done. */
-  async send(n: PushNotification, endpoint?: string): Promise<{ sent: number; failed: string[] }> {
+  /** Tell people: keep it as a notice (read again in the console, API and CLI), and push it to every device. */
+  notify(n: PushNotification): Promise<{ sent: number; failed: string[] }> {
+    this.opts.notices?.add(n);
+    return this.push(n);
+  }
+
+  /** Only push, to every device or only to `endpoint`, keeping no notice: for the test message. Resolves once all deliveries are done. */
+  async push(n: PushNotification, endpoint?: string): Promise<{ sent: number; failed: string[] }> {
     const targets = this.data.subscriptions.filter((s) => endpoint === undefined || s.endpoint === endpoint);
     const deliver = this.opts.send ?? sendPush;
     const subject = this.opts.subject ?? DEFAULT_SUBJECT;

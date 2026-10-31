@@ -2757,6 +2757,24 @@
               "since": {
                 "description": "When counting began: kept across restarts when the Hub saves its state, else since it started",
                 "type": "string"
+              },
+              "today": {
+                "description": "The estimated cost of the day's model calls so far (UTC): what the daily spending notice goes by",
+                "type": "object",
+                "properties": {
+                  "date": {
+                    "type": "string",
+                    "description": "The UTC day, YYYY-MM-DD"
+                  },
+                  "costUsd": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "date",
+                  "costUsd"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [
@@ -2915,6 +2933,61 @@
         "required": [
           "sent",
           "failed"
+        ],
+        "additionalProperties": false
+      },
+      "Notices": {
+        "type": "object",
+        "properties": {
+          "notices": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "at": {
+                  "type": "string",
+                  "description": "ISO 8601 time"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "body": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string",
+                  "description": "The console page it is about (always starts with a single /)"
+                },
+                "tag": {
+                  "type": "string",
+                  "description": "What it is about (a task, plan, provider, machine…): a newer notice with the same tag replaces it on a phone"
+                }
+              },
+              "required": [
+                "id",
+                "at",
+                "title",
+                "body",
+                "url",
+                "tag"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Newest first"
+          },
+          "unread": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Notices since a person last marked them read"
+          }
+        },
+        "required": [
+          "notices",
+          "unread"
         ],
         "additionalProperties": false
       },
@@ -4836,6 +4909,18 @@
         "required": [
           "state"
         ],
+        "additionalProperties": false
+      },
+      "NoticesRead": {
+        "type": "object",
+        "properties": {
+          "upTo": {
+            "description": "The id of the newest notice to mark read, with all before it (default: all of them)",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        },
         "additionalProperties": false
       },
       "RedeemSignInCode": {
@@ -8468,6 +8553,105 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PushTestResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/notices": {
+      "get": {
+        "operationId": "getNotices",
+        "tags": [
+          "Console"
+        ],
+        "summary": "What the Hub has told you about, newest first, and how many are unread",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "At most this many (default 50, at most 500)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Notices"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          }
+        }
+      }
+    },
+    "/api/notices/read": {
+      "post": {
+        "operationId": "postNoticesRead",
+        "tags": [
+          "Console"
+        ],
+        "summary": "Mark the notices read",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoticesRead"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Notices"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "No such notice",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }

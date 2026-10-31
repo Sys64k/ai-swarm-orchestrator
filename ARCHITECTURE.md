@@ -175,7 +175,7 @@ flowchart LR
 | | `hardware.ts` | `systeminformation` profile and disk write benchmark |
 | | `git/agent-git-client.ts` | The only Git interface agents get |
 | `@aso/cli` | `index.ts`, `commands/*` | Argument parsing and process orchestration (native or Docker) |
-| `@aso/dashboard` | `app/**`, `components/*` | The console: home, task (live transcript), plan (approve/reject), new plan, worker (a model per desk, grouped by provider), worker machines, model providers (add with a key, remove, prices), sign-in, notifications (`public/sw.js`). Client pages poll the Hub through `app/api/hub/[...path]` |
+| `@aso/dashboard` | `app/**`, `components/*` | The console: home, task (live transcript), plan (approve/reject), new plan, worker (a model per desk, grouped by provider), worker machines, model providers (add with a key, remove, prices), sign-in, notices and notifications (`public/sw.js`). Client pages poll the Hub through `app/api/hub/[...path]` |
 | | `lib/view.ts` | Pure view logic: home grouping, badges, transcript → terminal lines |
 | | `lib/auth.ts`, `lib/hub-routes.ts`, `proxy.ts` | Session cookie and Basic auth, browser-origin redirects, the allowlist of Hub endpoints the browser may reach |
 
@@ -721,6 +721,21 @@ sequenceDiagram
   beside `push.json`, so a machine that never reconnects after a Hub restart is still reported,
   counted from the restart; the Hub's `close` waits for its last write (`flush`), which the
   nodes' disconnects cause. A host gone 14 days (`WORKER_FORGET_MS`) is forgotten.
+- **Struggling and stuck tasks.** `notableChanges` also tells when a task's `reworkRound`
+  reaches 2 or more (the first round is routine). `stuckTasks` (`push/stuck.ts`), run by the sweep,
+  tells once per stall about a task at work (`TASK_AT_WORK`) whose last progress
+  (`lastProgress`: its `updatedAt` or its agent's last model turn) is an hour old
+  (`STUCK_ALERT_MS`); new progress clears it.
+- **Spending.** `ConversationManager` adds each call's cost to `totals.today` (UTC day, saved
+  with the totals). The sweep's `spendingNotice` (`push/spending.ts`) tells once a day (tag `spend-<date>`, looked
+  up in the notices so a restart doesn't repeat it) when it reaches `ASO_DAILY_SPEND_ALERT_USD`
+  (default $25; `0`: off).
+- **Notices.** `Notifier.notify` keeps every notification as a notice (`NoticeLog`,
+  `hub/src/push/notices.ts`, the latest 500 in `notices.json`) and then pushes it; `push`
+  alone (the test message) keeps nothing. So people without push, the CLI (`aso notices`)
+  and other UIs read the same news from `GET /api/notices`. The read mark is the id of the
+  newest notice marked read (`POST /api/notices/read`), so notices in the same millisecond
+  can't be confused; one older than every kept notice leaves them all unread.
 - **No replays.** A record seen for the first time (Hub start, a restored task) never notifies,
   so restarts don't repeat old news.
 - **No push library.** `hub/src/push/web-push.ts` implements RFC 8291 payload encryption

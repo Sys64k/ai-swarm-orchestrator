@@ -22,7 +22,7 @@ export {
   type RoutingRequest,
 } from "./routing.js";
 export { AnthropicApiAdapter, apiErrorText, classify, CREDIT_MESSAGE, LlmError, resetTime, usageLimitMessage, type Effort, type LlmAdapter, type LlmRequest, type LlmResponse } from "./llm/adapter.js";
-export { ConversationManager, DEFAULT_PLAN_BUDGET_USD, TURN_WARNING, contextFull, CONTEXT_FULL_BELOW_TOKENS, describeCutOff, toolResultBlocks, withCutOffNote, withTurnWarning, parseTotals, type UsageTotals } from "./llm/conversations.js";
+export { ConversationManager, DEFAULT_PLAN_BUDGET_USD, TURN_WARNING, contextFull, CONTEXT_FULL_BELOW_TOKENS, describeCutOff, toolResultBlocks, withCutOffNote, withTurnWarning, parseTotals, addToDay, spentOn, utcDay, type DaySpend, type UsageTotals } from "./llm/conversations.js";
 export { priceTable, priceUsage } from "./llm/pricing.js";
 export { CustomPrices } from "./llm/custom-prices.js";
 export { architectSystemPrompt, planPrompt, systemPrompt, taskPrompt } from "./llm/prompts.js";
@@ -46,6 +46,9 @@ export { Notifier, TEST_NOTIFICATION } from "./push/notifier.js";
 export { Deployer, deployEnv, deployNotification, deployWorkDir, failedInCommand, HostDeployQueue, runCommand, runHere, type DeployJob, type RunResult, DEPLOY_FILE, DEPLOYED_FILE, DEPLOY_TIMEOUT_SEC, type DeployCommand, type DeployStatus } from "./deploy.js";
 export { duration, WorkerWatch, WORKER_FORGET_MS, WORKER_OFFLINE_ALERT_MS } from "./push/workers.js";
 export { notableChanges, type ProjectState, type PushNotification } from "./push/changes.js";
+export { lastProgress, stuckTasks, STUCK_ALERT_MS } from "./push/stuck.js";
+export { DEFAULT_DAILY_SPEND_ALERT_USD, spendingNotice, spendLimitFromEnv } from "./push/spending.js";
+export { DEFAULT_NOTICE_LIMIT, MAX_NOTICES, NoticeLog } from "./push/notices.js";
 export { encryptPayload, generateVapidKeys, sendPush, vapidAuthorization, MAX_PAYLOAD_BYTES, type PushResult, type VapidKeys } from "./push/web-push.js";
 export { hubUpdateNotification } from "./hub-update.js";
 export { apiChanges, apiFileContents, apiHash, API_COPY_PATH, syncApiCopies, syncTaskId, syncTaskSpec, type ApiChanges } from "./api-sync.js";

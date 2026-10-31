@@ -18,6 +18,9 @@ const RULES: ReadonlyArray<{ method: "GET" | "POST"; pattern: RegExp }> = [
   // Push notifications: this device's subscription and a test message.
   { method: "GET", pattern: /^push$/ },
   { method: "POST", pattern: /^push\/(subscriptions|subscriptions\/check|subscriptions\/delete|test)$/ },
+  // What the Hub has told you about, and marking it read.
+  { method: "GET", pattern: /^notices$/ },
+  { method: "POST", pattern: /^notices\/read$/ },
   { method: "GET", pattern: /^projects$/ },
   { method: "POST", pattern: /^projects$/ },
   { method: "GET", pattern: new RegExp(`^projects/${ID}$`) },

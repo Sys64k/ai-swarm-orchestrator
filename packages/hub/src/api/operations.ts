@@ -45,6 +45,8 @@ import {
   PushSubscribedSchema,
   PushSubscriptionSchema,
   PushTestResultSchema,
+  NoticesSchema,
+  NoticesReadBodySchema,
   PushTestSchema,
   RedeemSignInCodeBodySchema,
   JoinBodySchema,
@@ -77,6 +79,7 @@ export const REQUEST_SCHEMAS = {
   Sync: SyncBodySchema,
   DeployResult: DeployResultBodySchema,
   HubUpdateReport: HubUpdateReportBodySchema,
+  NoticesRead: NoticesReadBodySchema,
   RedeemSignInCode: RedeemSignInCodeBodySchema,
   JoinCode: JoinCodeBodySchema,
   WorkerKeyScope: WorkerKeyScopeBodySchema,
@@ -118,6 +121,7 @@ export const ANSWER_SCHEMAS = {
   PushCheck: PushCheckSchema,
   PushRemoved: PushRemovedSchema,
   PushTestResult: PushTestResultSchema,
+  Notices: NoticesSchema,
   SignInCode: SignInCodeSchema,
   JoinCode: JoinCodeSchema,
   WorkerKeyJoined: WorkerKeyJoinedSchema,
@@ -377,6 +381,11 @@ const CONSOLE: ApiOperation[] = [
     method: "post", path: "/api/push/test", tag: "Console", summary: "Send a test notification to one device or all", body: "PushTest", optionalBody: true,
     responses: { 200: ok("PushTestResult", "Sent"), 404: err("No (such) subscribed device"), 502: ok("PushTestResult", "No device took it") },
   },
+  {
+    method: "get", path: "/api/notices", tag: "Console", summary: "What the Hub has told you about, newest first, and how many are unread",
+    query: { limit: "At most this many (default 50, at most 500)" }, responses: { 200: ok("Notices"), 400: err("Invalid limit") },
+  },
+  { method: "post", path: "/api/notices/read", tag: "Console", summary: "Mark the notices read", body: "NoticesRead", optionalBody: true, responses: { 200: ok("Notices"), 400: err("Invalid body"), ...notFound("notice") } },
 ];
 
 /** Every HTTP route under /api and /dist. The WebSocket (/ws) and Git (/git/<project>.git) endpoints speak their own protocols. */

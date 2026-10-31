@@ -6,10 +6,21 @@ import { describe, it } from "node:test";
 import {
   duration,
   encryptPayload,
+  addToDay,
+  DEFAULT_DAILY_SPEND_ALERT_USD,
   generateVapidKeys,
+  lastProgress,
   MAX_PAYLOAD_BYTES,
   notableChanges,
+  NoticeLog,
   Notifier,
+  parseTotals,
+  spendingNotice,
+  spendLimitFromEnv,
+  spentOn,
+  stuckTasks,
+  STUCK_ALERT_MS,
+  utcDay,
   sendPush,
   startHub,
   vapidAuthorization,
@@ -170,10 +181,150 @@ describe("notableChanges", () => {
     assert.deepEqual(look("awaiting_review", 7), ask, "back after the requested changes");
   });
 
+  it("tells you when a task comes back for a second rework round, not the first", () => {
+    const seen = new Map<string, string>();
+    const look = (round: number, reason?: string) =>
+      notableChanges(seen, { id: "shop", tasks: [task("t", "pending", { reworkRound: round, rework: reason ? { round, reason, failures: [] } : undefined })], plans: [] });
+    assert.deepEqual(look(0), [], "first seen");
+    assert.deepEqual(look(1, "QA failed: 2 tests"), [], "one round is routine");
+    assert.deepEqual(look(2, "QA failed: 1 test\nmore output"), [
+      { title: "shop: rework round 2", body: "Title t\nQA failed: 1 test", url: "/tasks/t", tag: "task-t" },
+    ]);
+    assert.deepEqual(look(2, "QA failed: 1 test"), [], "once per round");
+    assert.equal(look(3, "unmet").length, 1);
+    assert.deepEqual(look(0), [], "a retry starts the count again");
+  });
+
   it("keeps notification text short", () => {
     const seen = new Map([["task:t", "in_progress"]]);
     const [n] = notableChanges(seen, { id: "shop", tasks: [task("t", "failed", { detail: "x".repeat(5000) })], plans: [] });
     assert.ok(n.body.length <= 600 && n.body.endsWith("…"));
+  });
+});
+
+describe("stuckTasks", () => {
+  const at = (ms: number) => new Date(ms).toISOString();
+  const now = Date.parse("2026-10-31T12:00:00Z");
+  const working = (id: string, updatedMs: number, extra: Partial<TaskRecord> = {}) =>
+    task(id, "in_progress", { updatedAt: at(updatedMs), agentLog: [], nodeId: "avalon-1", ...extra });
+
+  it("tells once about a task at work that has made no progress for an hour", () => {
+    const told = new Map<string, number>();
+    const stalled = working("t", now - STUCK_ALERT_MS);
+    const tasks = [stalled, working("fresh", now - 60_000)];
+    assert.deepEqual(stuckTasks(told, "shop", tasks, now), [
+      {
+        title: "shop: no progress",
+        body: "Title t\nNothing has happened for 1 h (in progress on avalon-1). Its page shows the last thing it did.",
+        url: "/tasks/t",
+        tag: "task-t",
+      },
+    ]);
+    assert.deepEqual(stuckTasks(told, "shop", tasks, now + 600_000), [], "once per stall");
+    const moved = { ...stalled, updatedAt: at(now) };
+    assert.deepEqual(stuckTasks(told, "shop", [moved], now + 30 * 60_000), [], "moving again clears it");
+    assert.equal(stuckTasks(told, "shop", [moved], now + STUCK_ALERT_MS).length, 1, "and a new stall is told again");
+  });
+
+  it("counts a model turn as progress, and leaves waiting or finished tasks alone", () => {
+    const old = now - 2 * STUCK_ALERT_MS;
+    const turning = working("t", old, { agentLog: [{ at: at(now - 60_000), turn: 3, actions: [], costUsd: 0 }] });
+    assert.equal(lastProgress(turning), now - 60_000);
+    const idle = ["pending", "awaiting_review", "merged", "failed", "cancelled"].map((state, i) => task(`i${i}`, state as TaskRecord["state"], { updatedAt: at(old), agentLog: [] }));
+    assert.deepEqual(stuckTasks(new Map(), "shop", [turning, ...idle], now), []);
+    assert.equal(stuckTasks(new Map(), "shop", [working("q", old, { state: "testing", nodeId: undefined, qaNodeId: "canfod-1" })], now, 1000).length, 1, "a custom delay; QA counts");
+  });
+});
+
+describe("daily spending", () => {
+  it("adds up each UTC day's spending, starting a new day from zero", () => {
+    assert.equal(utcDay(new Date("2026-10-31T23:59:00+02:00")), "2026-10-31");
+    let today = addToDay(undefined, "2026-10-31", 1.5);
+    today = addToDay(today, "2026-10-31", 2);
+    assert.deepEqual(today, { date: "2026-10-31", costUsd: 3.5 });
+    assert.equal(spentOn(today, "2026-11-01"), 0, "nothing yet on a new day");
+    assert.deepEqual(addToDay(today, "2026-11-01", 0.25), { date: "2026-11-01", costUsd: 0.25 });
+  });
+
+  it("keeps the day across restarts, and ignores a damaged one", () => {
+    const now = "2026-10-31T00:00:00.000Z";
+    assert.deepEqual(parseTotals({ calls: 3, costUsd: 9, since: now, today: { date: "2026-10-31", costUsd: 2 } }, now)?.today, { date: "2026-10-31", costUsd: 2 });
+    assert.equal(parseTotals({ calls: 3, costUsd: 9, since: now, today: { date: "2026-10-31", costUsd: -1 } }, now)?.today, undefined);
+    assert.equal(parseTotals({ calls: 3, costUsd: 9, since: now }, now)?.today, undefined, "totals saved before days were counted");
+  });
+
+  it("is worth one notice a day once it reaches the limit", () => {
+    assert.equal(spendingNotice({ date: "2026-10-31", costUsd: 24.99 }, 25), undefined);
+    assert.deepEqual(spendingNotice({ date: "2026-10-31", costUsd: 25 }, 25), {
+      title: "Model spending today is $25.00",
+      body: "Over the daily limit of $25.00 (2026-10-31, UTC). Track records show where it went.",
+      url: "/track-records",
+      tag: "spend-2026-10-31",
+    });
+    assert.equal(spendingNotice({ date: "2026-10-31", costUsd: 500 }, 0), undefined, "0 turns it off");
+  });
+
+  it("reads the limit from the environment", () => {
+    assert.equal(spendLimitFromEnv(undefined), DEFAULT_DAILY_SPEND_ALERT_USD);
+    assert.equal(spendLimitFromEnv(""), DEFAULT_DAILY_SPEND_ALERT_USD);
+    assert.equal(spendLimitFromEnv("10.5"), 10.5);
+    assert.equal(spendLimitFromEnv("0"), 0);
+    assert.equal(spendLimitFromEnv("-3"), DEFAULT_DAILY_SPEND_ALERT_USD);
+    assert.equal(spendLimitFromEnv("lots"), DEFAULT_DAILY_SPEND_ALERT_USD);
+  });
+});
+
+describe("NoticeLog", () => {
+  const n = (tag: string): PushNotification => ({ title: `T ${tag}`, body: "b", url: "/", tag });
+
+  it("keeps notices newest first, counts the unread, and never moves the read mark back", async () => {
+    const log = await NoticeLog.open({ max: 3 });
+    assert.deepEqual(log.list(), { notices: [], unread: 0 });
+    assert.equal(log.markRead(), true, "nothing to mark is fine");
+    for (const [i, tag] of ["a", "b", "c", "d"].entries()) log.add(n(tag), new Date(Date.UTC(2026, 9, 31, 10, i)));
+    const all = log.list();
+    assert.deepEqual(all.notices.map((x) => x.tag), ["d", "c", "b"], "the oldest is dropped beyond the limit");
+    assert.equal(all.unread, 3);
+    assert.deepEqual(log.list(1).notices.map((x) => x.tag), ["d"]);
+    assert.ok(log.has("b") && !log.has("a"));
+
+    assert.equal(log.markRead(all.notices[1].id), true);
+    assert.equal(log.list().unread, 1, "only d is newer than c");
+    log.markRead(all.notices[2].id);
+    assert.equal(log.list().unread, 1, "an older mark changes nothing");
+    assert.equal(log.markRead("nope"), false, "no such notice");
+    assert.equal(log.markRead(), true);
+    assert.equal(log.list().unread, 0);
+    log.add(n("e"));
+    log.add(n("f"));
+    log.add(n("g"));
+    assert.equal(log.list().unread, 3, "the read notice was dropped: everything kept is newer");
+  });
+
+  it("keeps notices and the read mark across restarts, and starts over on a damaged file", async () => {
+    const dir = tempDir("aso-notices-");
+    try {
+      const first = await NoticeLog.open({ dir });
+      first.add(n("a"));
+      first.markRead();
+      first.add(n("b"));
+      await first.flush();
+      const again = await NoticeLog.open({ dir });
+      assert.deepEqual(again.list().notices.map((x) => x.tag), ["b", "a"]);
+      assert.equal(again.list().unread, 1);
+
+      const file = path.join(dir, "notices.json");
+      const saved = JSON.parse(readFileSync(file, "utf8"));
+      writeFileSync(file, JSON.stringify({ notices: [...saved.notices, { title: "no id" }], readId: 42 }));
+      const partial = await NoticeLog.open({ dir });
+      assert.equal(partial.list().notices.length, 2, "an invalid entry is left out");
+      assert.equal(partial.list().unread, 2, "an invalid read mark is ignored");
+
+      writeFileSync(file, "{not json");
+      assert.deepEqual((await NoticeLog.open({ dir })).list(), { notices: [], unread: 0 });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -241,12 +392,12 @@ describe("Notifier", () => {
     s.results.set("https://push.example.com/2", { ok: false, status: 410, error: "gone", gone: true });
     s.results.set("https://push.example.com/3", { ok: false, status: 500, error: "busy", gone: false });
     const msg = { title: "t", body: "b", url: "/", tag: "x" };
-    assert.deepEqual(await n.send(msg), { sent: 1, failed: ["gone", "busy"] });
+    assert.deepEqual(await n.push(msg), { sent: 1, failed: ["gone", "busy"] });
     assert.equal(n.subscriptionCount, 2);
     assert.ok(!n.has("https://push.example.com/2"));
 
     s.calls.length = 0;
-    await n.send(msg, "https://push.example.com/1");
+    await n.push(msg, "https://push.example.com/1");
     assert.deepEqual(s.calls.map((c) => c.endpoint), ["https://push.example.com/1"], "a test goes to one device only");
   });
 });
@@ -441,6 +592,45 @@ describe("push notifications from the Hub", () => {
       assert.equal(sent.filter((n) => n.tag === "worker-avalon").length, 2, "one alert and one all-clear");
       again.ws.close();
       assert.ok(existsSync(path.join(root, ".aso", "workers.json")), "known machines live with the Hub-wide state");
+    } finally {
+      await hub.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps what it tells as notices, even with no device to push to, until marked read", async () => {
+    const root = tempDir("aso-root-");
+    const repo = makeTargetRepo();
+    git(root, "clone", "--quiet", repo, "shop");
+    rmSync(repo, { recursive: true, force: true });
+    const start = () => startHub({ projectsRoot: root, port: 0, host: "127.0.0.1", token: TOKEN, sync: { enabled: false } });
+    let hub = await start();
+    try {
+      assert.deepEqual((await call(hub.port, "/api/notices")).body, { notices: [], unread: 0 });
+      const w = await worker(hub.port, "dev");
+      await call(hub.port, "/api/tasks", { taskId: "api", project: "shop", role: "backend", title: "API", description: "x" });
+      assert.equal((await w.next()).type, "TASK_ASSIGNMENT");
+      w.send(createMessage("STATUS_UPDATE", "dev", { state: "failed", taskId: "api", detail: "npm test failed" }));
+      const listed = await waitFor(async () => {
+        const r = (await call(hub.port, "/api/notices")).body;
+        return r.notices.length ? r : undefined;
+      });
+      w.ws.close();
+      assert.equal(listed.unread, 1);
+      assert.deepEqual({ ...listed.notices[0], id: "", at: "" }, { id: "", at: "", title: "shop: task failed", body: "API\nnpm test failed", url: "/tasks/api", tag: "task-api" });
+
+      for (const limit of ["0", "501", "two"]) assert.equal((await call(hub.port, `/api/notices?limit=${limit}`)).status, 400);
+      assert.equal((await call(hub.port, "/api/notices/read", { upTo: 7 })).status, 400);
+      assert.equal((await call(hub.port, "/api/notices/read", { upTo: "gone" })).status, 404);
+      assert.equal((await call(hub.port, "/api/notices/read", { upTo: listed.notices[0].id })).body.unread, 0);
+      assert.equal((await call(hub.port, "/api/notices/read", { other: true })).status, 400);
+      assert.equal((await call(hub.port, "/api/notices/read", {})).body.unread, 0);
+
+      await hub.close();
+      hub = await start();
+      const after = (await call(hub.port, "/api/notices?limit=10")).body;
+      assert.equal(after.notices.length, 1, "kept across a restart");
+      assert.equal(after.unread, 0);
     } finally {
       await hub.close();
       rmSync(root, { recursive: true, force: true });

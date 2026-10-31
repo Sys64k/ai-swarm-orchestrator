@@ -97,6 +97,9 @@ prints them and reads your answers (an empty answer rejects the plan).
 - `aso plan-approve <planId>` approves a proposed plan.
 - `aso plan-reply <planId> <message...>` answers questions or asks for changes.
 - `aso plan-reject <planId>` rejects a plan.
+- `aso notices` prints what the Hub has told you about (the same as its push notifications),
+  newest first, the unread ones marked `●`: `-n <count>` (default 20), `--unread` for only those,
+  `--read` to mark the ones shown read.
 - `aso task-dismiss <taskId...>` dismisses failed or cancelled tasks nobody will retry, so they
   leave Needs you; `--failed` dismisses every failed one still there (`-P <project>` for one
   project's).
