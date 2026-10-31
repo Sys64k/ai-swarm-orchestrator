@@ -614,6 +614,13 @@ export const DIAGNOSIS_CAUSES = ["task", "model", "platform", "unclear"] as cons
 export const DIAGNOSIS_ACTIONS = ["retry_with_correction", "retry", "dismiss", "platform_issue", "none"] as const;
 export const DIAGNOSIS_SOURCES = ["description", "criteria", "history", "transcript", "qa", "acceptance", "diff"] as const;
 
+/** Proposals that retry the task: their track record asks whether the retry worked. */
+export function isRetryAction(action: (typeof DIAGNOSIS_ACTIONS)[number] | undefined): boolean {
+  return action === "retry" || action === "retry_with_correction";
+}
+/** Earlier diagnoses a task keeps (`pastDiagnoses`). */
+export const PAST_DIAGNOSES = 10;
+
 /** How the console, the CLI and notifications say each cause, proposal and source. */
 export const DIAGNOSIS_CAUSE_LABEL: Record<(typeof DIAGNOSIS_CAUSES)[number], string> = {
   task: "The task was wrong or unclear",
@@ -673,6 +680,41 @@ export const DiagnosisSchema = z
   .describe("The product owner's reading of why the task failed, with one proposal for a person to accept or refuse");
 export type Diagnosis = z.infer<typeof DiagnosisSchema>;
 
+/** How the product owner has done: what it read, what people did with its proposals, and what came of them. */
+export const ProductOwnerRecordSchema = z.object({
+  diagnosed: z.number().int().describe("Failures it read"),
+  couldNot: z.number().int().describe("Failures it couldn't read (no model, an unreadable answer, its budget spent), among those still current"),
+  costUsd: z.number(),
+  decisions: z.object({
+    accepted: z.number().int(),
+    refused: z.number().int(),
+    waiting: z.number().int().describe("Still waiting for a person"),
+    unanswered: z.number().int().describe("Nobody answered before the task moved on (retried or dismissed another way)"),
+  }),
+  causes: z.record(z.enum(DIAGNOSIS_CAUSES), z.number().int()).describe("How many it put down to each cause"),
+  actions: z
+    .record(z.enum(DIAGNOSIS_ACTIONS), z.object({ proposed: z.number().int(), accepted: z.number().int(), refused: z.number().int() }))
+    .describe("Each proposal: how often it was made, accepted and refused"),
+  retries: z
+    .object({
+      accepted: z.number().int().describe("Proposed retries (corrected or not) a person accepted"),
+      merged: z.number().int().describe("…that then merged"),
+      failedAgain: z.number().int().describe("…that failed, or were cancelled, again"),
+      underway: z.number().int().describe("…still going"),
+    })
+    .describe("Whether its retries worked"),
+  quotes: z.object({ total: z.number().int(), notFound: z.number().int().describe("Quotes the Hub didn't find in the source they named") }),
+});
+export type ProductOwnerRecord = z.infer<typeof ProductOwnerRecordSchema>;
+export const ProductOwnerRecordQuerySchema = z.object({
+  project: z.string().optional().describe("Only this project's tasks"),
+  since: z
+    .string()
+    .refine((v) => !Number.isNaN(Date.parse(v)), "a date or time, e.g. 2026-10-01 or 2026-10-01T12:00:00Z")
+    .optional()
+    .describe("Only diagnoses made since then"),
+});
+
 export const TaskSchema = z.object({
   spec: TaskSpecSchema,
   project: z.string(),
@@ -702,6 +744,7 @@ export const TaskSchema = z.object({
   qaSummary: z.string().optional(),
   acceptance: AcceptanceSchema.optional(),
   diagnosis: DiagnosisSchema.optional(),
+  pastDiagnoses: z.array(DiagnosisSchema).optional().describe(`The product owner's diagnoses of the task's earlier failures, oldest first (the latest ${PAST_DIAGNOSES}): what its track record goes by`),
   testsFirst: TestsFirstSchema.optional(),
   screenshots: z
     .object({

@@ -16,6 +16,7 @@ import {
   type ReviewChecks,
   type Acceptance,
   type Diagnosis,
+  PAST_DIAGNOSES,
   type JobRecord,
   type TestsFirst,
   type JobResult,
@@ -54,6 +55,17 @@ export type { TaskState } from "@aso/shared";
 type Rework = NonNullable<PayloadInput<"TASK_ASSIGNMENT">["rework"]>;
 type Feedback = MessageOf<"FEEDBACK_LOOP">["payload"];
 
+/**
+ * A task's diagnoses once `next` is recorded: a reading of an earlier failure moves to
+ * `pastDiagnoses` (the track record goes by them); one of the same failure, or one that wasn't
+ * made, is simply replaced.
+ */
+export function withDiagnosis(task: Pick<TaskRecord, "diagnosis" | "pastDiagnoses">, next: Diagnosis): Pick<TaskRecord, "diagnosis" | "pastDiagnoses"> {
+  const old = task.diagnosis;
+  const keep = old?.state === "ready" && old.attempt !== next.attempt;
+  return { diagnosis: next, pastDiagnoses: keep ? [...(task.pastDiagnoses ?? []), old].slice(-PAST_DIAGNOSES) : task.pastDiagnoses };
+}
+
 export interface TaskRecord {
   spec: TaskSpec;
   /** The project (folder in the Hub's projects root) the task works on. */
@@ -85,6 +97,8 @@ export interface TaskRecord {
   acceptance?: Acceptance;
   /** The product owner's reading of its latest failure, and what a person did with its proposal. */
   diagnosis?: Diagnosis;
+  /** Its readings of earlier failures, oldest first (the latest `PAST_DIAGNOSES`): its track record goes by them. */
+  pastDiagnoses?: Diagnosis[];
   /** A tests-first task's phase: the test writer's, then the builder's against the tests it wrote. */
   testsFirst?: TestsFirst;
   /** What the project's screenshots script saved in the last passing QA run. */
@@ -367,7 +381,9 @@ export class TaskManager {
   setDiagnosis(taskId: string, diagnosis: Diagnosis): void {
     const task = this.tasks.get(taskId);
     if (!task) return;
-    task.diagnosis = diagnosis;
+    const next = withDiagnosis(task, diagnosis);
+    task.diagnosis = next.diagnosis;
+    task.pastDiagnoses = next.pastDiagnoses;
     if (diagnosis.state === "ready") this.note(task, `product owner: ${diagnosis.cause}; proposes ${diagnosis.proposal?.action ?? "nothing"}`);
     else if (diagnosis.state === "failed") this.note(task, `product owner couldn't diagnose it: ${diagnosis.error ?? "no reason"}`);
     this.onChange?.();

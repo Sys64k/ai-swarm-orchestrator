@@ -56,6 +56,7 @@ Answers can gain fields over time: clients should ignore fields they don't know.
 | `POST` | `/api/tasks/:id/cancel` | Stop a task that isn't finished; a worker still on it is cut off at its next model turn |
 | `POST` | `/api/nodes/:id/drain` · `/resume` | Stop or resume giving a worker new jobs; its current job finishes. Resume also cancels a pending restart |
 | `POST` | `/api/nodes/:id/restart` | Drain a service worker and restart it once idle (`restart`: `pending`, then `sent`). 409 for a hand-started worker |
+| `GET` | `/api/product-owner` | The product owner's track record: failures it read, what people did with its proposals, whether accepted retries merged, its causes, and quotes not found. `?project=`, `?since=` |
 | `POST` | `/api/tasks/:id/diagnose` | Ask the product owner why a failed task failed (it does by itself for failures while it runs); its answer lands in the task's `diagnosis` |
 | `POST` | `/api/tasks/:id/diagnosis/accept`, `/refuse` | Answer the product owner's proposal. Accepting does it: a retry (with its correction) or dismissing the task. 409 when there's no fresh proposal |
 | `POST` | `/api/tasks/:id/dismiss` | Done with a failed or cancelled task: it leaves Needs you and the failed count (a retry brings it back) |

@@ -4,8 +4,8 @@ import { useState } from "react";
 import { usePoll } from "./use-poll.ts";
 import { Banner, Section, TopBar } from "./ui.tsx";
 import { ModelSuggestions } from "./model-suggestions.tsx";
-import type { Project, TrackRecordKey, TrackRecords } from "../lib/types.ts";
-import { sinceDaysAgo, TASK_ROLES, TRACK_RECORD_GROUPS, TRACK_RECORD_PERIODS, trackRecordGroupLabel, trackRecordLine, trackRecordsPath } from "../lib/view.ts";
+import type { ProductOwnerRecord, Project, TrackRecordKey, TrackRecords } from "../lib/types.ts";
+import { productOwnerLines, productOwnerPath, sinceDaysAgo, TASK_ROLES, TRACK_RECORD_GROUPS, TRACK_RECORD_PERIODS, trackRecordGroupLabel, trackRecordLine, trackRecordsPath } from "../lib/view.ts";
 
 /** How models, machines, desks, roles and projects have done with their jobs. */
 export function TrackRecordsPage() {
@@ -19,6 +19,8 @@ export function TrackRecordsPage() {
   // Every model with a record, whatever the other filters, to choose from.
   const models = usePoll<TrackRecords>(trackRecordsPath("model"), 60_000);
   const projects = usePoll<Project[]>("projects", 60_000);
+  const owner = usePoll<ProductOwnerRecord>(productOwnerPath({ project, since }), 60_000);
+  const ownerLines = owner.data ? productOwnerLines(owner.data) : [];
   const filtered = !!(project || role || model || days);
 
   return (
@@ -103,6 +105,21 @@ export function TrackRecordsPage() {
               ))}
             </div>
           </Section>
+          {ownerLines.length > 0 && (
+            <Section title="Product owner">
+              <p className="muted small">What it read of failed tasks, what you did with its proposals, and whether the retries you accepted worked.</p>
+              <div className="card-list">
+                {ownerLines.map((l) => (
+                  <div key={l.label} className="row">
+                    <div className="row-main">
+                      <span className="row-title">{l.label}</span>
+                      <span className="row-sub">{l.text}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Section>
+          )}
         </div>
       </main>
     </>

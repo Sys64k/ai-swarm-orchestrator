@@ -52,6 +52,18 @@ export interface Diagnosis {
   decision?: { kind: "accepted" | "refused"; at: string };
 }
 
+/** The product owner's track record (`GET /api/product-owner`). Mirrors ProductOwnerRecord in @aso/shared. */
+export interface ProductOwnerRecord {
+  diagnosed: number;
+  couldNot: number;
+  costUsd: number;
+  decisions: { accepted: number; refused: number; waiting: number; unanswered: number };
+  causes: Record<NonNullable<Diagnosis["cause"]>, number>;
+  actions: Record<DiagnosisAction, { proposed: number; accepted: number; refused: number }>;
+  retries: { accepted: number; merged: number; failedAgain: number; underway: number };
+  quotes: { total: number; notFound: number };
+}
+
 export interface Task {
   /** The project (folder in the Hub's projects root) the task belongs to. */
   project: string;
