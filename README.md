@@ -22,21 +22,21 @@ Git. LLM access goes only through the Hub, so workers never hold API credentials
 ```
 
 <!-- swarm-stats:start -->
-**Built by its own swarm.** Since 27 Oct 2026, the swarm has merged **51 tasks**, **53%** on the first try (14 finished by a stronger model taking over), from **6 of 6** proposed plans approved, at about **$1.25 per task** in model costs.
+**Built by its own swarm.** Since 27 Oct 2026, the swarm has merged **52 tasks**, **54%** on the first try (14 finished by a stronger model taking over), from **7 of 7** proposed plans approved, at about **$1.28 per task** in model costs.
 
 | Model | Tasks finished | First try | QA passed | Acceptance met | Plans approved | Checks it made: met | Its met held up | Cost per task started on it |
 |---|---|---|---|---|---|---|---|---|
-| `gemini-3.8-flash` | 27 | 67% | 41 of 43 | 28 of 39 | – | – | – | $1.46 |
-| `claude-opus-5-5` | 12 | 0% | 19 of 19 | 13 of 19 | 6 of 6 | 4 of 6 | 4 of 4 | – |
-| `gpt-6.1-terra` | 10 | 80% | 16 of 16 | 12 of 16 | – | – | – | $0.63 |
+| `gemini-3.8-flash` | 27 | 67% | 43 of 45 | 29 of 41 | – | – | – | $1.46 |
+| `claude-opus-5-5` | 12 | 0% | 19 of 19 | 13 of 19 | 7 of 7 | 4 of 6 | 4 of 4 | – |
+| `gpt-6.1-terra` | 11 | 82% | 18 of 18 | 14 of 18 | – | – | – | $0.58 |
 | `claude-haiku-5-5` | 2 | 50% | 2 of 2 | 2 of 2 | – | – | – | $0.58 |
-| `gpt-6.1-sol` | 0 | – | – | – | – | 48 of 69 | 46 of 48 | – |
+| `gpt-6.1-sol` | 0 | – | – | – | – | 51 of 73 | 49 of 51 | – |
 
 <sub>Its met held up: of the work it passed as the reviewer, how much no person sent back or closed and whose deploy didn't fail.</sub>
 
 <sub>Cost per task started on it: all in, from a task's first build to its end (every model it escalated to, its acceptance checks, a share of its plan), and failed tasks too.</sub>
 
-<sub>From the Hub's public track record, updated daily (last: 31 Oct 2026). See [Track records](docs/models.md#track-records-how-each-model-has-done).</sub>
+<sub>From the Hub's public track record, updated daily (last: 1 Nov 2026). See [Track records](docs/models.md#track-records-how-each-model-has-done).</sub>
 <!-- swarm-stats:end -->
 
 ## What it does
