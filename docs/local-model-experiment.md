@@ -179,6 +179,13 @@ $2.49 for the five tasks, most of it Opus writing the tests.
   `\b123\s+words\b` in the panel's own element). qwen3-coder never worked it out, and it said
   all tests passed while its own last run showed 4 failing. This is the first failure where tests
   first was the cause. The product owner found it on its own and proposed a corrected retry.
+- **The corrected retry got past the tests but still failed** (accepted in the console, 41
+  min, outside the table). With labels first, `npm test` passed, and the acceptance check
+  found one real bug: shortening the text below 20 characters didn't make a running stats
+  request stale, so its answer could bring the numbers back. The reviewer named it in three
+  rounds; qwen3-coder read it each time as the out-of-order case, whose test already passed,
+  and one round pushed the same commit unchanged. The product owner said "model" this time
+  and proposed nothing: a plain retry would fail the same way, and the fix is one line.
 
 The two are about even: each passed four levels on the first try or with rework, and each run's
 level 5 tests were different, so level 5 doesn't separate them. qwen3-coder was quicker at
