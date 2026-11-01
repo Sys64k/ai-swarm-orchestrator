@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { BASE_COMMIT, LADDER, ladderTasks, modelTag, resultRow, resultsTable } from "./local-model-ladder.mjs";
+import { BASE_COMMIT, LADDER, ladderProject, ladderTasks, modelTag, resultRow, resultsTable } from "./local-model-ladder.mjs";
 
 describe("the local-model ladder", () => {
   it("names a run after its model", () => {
@@ -27,10 +27,20 @@ describe("the local-model ladder", () => {
   });
 
   it("marks a tests-first run's tasks, and refuses a variant it doesn't have", () => {
-    const tasks = ladderTasks("local/x", { testsFirst: true, variant: "B" });
-    assert.ok(tasks.every((t) => t.testsFirst === true && t.taskId.endsWith("-tf")));
+    const tasks = ladderTasks("local/x", { project: ladderProject("local/x", true), testsFirst: true, variant: "B" });
+    assert.ok(tasks.every((t) => t.testsFirst === true && t.project === "ladder-x-tf"));
     assert.equal(tasks[0].title, "Reading time helper");
     assert.throws(() => ladderTasks("local/x", { variant: "Z" }), /no variant Z: use A, B, C, D/);
+  });
+
+  it("names task ids after the run's project, so a second run of a model never meets the first's", () => {
+    assert.equal(ladderProject("local/qwen3-coder:30b"), "ladder-qwen3-coder-30b");
+    assert.equal(ladderProject("local/qwen3-coder:30b", true), "ladder-qwen3-coder-30b-tf");
+    const first = ladderTasks("local/qwen3-coder:30b", { project: "ladder-qwen3-coder-30b-tf", testsFirst: true });
+    const second = ladderTasks("local/qwen3-coder:30b", { project: "qwen-again", testsFirst: true });
+    assert.deepEqual(second.map((t) => t.taskId), [1, 2, 3, 4, 5].map((n) => `qwen-again-l${n}`));
+    assert.equal(first.filter((t) => second.some((u) => u.taskId === t.taskId)).length, 0);
+    assert.equal(ladderTasks("local/x")[0].taskId, "ladder-x-l1", "the default project names them too");
   });
 
   it("prints the results as a table for the experiment page", () => {

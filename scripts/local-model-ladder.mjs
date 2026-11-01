@@ -68,14 +68,22 @@ export function modelTag(model) {
   return model.replace(/^[a-z0-9_.-]+\//, "").replace(/[^a-z0-9]+/gi, "-").toLowerCase().replace(/^-+|-+$/g, "");
 }
 
-/** The ladder's tasks for a model, as `POST /api/tasks` bodies. */
-export function ladderTasks(model, { variant = "A", project, testsFirst = false } = {}) {
+/** A run's default project: `ladder-<model>`, with `-tf` for a tests-first run. */
+export function ladderProject(model, testsFirst = false) {
+  return `ladder-${modelTag(model)}${testsFirst ? "-tf" : ""}`;
+}
+
+/**
+ * The ladder's tasks for a model, as `POST /api/tasks` bodies. Task ids are global on a Hub, so
+ * they're named after the run's project (always a new one), never after the model alone: a
+ * model's second run must not meet its first run's ids.
+ */
+export function ladderTasks(model, { variant = "A", project = ladderProject(model, false), testsFirst = false } = {}) {
   const tasks = LADDER[variant];
   if (!tasks) throw new Error(`no variant ${variant}: use ${Object.keys(LADDER).join(", ")}`);
-  const tag = modelTag(model);
   return tasks.map(([title, description, criteria, files], i) => ({
     project,
-    taskId: `ladder-${tag}-l${i + 1}${testsFirst ? "-tf" : ""}`,
+    taskId: `${project}-l${i + 1}`,
     role: "frontend",
     kind: "feature",
     title,
@@ -144,7 +152,7 @@ async function main() {
   const { hubHttpBase } = await import("@aso/shared");
   const base = hubHttpBase(opts.hub);
   const call = (route, init) => api(base, route, init);
-  const name = opts.project ?? `ladder-${modelTag(opts.model)}${opts.testsFirst ? "-tf" : ""}`;
+  const name = opts.project ?? ladderProject(opts.model, opts.testsFirst);
   const project = await freshProject(call, name, opts.from, opts.base);
   console.log(`project ${project}: ${opts.from} at ${opts.base}`);
 
