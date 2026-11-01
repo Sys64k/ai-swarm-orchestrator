@@ -3,7 +3,7 @@ import http from "node:http";
 import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
-import { CustomPrices, environmentProviders, fetchModels, parseModelList, parseSpec, priceTable, priceUsage, Providers, resolveModel, type Provider } from "@aso/hub";
+import { CustomPrices, environmentProviders, fetchModels, parseModelList, parseSpec, priceTable, priceUsage, Providers, resolveModel, unpricedWarning, type Provider } from "@aso/hub";
 import type { AvailableModel } from "@aso/shared";
 import { tempDir, TOKEN, withHub } from "./helpers.ts";
 
@@ -187,6 +187,22 @@ describe("providers", () => {
     assert.equal(priceUsage("claude-haiku-5-5", million).costUsd, 0.6, "back to the built-in price");
     assert.equal(await prices.remove("claude-haiku-5-5"), false);
     await prices.remove("qwen3-coder:30b");
+  });
+
+  it("prices the older Opus models desks can still be put on", () => {
+    const task = { inputTokens: 0, outputTokens: 1e6, cacheReadTokens: 1e6, cacheWriteTokens: 1e6 };
+    for (const model of ["claude-opus-4-7", "claude-opus-4-6"]) assert.equal(priceUsage(model, task).costUsd, 31.75, model);
+  });
+
+  it("warns about an Anthropic model with no price, and only that", async () => {
+    assert.match(unpricedWarning("anthropic/claude-opus-4-1") ?? "", /no price known for claude-opus-4-1; its cost will read \$0/);
+    assert.equal(unpricedWarning("anthropic/claude-opus-4-7"), undefined, "a built-in price");
+    assert.equal(unpricedWarning("local/qwen3-coder:30b"), undefined, "an OpenAI-compatible model may be free");
+    assert.equal(unpricedWarning("machine/qwen3-coder:30b"), undefined, "a machine's own model costs nothing");
+    const prices = await CustomPrices.open(tempDir());
+    await prices.set("claude-opus-4-1", { input: 15, output: 75 });
+    assert.equal(unpricedWarning("anthropic/claude-opus-4-1"), undefined, "a price set on the Hub");
+    await prices.remove("claude-opus-4-1");
   });
 
   it("charges cached input at its own rate when one is set", async () => {

@@ -1009,6 +1009,7 @@ export const DesksSchema = z.object({
   models: z
     .array(z.object({ model: z.string(), baseUrl: z.string().optional(), concurrency: z.number().int(), running: z.number().int(), waiting: z.number().int() }))
     .describe("Each model desks use, with its calls at once and how busy it is"),
+  warning: z.string().optional().describe("After POST /api/desks: why the new model's cost would read $0 (an Anthropic model with no price known)"),
 });
 export type Desks = z.infer<typeof DesksSchema>;
 export const SignedInSchema = z.object({ ok: z.literal(true) });

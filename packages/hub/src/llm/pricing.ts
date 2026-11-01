@@ -14,6 +14,8 @@ const PRICES: Record<string, Price> = {
   "claude-opus-5-5": { input: 4, output: 20, cacheWrite: 5, cacheRead: 0.2 },
   "claude-opus-5": { input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 },
   "claude-opus-4-8": { input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 },
+  "claude-opus-4-7": { input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 },
+  "claude-opus-4-6": { input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 },
   "claude-sonnet-5-5": { input: 2, output: 10, cacheWrite: 2.5, cacheRead: 0.2 },
   "claude-haiku-5-5": { input: 0.1, output: 0.5, cacheWrite: 0.125, cacheRead: 0.01 },
 };
@@ -56,6 +58,17 @@ function priceOf(model: string): Price | undefined {
 
 export function hasPrice(model: string): boolean {
   return priceOf(model) !== undefined;
+}
+
+/**
+ * Why a spec's cost would read $0 although it costs money, or undefined. Only Anthropic's API is
+ * known to charge: an OpenAI-compatible model without a price may be a free local one.
+ */
+export function unpricedWarning(spec: string): string | undefined {
+  const [provider, ...rest] = spec.split("/");
+  const model = rest.join("/");
+  if (provider !== "anthropic" || hasPrice(model)) return undefined;
+  return `no price known for ${model}; its cost will read $0, so task budgets won't stop it (set one with aso price set)`;
 }
 
 export interface TokenCounts {

@@ -88,7 +88,7 @@ import { Providers, resolveModel } from "./llm/providers.js";
 import { CustomPrices } from "./llm/custom-prices.js";
 import { buildEscalationPolicy } from "./llm/escalation.js";
 import { ConversationManager } from "./llm/conversations.js";
-import { hasPrice, priceTable } from "./llm/pricing.js";
+import { hasPrice, priceTable, unpricedWarning } from "./llm/pricing.js";
 import { gitHttpHandler } from "./git/http-backend.js";
 import { type DependencyInstaller } from "./git/hub-repo.js";
 import type { GitSync } from "./git/sync.js";
@@ -1070,7 +1070,10 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     } catch (err) {
       return c.json({ error: (err as Error).message }, 400);
     }
-    return c.json(deskView());
+    log.info(`desks: ${desks.join(", ")} now on ${spec ?? "the default model"}`);
+    const warning = spec ? unpricedWarning(spec) : undefined;
+    if (warning) log.warn(`desks: ${warning}`);
+    return c.json({ ...deskView(), ...(warning ? { warning } : {}) });
   });
 
   /** Maps the errors a request can hit to HTTP statuses. */

@@ -4070,6 +4070,10 @@
               "additionalProperties": false
             },
             "description": "Each model desks use, with its calls at once and how busy it is"
+          },
+          "warning": {
+            "description": "After POST /api/desks: why the new model's cost would read $0 (an Anthropic model with no price known)",
+            "type": "string"
           }
         },
         "required": [
