@@ -147,6 +147,10 @@ export function transcriptTail(entries: readonly TranscriptEntry[], limit = TRAN
 }
 
 /** What the product owner is shown of a failed task, by source. */
+/** Terminal colour and cursor codes (test runners' output): noise to a reader, and a quote of the visible text must still match. */
+const ANSI = /\x1b\[[0-9;?]*[A-Za-z]/g;
+export const withoutAnsi = (s: string) => s.replace(ANSI, "");
+
 export function failureSources(task: FailedTask, transcript: readonly TranscriptEntry[], diff: TaskDiff | undefined): Sources {
   const a = task.acceptance;
   const acceptance = a
@@ -165,8 +169,8 @@ export function failureSources(task: FailedTask, transcript: readonly Transcript
     description: `${task.spec.title}\n\n${task.spec.description.trim()}`,
     criteria: task.spec.acceptanceCriteria.map((c, i) => `${i + 1}. ${c}`).join("\n"),
     history: [...task.history.slice(-HISTORY_EVENTS).map((h) => `${h.at.slice(0, 19)} ${h.event}`), ...(task.detail ? [`failed: ${task.detail}`] : [])].join("\n"),
-    transcript: transcriptTail(transcript.filter((e) => e.kind !== "qa")),
-    qa,
+    transcript: withoutAnsi(transcriptTail(transcript.filter((e) => e.kind !== "qa"))),
+    qa: withoutAnsi(qa),
     acceptance,
     diff: diff ? diffText(diff, DIFF_LIMIT).text : "",
   };
@@ -189,7 +193,7 @@ export function diagnosisPrompt(task: FailedTask, sources: Sources): string {
 }
 
 /** Whitespace-insensitive: a quote copied across a line break still counts as found. */
-const squash = (s: string) => s.replace(/\s+/g, " ").trim();
+const squash = (s: string) => withoutAnsi(s).replace(/\s+/g, " ").trim();
 /** A non-empty string, trimmed, or undefined. */
 const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
 
