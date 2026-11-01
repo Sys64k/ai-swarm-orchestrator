@@ -19,7 +19,7 @@ export interface LlmResponse {
   /** Model that produced the final answer (differs from the requested one after a fallback). */
   model: string;
   tokens: TokenCounts;
-  /** What the model thought before answering, as readable text, when its provider returns it: shown, never sent back. */
+  /** What the model thought before answering, when its provider returns it: trimmed and never empty, shown, never sent back. */
   reasoning?: string;
 }
 
@@ -108,10 +108,14 @@ export function summarizesThinking(model: string): boolean {
   return /^claude-[a-z]+-5(?:-\d+)?$/.test(model);
 }
 
+/** Pieces of reasoning as one text (`LlmResponse.reasoning`): trimmed, empty ones left out, undefined when none is left. */
+export function joinReasoning(parts: ReadonlyArray<string | undefined>): string | undefined {
+  return parts.map((p) => p?.trim()).filter(Boolean).join("\n\n") || undefined;
+}
+
 /** The readable thinking in an answer's thinking blocks, if any. */
 export function thinkingText(content: readonly Anthropic.Beta.BetaContentBlock[]): string | undefined {
-  const text = content.flatMap((b) => (b.type === "thinking" && b.thinking.trim() ? [b.thinking.trim()] : [])).join("\n\n");
-  return text || undefined;
+  return joinReasoning(content.map((b) => (b.type === "thinking" ? b.thinking : undefined)));
 }
 
 /** Official Anthropic API via @anthropic-ai/sdk. */

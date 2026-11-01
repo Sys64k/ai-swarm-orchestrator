@@ -762,7 +762,7 @@ export function terminalLines(entries: readonly TranscriptEntry[], opts: { showQ
       case "text":
         return { ...base, style: "say", text: e.text };
       case "thinking":
-        // Long reasoning collapses like long output.
+        // The reasoning goes in the body, which the terminal collapses when long, like output.
         return { ...base, style: "think", text: "thinking", body: e.text };
       case "call":
         return { ...base, ...describeCall(e.name, e.input) };

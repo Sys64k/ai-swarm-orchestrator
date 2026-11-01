@@ -1,8 +1,8 @@
 import type Anthropic from "@anthropic-ai/sdk";
-import type { LlmAdapter, LlmRequest, LlmResponse } from "./adapter.js";
+import { joinReasoning, type LlmAdapter, type LlmRequest, type LlmResponse } from "./adapter.js";
 import { classifyHttp, flattenToolResult, parseToolArguments, postForStream, providerLabel, TOOL_IMAGES_INTRO, type OpenAiBaseOptions } from "./openai-http.js";
 import { PROVIDER_DATA } from "./provider-data.js";
-import { accumulateChunks, sseData, type ChatAnswer, type ChatToolCall } from "@aso/shared";
+import { accumulateChunks, PRESET_INFO, sseData, type ChatAnswer, type ChatToolCall } from "@aso/shared";
 
 export { accumulateChunks, classifyHttp, sseData, type ChatAnswer };
 
@@ -100,15 +100,18 @@ export function chatRequest(
  * answer: it isn't part of the answer, but it is shown. One left open (an answer cut off while
  * thinking) runs to the end.
  */
-export function splitThoughts(content: string): { text: string; thoughts: string[] } {
+export function splitInlineReasoning(content: string): { text: string; reasoning: string[] } {
   const inline = /<(think|thought)>([\s\S]*?)(?:<\/\1>|$)/g;
-  const thoughts = [...content.matchAll(inline)].map((m) => m[2]!.trim()).filter(Boolean);
-  return { text: content.replace(inline, "").trim(), thoughts };
+  const reasoning = [...content.matchAll(inline)].map((m) => m[2]!.trim()).filter(Boolean);
+  return { text: content.replace(inline, "").trim(), reasoning };
 }
 
+const GEMINI_HOST = new URL(PRESET_INFO.gemini.baseUrl!).host;
+
 /** Gemini returns a summary of its thinking (inline, as `<thought>`) only when asked; it's billed the same either way. */
-export function thoughtsRequest(baseUrl: string | undefined): Record<string, unknown> {
-  return baseUrl?.includes("generativelanguage.googleapis.com") ? { extra_body: { google: { thinking_config: { include_thoughts: true } } } } : {};
+export function reasoningRequest(baseUrl: string | undefined): Record<string, unknown> {
+  const host = baseUrl ? URL.parse(baseUrl)?.host : undefined;
+  return host === GEMINI_HOST ? { extra_body: { google: { thinking_config: { include_thoughts: true } } } } : {};
 }
 
 const STOP_REASONS: Record<string, string> = { stop: "end_turn", tool_calls: "tool_use", function_call: "tool_use", length: "max_tokens", content_filter: "refusal" };
@@ -116,8 +119,7 @@ const STOP_REASONS: Record<string, string> = { stop: "end_turn", tool_calls: "to
 /** The answer in the Hub's format. Rejects tool calls whose arguments aren't a JSON object. */
 export function fromChatAnswer(answer: ChatAnswer, requestedModel: string): LlmResponse {
   const content: Anthropic.Beta.BetaContentBlock[] = [];
-  const { text, thoughts } = splitThoughts(answer.content);
-  const reasoning = [answer.reasoning?.trim(), ...thoughts].filter(Boolean).join("\n\n");
+  const { text, reasoning: inline } = splitInlineReasoning(answer.content);
   if (text) content.push({ type: "text", text, citations: null } as Anthropic.Beta.BetaTextBlock);
   for (const call of answer.toolCalls) {
     const input = parseToolArguments(call.function.name, call.function.arguments);
@@ -132,7 +134,7 @@ export function fromChatAnswer(answer: ChatAnswer, requestedModel: string): LlmR
     stopReason: STOP_REASONS[finish] ?? finish,
     refusalCategory: null,
     model: answer.model ?? requestedModel,
-    ...(reasoning ? { reasoning } : {}),
+    reasoning: joinReasoning([answer.reasoning, ...inline]),
     tokens: {
       inputTokens: Math.max(0, (answer.usage?.prompt_tokens ?? 0) - cached),
       outputTokens: answer.usage?.completion_tokens ?? 0,
@@ -156,7 +158,7 @@ export class OpenAiCompatibleAdapter implements LlmAdapter {
   async complete(req: LlmRequest): Promise<LlmResponse> {
     const body = await postForStream(this.opts, "chat/completions", {
       ...chatRequest(req, { model: this.model, maxTokens: this.opts.maxTokens, maxTokensField: this.opts.maxTokensField, vision: this.opts.vision ?? false }),
-      ...thoughtsRequest(this.opts.baseUrl),
+      ...reasoningRequest(this.opts.baseUrl),
       stream: true,
       stream_options: { include_usage: true },
     });
