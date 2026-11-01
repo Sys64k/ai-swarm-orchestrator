@@ -147,6 +147,13 @@ function testsFirstBrief(t: NonNullable<TaskRecord["testsFirst"]>): string[] {
     ...t.files.map((f) => `- ${f}`),
     ...(t.notes ? ["", "The test writer's notes:", t.notes] : []),
     "",
+    "How to work from them:",
+    "1. Read every one of these test files before writing code. They are your spec: use the names, signatures, props, routes and shapes they import and call.",
+    "2. Run them first, and note which fail and why.",
+    "3. Write the code, running them as you go, until they all pass.",
+    "4. Before you finish, run the project's full test command and report what that last run showed, not what you expect it to show.",
+    "5. If a test keeps failing and the cause isn't your code, read exactly what it checks (its input, what it reads, its pattern) before trying again.",
+    "",
     t.disputed
       ? "They already went back to their writer once after a builder said one was wrong, and this is the result: make them pass."
       : "If you are sure a test is wrong (it contradicts the task or the existing code), call dispute_tests with which and why: the tests go back to their writer, once. A test that's hard to pass isn't wrong.",

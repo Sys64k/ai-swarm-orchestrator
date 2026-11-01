@@ -79,6 +79,10 @@ describe("tests-first tasks", () => {
         dev.send(createMessage("STATUS_UPDATE", "dev", { state: "in_progress", taskId: "greet", slot: 1 }));
         await firstTurn(dev, "greet");
         assert.match(builder.requests[0].messages[0].content as string, /## Tests written first\n.*can't change them[\s\S]*- greet\.test\.mjs\n\nThe test writer's notes:\ngreet\.test\.mjs: greet\(\) returns hello/);
+        const brief = builder.requests[0].messages[0].content as string;
+        assert.match(brief, /How to work from them:\n1\. Read every one of these test files before writing code\. They are your spec/, "told to start from the tests");
+        assert.match(brief, /2\. Run them first[\s\S]*4\. Before you finish, run the project's full test command and report what that last run showed/, "told to run them first and report the last run");
+        assert.match(brief, /5\.[^\n]*\n\nIf you are sure a test is wrong.*dispute_tests/, "the dispute rule follows the steps");
         assert.match(task.history.map((h) => h.event).join("\n"), /\(claude-opus-5-5, writes the tests first\)[\s\S]*\(claude-haiku-5-5/);
 
         // 3. A builder that loosens the test is refused.
