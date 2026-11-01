@@ -122,6 +122,8 @@ export function transcriptLine(e: TranscriptEntry): string {
       return `[event] ${e.text}`;
     case "text":
       return `[agent] ${cut(e.text, ENTRY_LIMIT)}`;
+    case "thinking":
+      return `[thinking] ${cut(e.text, ENTRY_LIMIT)}`;
     case "call":
       return `[call ${e.name}] ${cut(JSON.stringify(e.input), 300)}`;
     case "result":

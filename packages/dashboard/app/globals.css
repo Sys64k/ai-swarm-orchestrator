@@ -493,6 +493,21 @@ code,
   font-size: 0.9rem;
 }
 
+.tline-think .tline-text {
+  color: var(--term-dim);
+  font-style: italic;
+}
+
+.tline-think .tline-text::before {
+  content: "◌ ";
+}
+
+.tline-think .tline-body {
+  color: var(--term-dim);
+  white-space: pre-wrap;
+  font-family: system-ui, sans-serif;
+}
+
 .tline-command .tline-text {
   color: var(--term-cmd);
   font-weight: 600;

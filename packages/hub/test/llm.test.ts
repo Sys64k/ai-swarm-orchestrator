@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { describe, it } from "node:test";
 import Anthropic from "@anthropic-ai/sdk";
-import { AnthropicApiAdapter, classify, shouldHold, UNREACHABLE_HOLD_MS, contextFull, CREDIT_MESSAGE, DEFAULT_PLAN_BUDGET_USD, describeCutOff, toolResultBlocks, withCutOffNote, LlmError, priceUsage, resetTime, usageLimitMessage, taskPrompt, TURN_WARNING, withTurnWarning, type LlmRequest } from "@aso/hub";
+import { AnthropicApiAdapter, classify, summarizesThinking, thinkingText, shouldHold, UNREACHABLE_HOLD_MS, contextFull, CREDIT_MESSAGE, DEFAULT_PLAN_BUDGET_USD, describeCutOff, toolResultBlocks, withCutOffNote, LlmError, priceUsage, resetTime, usageLimitMessage, taskPrompt, TURN_WARNING, withTurnWarning, type LlmRequest } from "@aso/hub";
 import { CONVERSATION_MAX_IMAGE_BYTES, CONVERSATION_MAX_IMAGES, createMessage, type AgentMessage } from "@aso/shared";
 import { callModelWithRetry, startWorker, type ModelReply } from "@aso/worker";
 import {
@@ -419,6 +419,22 @@ describe("LLM gateway (Hub)", () => {
     assert.equal(await budget({ adapter: new ScriptedModel(() => reply([], "end_turn")), planBudgetUsd: 7.5 }), 7.5);
   });
 
+  it("puts the model's reasoning in the transcript before what it says", () => {
+    const model = new ScriptedModel(() => ({ ...reply([text("Done.")], "end_turn"), reasoning: "The greeting needs a name." }));
+    return withHub(
+      async (ctx) => {
+        const w = await implementer(ctx, "dev", "greet");
+        w.send(prompt("dev", crypto.randomUUID(), 0));
+        assert.equal(result(await w.next()).outcome, "ok");
+        const transcript = await (await fetch(`http://127.0.0.1:${ctx.port}/api/tasks/greet/transcript`, { headers: { authorization: `Bearer ${TOKEN}` } })).json() as { entries: Array<{ kind: string; text?: string }> };
+        const said = transcript.entries.filter((e) => e.kind === "thinking" || e.kind === "text").map((e) => [e.kind, e.text]);
+        assert.deepEqual(said, [["thinking", "The greeting needs a name."], ["text", "Done."]]);
+        w.ws.close();
+      },
+      { llm: { adapter: model } },
+    );
+  });
+
   it("shows the model an image from view_image, and keeps the transcript to its description", () => {
     const model = new ScriptedModel((_req, n) =>
       n === 0 ? reply([toolUse("tu_img", "view_image", { path: "shot.png" })]) : reply([text("Looks right.")], "end_turn"),
@@ -534,11 +550,30 @@ describe("Anthropic API adapter", () => {
     assert.deepEqual(p.output_config, { effort: "high" });
     assert.equal(p.fallbacks, "default");
     assert.deepEqual(p.betas, ["server-side-fallback-2026-07-01"]);
-    assert.equal("thinking" in p, false, "Opus 5.5 rejects disabled thinking; leave it adaptive");
+    assert.deepEqual(p.thinking, { type: "adaptive", display: "summarized" }, "adaptive as it already was (Opus 5.5 refuses disabled), with readable thinking");
 
     const haiku = fakeClient(() => ({ content: [], stop_reason: "end_turn", model: "claude-haiku-5-5", usage: { input_tokens: 1, output_tokens: 1 } }) as never);
     await new AnthropicApiAdapter({ model: "claude-haiku-5-5", effort: "low", maxTokens: 1000, client: haiku.client }).complete({ system: "", tools: [], messages: [] });
     assert.equal("fallbacks" in haiku.calls[0], false);
+  });
+
+  it("returns Claude's summarized thinking as reasoning, asking for it only where thinking is already on", async () => {
+    assert.deepEqual(["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-opus-5", "claude-fable-5-1"].map(summarizesThinking), [true, true, true, true, true]);
+    assert.deepEqual(["claude-opus-4-8", "claude-haiku-4-5", "claude-sonnet-4-6"].map(summarizesThinking), [false, false, false], "these would start thinking, and cost more");
+    const { client, calls } = fakeClient(() => ({
+      content: [{ type: "thinking", thinking: "The test fails on the trailing space.", signature: "s" }, { type: "thinking", thinking: "", signature: "t" }, { type: "text", text: "Fixing it." }],
+      stop_reason: "end_turn",
+      model: "claude-opus-5-5",
+      usage: { input_tokens: 1, output_tokens: 1 },
+    }) as never);
+    const r = await new AnthropicApiAdapter({ model: "claude-opus-5-5", effort: "high", maxTokens: 1000, client }).complete({ system: "", tools: [], messages: [] });
+    assert.equal(r.reasoning, "The test fails on the trailing space.");
+    assert.equal(r.content.length, 3, "thinking blocks stay in the conversation as they came");
+    assert.equal(thinkingText([{ type: "thinking", thinking: " ", signature: "x" }] as never), undefined, "omitted thinking is no reasoning");
+    const old = fakeClient(() => ({ content: [], stop_reason: "end_turn", model: "claude-opus-4-8", usage: { input_tokens: 1, output_tokens: 1 } }) as never);
+    await new AnthropicApiAdapter({ model: "claude-opus-4-8", effort: "high", maxTokens: 1000, client: old.client }).complete({ system: "", tools: [], messages: [] });
+    assert.equal("thinking" in old.calls[0], false);
+    assert.equal(calls.length, 1);
   });
 
   it("classifies errors as retryable or not", async () => {

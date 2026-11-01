@@ -7,7 +7,9 @@ import {
   fromChatAnswer,
   LlmError,
   OpenAiCompatibleAdapter,
+  splitInlineReasoning,
   sseData,
+  reasoningRequest,
   startHub,
   toChatMessages,
   toChatTools,
@@ -110,6 +112,30 @@ describe("OpenAI-compatible models: translation", () => {
     assert.equal(res.stopReason, "tool_use");
     assert.equal(res.model, "qwen3-coder:30b");
     assert.deepEqual(res.tokens, { inputTokens: 20, outputTokens: 30, cacheReadTokens: 100, cacheWriteTokens: 0 });
+  });
+
+  it("keeps the model's reasoning apart from its answer: inline, or in its own field", () => {
+    const res = fromChatAnswer(accumulateChunks(sseData('data: {"choices":[{"delta":{"content":"<think>hmm</think>Let me look."}}]}')), "m");
+    assert.equal(res.reasoning, "hmm");
+    // Gemini's thought summary, when asked for.
+    assert.deepEqual(splitInlineReasoning("<thought>**Checking**\n391 = 17 × 23.\n</thought>No"), { text: "No", reasoning: ["**Checking**\n391 = 17 × 23."] });
+    assert.deepEqual(splitInlineReasoning("Done.<think>cut off while thin"), { text: "Done.", reasoning: ["cut off while thin"] }, "an answer cut off while thinking");
+    assert.deepEqual(splitInlineReasoning("no reasoning"), { text: "no reasoning", reasoning: [] });
+    const fields = accumulateChunks([
+      { choices: [{ delta: { reasoning: "Ollama " } }] },
+      { choices: [{ delta: { reasoning_content: "and vLLM" } }] },
+      { choices: [{ delta: { content: "Answer" } }] },
+    ]);
+    assert.equal(fields.reasoning, "Ollama and vLLM");
+    assert.deepEqual(fromChatAnswer(fields, "m").content, [{ type: "text", text: "Answer", citations: null }], "never part of the answer");
+    assert.equal(fromChatAnswer(accumulateChunks([{ choices: [{ delta: { content: "x" } }] }]), "m").reasoning, undefined);
+  });
+
+  it("asks Gemini, and only Gemini, for its thought summary", () => {
+    assert.deepEqual(reasoningRequest("https://generativelanguage.googleapis.com/v1beta/openai"), { extra_body: { google: { thinking_config: { include_thoughts: true } } } });
+    assert.deepEqual(reasoningRequest("https://api.openai.com/v1"), {});
+    assert.deepEqual(reasoningRequest("http://avalon:11434/v1"), {});
+    assert.deepEqual(reasoningRequest("https://proxy.example/generativelanguage.googleapis.com/v1"), {}, "the host, not a path");
   });
 
   it("keeps a tool call's provider data and sends it back next turn, but never to Anthropic (Gemini's thought signature)", () => {

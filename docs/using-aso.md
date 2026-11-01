@@ -26,8 +26,10 @@ like an app.
   - **+ New project** on the home screen creates a new repository in the projects folder.
     The name is checked as you type, and the folder it will create is shown.
 - **Task.**
-  - **Live** shows the agent's work as a terminal: its messages, the commands it runs with
-    their output, file edits, Hub events and QA results. Finished tasks keep this transcript.
+  - **Live** shows the agent's work as a terminal: its thinking, its messages, the commands it
+    runs with their output, file edits, Hub events and QA results. Finished tasks keep this
+    transcript. Thinking shows for models whose provider returns it: Claude 5 models (a summary),
+    Gemini (a summary) and open models that reason, such as gpt-oss and glm on Ollama.
   - **Details** shows the description, acceptance criteria, files touched and history.
   - **Cancel** a task that's going the wrong way, or **Retry** a failed one. **Edit and retry**
     corrects its description or acceptance criteria first, for a criterion that can't be met.

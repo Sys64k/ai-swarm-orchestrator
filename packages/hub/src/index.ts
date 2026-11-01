@@ -21,7 +21,7 @@ export {
   type RoutingPolicy,
   type RoutingRequest,
 } from "./routing.js";
-export { AnthropicApiAdapter, apiErrorText, classify, CREDIT_MESSAGE, LlmError, resetTime, usageLimitMessage, type Effort, type LlmAdapter, type LlmRequest, type LlmResponse } from "./llm/adapter.js";
+export { AnthropicApiAdapter, apiErrorText, classify, summarizesThinking, thinkingText, CREDIT_MESSAGE, LlmError, resetTime, usageLimitMessage, type Effort, type LlmAdapter, type LlmRequest, type LlmResponse } from "./llm/adapter.js";
 export { ConversationManager, shouldHold, UNREACHABLE_HOLD_MS, DEFAULT_PLAN_BUDGET_USD, TURN_WARNING, contextFull, CONTEXT_FULL_BELOW_TOKENS, describeCutOff, toolResultBlocks, withCutOffNote, withTurnWarning, parseTotals, addToDay, spentOn, utcDay, type DaySpend, type UsageTotals } from "./llm/conversations.js";
 export { priceTable, priceUsage } from "./llm/pricing.js";
 export { CustomPrices } from "./llm/custom-prices.js";
@@ -59,7 +59,7 @@ export { apiChanges, apiFileContents, apiHash, API_COPY_PATH, syncApiCopies, syn
 export { PROVIDER_DATA, withoutProviderData } from "./llm/provider-data.js";
 export { buildEscalationPolicy, calledSpec, canonicalSpec, canSwitchFrom, DEFAULT_JUNIOR_TRIES, roundModel, type EscalationPolicy, type EscalationTask, type RoundModel } from "./llm/escalation.js";
 export { fromResponsesAnswer, finalResponse, OpenAiResponsesAdapter, responsesRequest, toResponsesInput, toResponsesTools, type ResponsesAnswer } from "./llm/openai-responses.js";
-export { OpenAiCompatibleAdapter, OPENAI_PREFIX, accumulateChunks, classifyHttp, fromChatAnswer, sseData, toChatMessages, toChatTools, type ChatAnswer, type ChatMessage } from "./llm/openai-compatible.js";
+export { OpenAiCompatibleAdapter, OPENAI_PREFIX, accumulateChunks, classifyHttp, fromChatAnswer, splitInlineReasoning, reasoningRequest, sseData, toChatMessages, toChatTools, type ChatAnswer, type ChatMessage } from "./llm/openai-compatible.js";
 export { deskName, DeskModels, desksOf, modelConcurrency, type ModelSettings, type Route, type ToolCheck } from "./llm/desk-models.js";
 export { checkToolUse } from "./llm/tool-check.js";
 export { CLAUDE_FALLBACK, DEFAULT_CLAUDE_MODEL, environmentProviders, fetchModels, parseModelList, parseSpec, providerView, Providers, resolveModel, type Provider, type ProviderInput, type ProviderStatus } from "./llm/providers.js";

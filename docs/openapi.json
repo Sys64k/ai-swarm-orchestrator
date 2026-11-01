@@ -2860,6 +2860,35 @@
                     },
                     "kind": {
                       "type": "string",
+                      "const": "thinking"
+                    },
+                    "text": {
+                      "type": "string",
+                      "description": "What the model thought before answering, where its provider returns it"
+                    }
+                  },
+                  "required": [
+                    "seq",
+                    "at",
+                    "kind",
+                    "text"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "seq": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "at": {
+                      "type": "string",
+                      "description": "ISO 8601 time"
+                    },
+                    "kind": {
+                      "type": "string",
                       "const": "call"
                     },
                     "id": {
