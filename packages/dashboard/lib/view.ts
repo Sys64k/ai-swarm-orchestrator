@@ -745,7 +745,7 @@ export function buildOf(version: string): string {
 export interface TerminalLine {
   seq: number;
   at: string;
-  style: "say" | "command" | "tool" | "output" | "error" | "event" | "pass" | "fail";
+  style: "say" | "think" | "command" | "tool" | "output" | "error" | "event" | "pass" | "fail";
   text: string;
   /** Output shown under the line (collapsed when long). */
   body?: string;
@@ -761,6 +761,9 @@ export function terminalLines(entries: readonly TranscriptEntry[], opts: { showQ
     switch (e.kind) {
       case "text":
         return { ...base, style: "say", text: e.text };
+      case "thinking":
+        // Long reasoning collapses like long output.
+        return { ...base, style: "think", text: "thinking", body: e.text };
       case "call":
         return { ...base, ...describeCall(e.name, e.input) };
       case "result":

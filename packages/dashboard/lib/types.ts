@@ -276,6 +276,7 @@ export interface Llm {
 
 export type TranscriptEntry = { seq: number; at: string } & (
   | { kind: "text"; text: string }
+  | { kind: "thinking"; text: string }
   | { kind: "call"; id: string; name: string; input: Record<string, unknown> }
   | { kind: "result"; id: string; name?: string; content: string; isError: boolean }
   | { kind: "event"; text: string }

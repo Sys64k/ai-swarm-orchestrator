@@ -52,7 +52,7 @@ Answers can gain fields over time: clients should ignore fields they don't know.
 | `GET` | `/api/nodes` | Registered nodes with hardware, latest heartbeat, current task, the aso build each runs (`version`), `outdated` (a different build than the Hub serves), `supervisor`, `updates` (`package`: it can update itself), `draining`, `restart`, `updateTo` (the build a pending or running update installs), `updateError` (why the Hub stopped updating that machine) and `actions` (what the console may do now, with `why` for a refusal) |
 | `GET` | `/api/tasks` | All tasks with state, nodes, commits, rework round, `crew` (the agents that built and tested it) and history |
 | `GET` | `/api/tasks/:id` | A single task (history, agent turn log, LLM cost, files touched) |
-| `GET` | `/api/tasks/:id/transcript`, `/api/plans/:id/transcript` | What the agent said and did: text, tool calls, command output, events, QA verdicts. `?after=<seq>` returns only newer entries |
+| `GET` | `/api/tasks/:id/transcript`, `/api/plans/:id/transcript` | What the agent thought, said and did: its reasoning (where its provider returns it), text, tool calls, command output, events, QA verdicts. `?after=<seq>` returns only newer entries |
 | `POST` | `/api/tasks/:id/cancel` | Stop a task that isn't finished; a worker still on it is cut off at its next model turn |
 | `POST` | `/api/nodes/:id/drain` · `/resume` | Stop or resume giving a worker new jobs; its current job finishes. Resume also cancels a pending restart |
 | `POST` | `/api/nodes/:id/restart` | Drain a service worker and restart it once idle (`restart`: `pending`, then `sent`). 409 for a hand-started worker |

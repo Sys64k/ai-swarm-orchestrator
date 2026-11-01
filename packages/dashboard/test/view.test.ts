@@ -409,6 +409,12 @@ describe("terminal lines", () => {
     assert.equal(lines[9].body, "trace");
   });
 
+  it("shows the model's reasoning as a collapsible thinking line, never as quiet noise", () => {
+    const thinking = { seq: 1, at, kind: "thinking" as const, text: "The test fails on the trailing space." };
+    assert.deepEqual(terminalLines([thinking]), [{ seq: 1, at, style: "think", text: "thinking", body: "The test fails on the trailing space." }]);
+    assert.equal(isQuiet(thinking), false);
+  });
+
   it("treats successful results of quiet tools as noise, never errors or commands", () => {
     assert.deepEqual(entries.map((e) => isQuiet(e)), [false, false, false, false, true, false, false, false, false, false]);
   });

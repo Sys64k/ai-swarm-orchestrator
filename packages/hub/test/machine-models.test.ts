@@ -37,7 +37,7 @@ describe("a machine's own model (Hub)", () => {
       const call = payloadOf(await gpu.next(), "MODEL_CALL");
       assert.equal(call.model, "qwen3-coder:30b", "its chosen model");
       assert.ok(Array.isArray(call.request.messages) && Array.isArray(call.request.tools), "a ready Chat Completions request");
-      gpu.send(createMessage("MODEL_ANSWER", "gpu", { callId: call.callId, outcome: "ok", answer: { content: "done on my GPU", toolCalls: [], finishReason: "stop", usage: { prompt_tokens: 900, completion_tokens: 40 } } }));
+      gpu.send(createMessage("MODEL_ANSWER", "gpu", { callId: call.callId, outcome: "ok", answer: { content: "done on my GPU", reasoning: "Ollama sends its thinking apart.", toolCalls: [], finishReason: "stop", usage: { prompt_tokens: 900, completion_tokens: 40 } } }));
 
       const result = payloadOf(await gpu.next(), "PROMPT_RESULT");
       assert.equal(result.outcome, "ok");
@@ -45,6 +45,8 @@ describe("a machine's own model (Hub)", () => {
       const task = ctx.hub.tasks.get("greet")!;
       assert.ok(task.history.some((h) => /\(machine\/qwen3-coder:30b, this machine's own model\)/.test(h.event)), "the history names it");
       assert.equal(task.llm.costUsd, 0, "free for the Hub");
+      const transcript = await (await fetch(`http://127.0.0.1:${ctx.port}/api/tasks/greet/transcript`, { headers: { authorization: `Bearer ${TOKEN}` } })).json() as { entries: Array<{ kind: string; text?: string }> };
+      assert.ok(transcript.entries.some((e) => e.kind === "thinking" && e.text === "Ollama sends its thinking apart."), "a machine's model's reasoning reaches the transcript");
       gpu.ws.close();
     }, hubOpts);
   });

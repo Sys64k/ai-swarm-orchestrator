@@ -15,6 +15,7 @@ const SAFE_KEY = /^(task|plan)-[A-Za-z0-9_-]{1,128}$/;
 /** One line of what happened in a task or plan, in the order it happened. */
 export type TranscriptEntry = { seq: number; at: string } & (
   | { kind: "text"; text: string }
+  | { kind: "thinking"; text: string }
   | { kind: "call"; id: string; name: string; input: Record<string, unknown> }
   | { kind: "result"; id: string; name?: string; content: string; isError: boolean }
   | { kind: "event"; text: string }
@@ -114,6 +115,7 @@ function keyOf(subject: TranscriptSubject): string | undefined {
 function trim(input: TranscriptInput): TranscriptInput {
   switch (input.kind) {
     case "text":
+    case "thinking":
     case "event":
       return { ...input, text: clip(input.text) };
     case "result":

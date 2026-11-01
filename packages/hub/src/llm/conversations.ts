@@ -654,6 +654,7 @@ export class ConversationManager {
       conv.turn++;
       const actions = toolCalls.length ? toolCalls.map(describeCall) : [`(${response.stopReason})`];
       conv.subject.recordTurn({ turn: result.turn, actions, costUsd: usage.costUsd });
+      if (response.reasoning?.trim()) this.transcripts?.append(conv.subject, { kind: "thinking", text: response.reasoning.trim() });
       if (text.trim()) this.transcripts?.append(conv.subject, { kind: "text", text });
       for (const c of toolCalls) this.transcripts?.append(conv.subject, { kind: "call", id: c.id, name: c.name, input: c.input });
       this.save(conv, result);

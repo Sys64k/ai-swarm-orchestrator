@@ -16,6 +16,8 @@ export interface ChatToolCall {
 /** What a streamed answer adds up to. */
 export interface ChatAnswer {
   content: string;
+  /** The model's reasoning, where its provider sends it apart from the answer (`reasoning`, `reasoning_content`). */
+  reasoning?: string;
   toolCalls: ChatToolCall[];
   finishReason: string | null;
   model?: string;
@@ -25,7 +27,7 @@ export interface ChatAnswer {
 export interface ChatChunk {
   model?: string;
   choices?: Array<{
-    delta?: { content?: string | null; tool_calls?: Array<{ index?: number; id?: string; function?: { name?: string; arguments?: string }; extra_content?: unknown }> };
+    delta?: { content?: string | null; reasoning?: string | null; reasoning_content?: string | null; tool_calls?: Array<{ index?: number; id?: string; function?: { name?: string; arguments?: string }; extra_content?: unknown }> };
     finish_reason?: string | null;
   }>;
   usage?: ChatAnswer["usage"];
@@ -41,6 +43,9 @@ export function accumulateChunks(chunks: Iterable<ChatChunk>): ChatAnswer {
     const choice = chunk.choices?.[0];
     if (!choice) continue;
     if (choice.delta?.content) answer.content += choice.delta.content;
+    // Ollama and OpenRouter name it `reasoning`; DeepSeek and vLLM `reasoning_content`.
+    const reasoning = choice.delta?.reasoning || choice.delta?.reasoning_content;
+    if (reasoning) answer.reasoning = (answer.reasoning ?? "") + reasoning;
     for (const [i, d] of (choice.delta?.tool_calls ?? []).entries()) {
       const index = d.index ?? i;
       const call = calls.get(index) ?? { id: "", type: "function" as const, function: { name: "", arguments: "" } };
@@ -75,6 +80,7 @@ export function* sseData(body: string): Generator<ChatChunk> {
 /** A ChatAnswer as sent over the wire (MODEL_ANSWER). */
 export const ChatAnswerSchema = z.strictObject({
   content: z.string().max(4_000_000),
+  reasoning: z.string().max(4_000_000).optional(),
   toolCalls: z
     .array(
       z.object({

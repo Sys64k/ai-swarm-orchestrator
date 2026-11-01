@@ -616,11 +616,19 @@ who wrote the tests, and which.
 
 ### Transcripts
 
-Every task and plan has a transcript: the agent's text, each tool call (long string inputs
+Every task and plan has a transcript: the agent's reasoning, its text, each tool call (long string inputs
 trimmed to 2,000 characters), each tool result, Hub events and QA verdicts with the runner's
 output. Long text keeps its first 1,500 and last 6,500 characters, because the end of a test
 run is usually what matters. The `ConversationManager` records the agent side as turns pass
 through it. `TaskManager` and `PlanManager` record events and verdicts.
+
+- **Reasoning.** An adapter returns what the model thought as `LlmResponse.reasoning`, kept
+  for the transcript only and never sent back:
+  - Claude 5 models: the summarized text of their thinking blocks (`display: "summarized"`,
+    asked only of models that think by default, so it costs nothing extra);
+  - Gemini: its `<thought>` summary, asked for with `include_thoughts`;
+  - open models: a `reasoning` or `reasoning_content` field, or inline `<think>` tags (also
+    from a worker's own model, through `MODEL_ANSWER`).
 
 - **Storage.** Kept in memory (last 1,000 entries per transcript) and appended to
   `<stateDir>/transcripts/<task|plan>-<id>.jsonl`. They survive restarts and outlive the

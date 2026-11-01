@@ -7,7 +7,9 @@ import {
   fromChatAnswer,
   LlmError,
   OpenAiCompatibleAdapter,
+  splitThoughts,
   sseData,
+  thoughtsRequest,
   startHub,
   toChatMessages,
   toChatTools,
@@ -110,6 +112,29 @@ describe("OpenAI-compatible models: translation", () => {
     assert.equal(res.stopReason, "tool_use");
     assert.equal(res.model, "qwen3-coder:30b");
     assert.deepEqual(res.tokens, { inputTokens: 20, outputTokens: 30, cacheReadTokens: 100, cacheWriteTokens: 0 });
+  });
+
+  it("keeps the model's reasoning apart from its answer: inline, or in its own field", () => {
+    const res = fromChatAnswer(accumulateChunks(sseData('data: {"choices":[{"delta":{"content":"<think>hmm</think>Let me look."}}]}')), "m");
+    assert.equal(res.reasoning, "hmm");
+    // Gemini's thought summary, when asked for.
+    assert.deepEqual(splitThoughts("<thought>**Checking**\n391 = 17 × 23.\n</thought>No"), { text: "No", thoughts: ["**Checking**\n391 = 17 × 23."] });
+    assert.deepEqual(splitThoughts("Done.<think>cut off while thin"), { text: "Done.", thoughts: ["cut off while thin"] }, "an answer cut off while thinking");
+    assert.deepEqual(splitThoughts("no reasoning"), { text: "no reasoning", thoughts: [] });
+    const fields = accumulateChunks([
+      { choices: [{ delta: { reasoning: "Ollama " } }] },
+      { choices: [{ delta: { reasoning_content: "and vLLM" } }] },
+      { choices: [{ delta: { content: "Answer" } }] },
+    ]);
+    assert.equal(fields.reasoning, "Ollama and vLLM");
+    assert.deepEqual(fromChatAnswer(fields, "m").content, [{ type: "text", text: "Answer", citations: null }], "never part of the answer");
+    assert.equal("reasoning" in fromChatAnswer(accumulateChunks([{ choices: [{ delta: { content: "x" } }] }]), "m"), false);
+  });
+
+  it("asks Gemini, and only Gemini, for its thought summary", () => {
+    assert.deepEqual(thoughtsRequest("https://generativelanguage.googleapis.com/v1beta/openai"), { extra_body: { google: { thinking_config: { include_thoughts: true } } } });
+    assert.deepEqual(thoughtsRequest("https://api.openai.com/v1"), {});
+    assert.deepEqual(thoughtsRequest("http://avalon:11434/v1"), {});
   });
 
   it("keeps a tool call's provider data and sends it back next turn, but never to Anthropic (Gemini's thought signature)", () => {

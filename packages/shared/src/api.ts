@@ -854,6 +854,7 @@ export const TranscriptSchema = z.object({
   entries: z.array(
     z.discriminatedUnion("kind", [
       z.object({ ...EntryBase, kind: z.literal("text"), text: z.string() }),
+      z.object({ ...EntryBase, kind: z.literal("thinking"), text: z.string().describe("What the model thought before answering, where its provider returns it") }),
       z.object({ ...EntryBase, kind: z.literal("call"), id: z.string(), name: z.string(), input: z.record(z.string(), z.unknown()) }),
       z.object({ ...EntryBase, kind: z.literal("result"), id: z.string(), name: z.string().optional(), content: z.string(), isError: z.boolean() }),
       z.object({ ...EntryBase, kind: z.literal("event"), text: z.string() }),

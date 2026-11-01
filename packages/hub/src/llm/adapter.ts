@@ -19,6 +19,8 @@ export interface LlmResponse {
   /** Model that produced the final answer (differs from the requested one after a fallback). */
   model: string;
   tokens: TokenCounts;
+  /** What the model thought before answering, as readable text, when its provider returns it: shown, never sent back. */
+  reasoning?: string;
 }
 
 export class LlmError extends Error {
@@ -97,6 +99,21 @@ export interface AnthropicAdapterOptions {
   client?: Pick<Anthropic, "beta">;
 }
 
+/**
+ * Claude models that think by default (adaptive), so asking for a readable summary of it changes
+ * nothing but what comes back: their thinking text is otherwise empty. Older models would start
+ * thinking (and cost more) if asked, so they're left as they are.
+ */
+export function summarizesThinking(model: string): boolean {
+  return /^claude-[a-z]+-5(?:-\d+)?$/.test(model);
+}
+
+/** The readable thinking in an answer's thinking blocks, if any. */
+export function thinkingText(content: readonly Anthropic.Beta.BetaContentBlock[]): string | undefined {
+  const text = content.flatMap((b) => (b.type === "thinking" && b.thinking.trim() ? [b.thinking.trim()] : [])).join("\n\n");
+  return text || undefined;
+}
+
 /** Official Anthropic API via @anthropic-ai/sdk. */
 export class AnthropicApiAdapter implements LlmAdapter {
   readonly name = "anthropic-api";
@@ -122,6 +139,7 @@ export class AnthropicApiAdapter implements LlmAdapter {
         // Caches the growing conversation prefix: each turn re-reads earlier turns at the cache rate.
         cache_control: { type: "ephemeral" },
         output_config: { effort: this.opts.effort },
+        ...(summarizesThinking(this.model) ? { thinking: { type: "adaptive" as const, display: "summarized" as const } } : {}),
         ...(fallbacks ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const } : {}),
       });
       message = await stream.finalMessage();
@@ -134,6 +152,7 @@ export class AnthropicApiAdapter implements LlmAdapter {
       stopReason: message.stop_reason,
       refusalCategory: message.stop_details?.category ?? null,
       model: message.model,
+      reasoning: thinkingText(message.content),
       tokens: {
         inputTokens: u.input_tokens,
         outputTokens: u.output_tokens,
