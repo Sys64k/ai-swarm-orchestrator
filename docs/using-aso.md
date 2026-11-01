@@ -113,8 +113,10 @@ cutting text.
    criterion and the edge cases, and runs them: they must fail because the feature is missing,
    not because a test is broken. Nothing goes to QA yet.
 2. **The builder** (the desk's model, escalation as usual) gets the task with the list of tests
-   and the writer's notes, and writes the code that makes them pass. A push that changes those
-   tests is refused, so it can't loosen a test to fit its code.
+   and the writer's notes, and writes the code that makes them pass. It's told how: read every
+   test file before writing code and take its interface from them, run them first, work until
+   they pass, and before finishing run the full test command and report what that run showed. A
+   push that changes those tests is refused, so it can't loosen a test to fit its code.
 3. **A disputed test** goes back once: a builder sure that a test is wrong calls `dispute_tests`
    (which test, and why), and the tests go back to their writer with that reason (not a rework
    round). Only that builder has the tool, and only until it's used; giving up without it is an
