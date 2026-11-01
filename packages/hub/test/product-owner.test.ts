@@ -93,6 +93,20 @@ describe("what the product owner reads", () => {
     assert.doesNotMatch(sources.transcript, /qa fail/);
     assert.equal(sources.diff, "", "no branch to show");
   });
+
+  it("gives test output without its terminal colour codes, so a quote of what it shows is found", () => {
+    const at = "2026-11-01T12:00:00.000Z";
+    const colored = "Tests  \x1b[1m\x1b[31m4 failed\x1b[39m\x1b[22m | \x1b[1m\x1b[32m508 passed\x1b[39m\x1b[22m (512)";
+    const entries = [
+      { seq: 0, at, kind: "result" as const, id: "c", name: "run_command", content: colored, isError: true },
+      { seq: 1, at, kind: "qa" as const, outcome: "fail" as const, summary: "4 tests fail", output: colored },
+    ];
+    const sources = failureSources(TASK, entries, undefined);
+    assert.match(sources.transcript, /Tests {2}4 failed \| 508 passed \(512\)/);
+    assert.doesNotMatch(sources.transcript + sources.qa, /\x1b/);
+    const d = readDiagnosis(answer({ ...GOOD, evidence: [{ source: "transcript", quote: "4 failed | 508 passed (512)" }] }).content, sources);
+    assert.ok(!("error" in d) && d.evidence?.[0].found);
+  });
 });
 
 describe("readDiagnosis", () => {
