@@ -153,6 +153,37 @@ task), nearly all of it Opus writing the tests, plus $0.12 for acceptance checks
 Tests first takes glm-4.7-flash from three levels to five, the same as qwen3-coder without tests
 first, but it took more rework rounds to get there.
 
+qwen3-coder on the same five tasks with tests first (project `ladder-qwen3-coder-30b-tf`, run
+2026-11-01), next to glm-4.7-flash:
+
+| Level | Task | qwen3-coder | glm-4.7-flash |
+|---|---|---|---|
+| 1 | Word count helper | ✅ 1st try, 3 min | ✅ 1st try, 4 min |
+| 2 | Tidy document titles on save | ✅ 1 rework round, 7 min | ✅ 1 rework round, 7 min |
+| 3 | Backup export and import | ✅ 2 rework rounds, 11 min | ✅ 1st try, 14 min |
+| 4 | Clear all recent documents | ✅ 1st try, 9 min | ✅ 2 rework rounds, 132 min |
+| 5 | Text statistics before reading | ❌ 3 rework rounds, 109 min | ✅ 2 rework rounds, 17 min |
+
+$2.49 for the five tasks, most of it Opus writing the tests.
+
+- **Level 2** copied `deriveTitle`'s cutting code into a new helper; the acceptance check sent it
+  back to share it, as it did glm.
+- **Level 3** merged imported documents by id but kept duplicate ids from the backup itself;
+  the acceptance check caught it twice before it used the merged map.
+- **Level 4** was much faster than glm's: first try in 9 minutes, against glm's 132.
+- **Level 5 failed on the tests, not only the model.** Opus's panel tests read the panel's whole
+  text, pasted text included, and their pattern refuses a number straight after a `.`. The
+  pasted sample ends in `.`, so the `123 words` layout the tests' own notes allow could never
+  pass: `friend.123 words`. Only a label first (`Words: 123`) or a space before the numbers works.
+  Opus writes new tests for every run, and glm's didn't have this trap (they matched
+  `\b123\s+words\b` in the panel's own element). qwen3-coder never worked it out, and it said
+  all tests passed while its own last run showed 4 failing. This is the first failure where tests
+  first was the cause. The product owner found it on its own and proposed a corrected retry.
+
+The two are about even: each passed four levels on the first try or with rework, and each run's
+level 5 tests were different, so level 5 doesn't separate them. qwen3-coder was quicker at
+level 4, glm at level 3. One run each is too few to call.
+
 ### Many failures were ours
 
 Weak models hit rough edges that strong ones step around. Each of these looked like the model
@@ -220,8 +251,9 @@ above compare only roughly. From here on, models compare on the same tasks.
   task. Track records can show it once there are enough of each.
 - **Is qwen3-coder worth its desk?** Its everyday record against Gemini's (finished, first
   try, cost all in) will show whether its share of the work should grow or end.
-- **qwen3-coder with all five levels tests first** would show whether glm-4.7-flash with tests
-  first is a match for it, or still behind.
+- **Tests written first can be wrong.** A test that refuses what its own notes allow can't be
+  fixed by the builder, which may not change it. A writer that runs its tests against a
+  sketch of the feature, or a dispute the product owner can settle, would catch that.
 - **devstral** might drive the agent with a firmer reminder to call a tool; not tried.
 - **Ollama Cloud's larger models** (added as a provider in [#132](https://github.com/Sys64k/ai-swarm-orchestrator/pull/132))
   would show how much model size moves the line between pass and fail.
