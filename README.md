@@ -56,6 +56,33 @@ Git. LLM access goes only through the Hub, so workers never hold API credentials
 - **Runs itself.** The Hub and workers run as services, find each other on the LAN, update
   themselves from `main`, and notify your phone.
 
+## Local models
+
+A free model on your own GPU can take part of the work, if the tests are written first. We ran
+four Ollama models up a ladder of five tasks, from one function to a change across the API and
+the UI:
+
+- **Two can't drive an agent.** `devstral:24b` and `qwen2.5-coder:14b` describe tool calls
+  instead of making them, so they never get as far as code.
+- **Two can, but trip on logic with edge cases.** `qwen3-coder:30b` and `glm-4.7-flash` wire
+  code together fine and fail where "done" is subtle. With Opus writing the tests first,
+  glm-4.7-flash passed all five levels and qwen3-coder four, at about $0.60 per finished task
+  all in, nearly all of it the test writing.
+
+```mermaid
+xychart-beta
+    title "Levels passed, of five"
+    x-axis ["glm-4.7-flash", "glm-4.7-flash, tests first", "qwen3-coder", "qwen3-coder, tests first"]
+    y-axis "Levels passed" 0 --> 5
+    bar [3, 5, 3, 4]
+```
+
+<sub>glm-4.7-flash ran the same five tasks both ways. qwen3-coder's run without tests first was
+on tasks of the same size but not the same tasks, so compare that bar roughly.</sub>
+
+How we ran it, every failure, and what it changed in ASO:
+[The local-model experiment](docs/local-model-experiment.md).
+
 ## Technologies
 
 TypeScript on Node.js (a monorepo: Hub, worker, Architect, CLI), Zod for the WebSocket
