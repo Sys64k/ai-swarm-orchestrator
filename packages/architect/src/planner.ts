@@ -71,33 +71,36 @@ export class Planner {
         turn = reply.turn + 1;
         log.info(`${planId} turn ${reply.turn}: ${reply.toolCalls.map(describeToolCall).join(", ") || reply.stopReason}`);
 
-        const ask = reply.toolCalls.find((c) => c.name === "ask_questions");
-        const submit = reply.toolCalls.find((c) => c.name === "submit_plan");
+        // A model may call submit_plan (or ask_questions) more than once in a turn: each call gets an answer.
+        const asks = reply.toolCalls.filter((c) => c.name === "ask_questions");
+        const submits = reply.toolCalls.filter((c) => c.name === "submit_plan");
         results = [];
-        for (const call of reply.toolCalls) if (call !== submit && call !== ask) results.push(await tools.execute(call));
+        for (const call of reply.toolCalls) if (call.name !== "submit_plan" && call.name !== "ask_questions") results.push(await tools.execute(call));
 
-        if (ask && !submit) {
-          const parsed = AGENT_TOOLS.ask_questions.input.safeParse(ask.input);
-          if (parsed.success) {
-            log.info(`${planId}: asking ${parsed.data.questions.length} question(s)`);
-            return { planId, outcome: "questions", questions: parsed.data.questions, context: parsed.data.context };
+        if (asks.length && !submits.length) {
+          for (const ask of asks) {
+            const parsed = AGENT_TOOLS.ask_questions.input.safeParse(ask.input);
+            if (parsed.success) {
+              log.info(`${planId}: asking ${parsed.data.questions.length} question(s)`);
+              return { planId, outcome: "questions", questions: parsed.data.questions, context: parsed.data.context };
+            }
+            results.push({ toolUseId: ask.id, content: `invalid questions, fix and ask again: ${issues(parsed.error)}`, isError: true });
           }
-          results.push({ toolUseId: ask.id, content: `invalid questions, fix and ask again: ${issues(parsed.error)}`, isError: true });
-        } else if (ask) {
-          results.push({ toolUseId: ask.id, content: "ignored: you also submitted a plan in this turn", isError: true });
+        } else {
+          for (const ask of asks) results.push({ toolUseId: ask.id, content: "ignored: you also submitted a plan in this turn", isError: true });
         }
 
-        if (submit) {
+        // The first plan that passes is the one proposed; each that doesn't is told why.
+        for (const submit of submits) {
           const parsed = AGENT_TOOLS.submit_plan.input.safeParse(submit.input);
-          const problem = parsed.success
-            ? planProblem(parsed.data.tasks)
-            : issues(parsed.error);
+          const problem = parsed.success ? planProblem(parsed.data.tasks) : issues(parsed.error);
           if (parsed.success && !problem) {
             log.info(`${planId}: proposing ${parsed.data.tasks.length} task(s)`);
             return { planId, outcome: "proposed", summary: parsed.data.summary, tasks: parsed.data.tasks };
           }
           results.push({ toolUseId: submit.id, content: `plan rejected, fix it and submit again: ${problem}`, isError: true });
-        } else if (reply.toolCalls.length === 0) {
+        }
+        if (reply.toolCalls.length === 0) {
           results = [];
           return { planId, outcome: "failed", error: `the model stopped without submitting a plan: ${reply.text.slice(0, 1000) || "(no text)"}` };
         }

@@ -362,3 +362,39 @@ describe("Architect → plan → workers (real nodes, scripted model)", () => {
     );
   });
 });
+
+describe("Architect: several submit_plan calls in one turn", () => {
+  it("answers each call, and proposes the first plan that passes", () => {
+    const valid = { summary: "The good one", tasks: [planned("feature", { title: "Add feature" })] };
+    const model = new ScriptedModel((req) => {
+      const n = req.messages.length;
+      // A list sent as a string, and a dependency on a task that isn't in the plan.
+      if (n === 1)
+        return reply([
+          toolUse("s1", "submit_plan", { summary: "files as text", tasks: [{ ...planned("feature"), files: "src/feature.js" }] }),
+          toolUse("s2", "submit_plan", { summary: "missing dependency", tasks: [planned("feature", { dependsOn: ["nowhere"] })] }),
+        ]);
+      const r = lastToolResults(req);
+      assert.match(r.s1.content, /plan rejected, fix it and submit again: tasks\.0\.files/);
+      assert.match(r.s2.content, /plan rejected, fix it and submit again: .*nowhere/);
+      assert.ok(!/unknown tool/.test(JSON.stringify(r)), "no call is taken for an unknown tool");
+      return reply([toolUse("s3", "submit_plan", { summary: "still text", tasks: [{ ...planned("feature"), files: "x" }] }), toolUse("s4", "submit_plan", valid)]);
+    });
+    return withHub(
+      async (ctx) => {
+        const architect = startArchitect({ hub: `127.0.0.1:${ctx.port}`, token: TOKEN, nodeId: "arch", workDir: tempDir("aso-arch-") });
+        try {
+          const planId = (await api(ctx, "/api/plans", { method: "POST", body: JSON.stringify({ requirement: "Add the answer" }) })).body.planId;
+          const plan = await waitFor(() => ["proposed", "failed"].includes(ctx.hub.plans.get(planId)!.state) && ctx.hub.plans.get(planId)!, 15_000);
+          assert.equal(plan.state, "proposed", plan.history.map((h) => h.event).join("\n"));
+          assert.equal(plan.summary, "The good one");
+          assert.equal(plan.llm.calls, 2);
+        } finally {
+          architect.stop();
+          await architect.idle();
+        }
+      },
+      { llm: { adapter: model } },
+    );
+  });
+});
