@@ -135,6 +135,13 @@ contains a misbehaving agent, and the known limits. In short:
 
 Report vulnerabilities privately (see [SECURITY.md](SECURITY.md#reporting-a-vulnerability)).
 
+## A hosted Hub?
+
+We're finding out whether a hosted Hub is worth building: we'd run the Hub, and you'd connect your
+own worker machines and keep your own model keys. Nothing is built yet. If you'd use it,
+[tell us in a short form](https://github.com/Sys64k/ai-swarm-orchestrator/issues/new?template=hosted-hub-interest.yml):
+who you are, how many workers you'd connect, and what you'd use it for.
+
 ## License
 
 [MIT](LICENSE)

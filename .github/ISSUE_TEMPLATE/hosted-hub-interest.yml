@@ -1,0 +1,42 @@
+name: Hosted Hub — interested?
+description: Tell us you'd use a hosted Hub (we run the Hub, you bring your workers and model keys). Nothing is built yet.
+title: "Hosted Hub interest: "
+labels: ["hosted-hub-interest"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        We're finding out whether a hosted Hub is worth building: we'd run the Hub, and you'd connect
+        your own worker machines and keep your own model keys. Nothing is built yet and nothing is for
+        sale; this only tells us who would use it. Issues are public, so share only what you're happy
+        to have seen.
+  - type: dropdown
+    id: who
+    attributes:
+      label: Who are you?
+      options:
+        - A solo developer
+        - A small team
+        - A company
+    validations:
+      required: true
+  - type: input
+    id: workers
+    attributes:
+      label: How many worker machines would you connect?
+      placeholder: e.g. 2 laptops and a GPU box
+    validations:
+      required: false
+  - type: textarea
+    id: use
+    attributes:
+      label: What would you use it for?
+      description: The kind of projects, and why hosted rather than running the Hub yourself.
+    validations:
+      required: true
+  - type: checkboxes
+    id: contact
+    attributes:
+      label: Follow-up
+      options:
+        - label: I'm happy to be contacted here for a short chat about it
