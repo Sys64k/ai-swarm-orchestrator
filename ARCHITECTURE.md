@@ -1214,10 +1214,11 @@ next merged task.
 
 ## 10. LLM gateway and agent loop
 
-Model inference happens at Anthropic. The **Hub** holds the API key, every conversation and
-the prompts. The **worker** runs the loop and executes the tools. Files never leave the
-worker; only what the model asks to see (file contents, command output) travels, as tool
-results.
+Model inference happens at the model's provider, or in Ollama on a worker machine. The **Hub**
+holds the API keys, every conversation and the prompts. The **worker** runs the loop and executes
+the tools. Files never leave the worker; only what the model asks to see (file contents, command
+output) travels, as tool results. For what each turn really contains, with examples, see
+[How an agent talks to its model](docs/agent-conversation.md).
 
 ```mermaid
 sequenceDiagram
