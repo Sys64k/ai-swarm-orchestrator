@@ -20,7 +20,7 @@ describe("the swarm's stats in the README", () => {
     const md = renderStats(stats);
     assert.match(
       md,
-      /^\*\*Built by its own swarm\.\*\* Since 27 Oct 2026, the swarm has merged \*\*42 tasks\*\*, \*\*71%\*\* on the first try \(8 finished by a stronger model taking over\), from \*\*12 of 14\*\* proposed plans approved, at about \*\*\$0\.31 per task\*\* in model costs\./,
+      /^\*\*The swarm's track record\.\*\* Since 27 Oct 2026, the swarm has merged \*\*42 tasks\*\*, \*\*71%\*\* on the first try \(8 finished by a stronger model taking over\), from \*\*12 of 14\*\* proposed plans approved, at about \*\*\$0\.31 per task\*\* in model costs\./,
     );
     assert.match(md, /\| Model \| Tasks finished \| First try \| QA passed \| Acceptance met \| Plans approved \| Checks it made: met \| Its met held up \| Cost per task started on it \|/);
     assert.match(md, /Its met held up: of the work it passed/, "says what held up means");
