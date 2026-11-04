@@ -116,6 +116,7 @@ The full setup, with options, updates and remote access, is in
 |---|---|
 | [Installation](docs/installation.md) | The Hub and worker machines, services, updates, Tailscale, phone notifications |
 | [Using ASO](docs/using-aso.md) | The console, planning with the Architect, tasks and how they flow, projects, roles |
+| [How an agent talks to its model](docs/agent-conversation.md) | What each turn sends and receives, with examples: the system prompt, the brief, tools and tool results |
 | [Models](docs/models.md) | Claude, OpenAI-compatible and local models, a model per desk |
 | [GitHub and deploys](docs/github.md) | Pull requests, pushing `main`, deploying after a merge |
 | [CLI reference](docs/cli.md) | Every `aso` command |
