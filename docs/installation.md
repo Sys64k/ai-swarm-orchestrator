@@ -13,6 +13,8 @@ npm run package            # builds everything + release/aso.tgz (the package wo
 npm link -w @aso/cli       # puts `aso` on your PATH (or use: npm run aso -- <command>)
 ```
 
+If `npm link` stops with `EACCES`, see [If npm says EACCES](#if-npm-says-eacces).
+
 Start the Hub, in Docker (recommended) or directly:
 
 ```bash
@@ -112,6 +114,20 @@ Each machine joins with **its own worker key**: on the Hub machine, `aso worker-
 curl -fo /tmp/aso.tgz http://192.168.1.10:7420/dist/aso.tgz && npm install -g /tmp/aso.tgz
 aso service install --join <code>
 ```
+
+### If npm says EACCES
+
+`npm link` and `npm install -g` write to npm's global folder. Where root owns that folder, as it
+often does when Node.js comes from a system package, they stop with `EACCES: permission denied`.
+Give npm a folder of your own, once on each machine, and run the command again:
+
+```bash
+npm config set prefix ~/.npm-global
+echo 'export PATH="$HOME/.npm-global/bin:$PATH"' >> ~/.bashrc   # or your shell's own file
+export PATH="$HOME/.npm-global/bin:$PATH"
+```
+
+Running them with `sudo` isn't needed. Updates to `aso` then use the same folder.
 
 ### Finding the Hub on the LAN
 

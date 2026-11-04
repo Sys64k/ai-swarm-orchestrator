@@ -19,7 +19,7 @@
     "@aso/hub": "*",
     "@aso/shared": "*",
     "@aso/worker": "*",
-    "commander": "^15.0.0",
+    "commander": "^14.0.3",
     "qrcode": "1.5.4"
   },
   "devDependencies": {
