@@ -132,7 +132,7 @@ many of them. Stronger models often ask for several calls at once, which saves r
 
 This is also what a model has to get right before anything else. A model that writes "I'll read the file"
 without a call, or writes the call as JSON in its text, leaves the worker nothing to run. That's why two
-models in [the local-model experiment](local-model-experiment.md#two-of-the-four-models-cant-drive-an-agent)
+models in [the local-model experiment](local-model-experiment.md#two-of-the-five-models-cant-drive-an-agent)
 scored 0 of 5.
 
 ## The next request

@@ -38,11 +38,11 @@ const day = (iso) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric",
 export function renderStats(stats) {
   const t = stats.tasks;
   if (!t.finished && !stats.plans.proposed) {
-    return "**Built by its own swarm.** The swarm's track record appears here once it has finished its first tasks.";
+    return "**The swarm's track record** appears here once it has finished its first tasks.";
   }
   const since = stats.since ? `Since ${day(stats.since)}, the` : "The";
   const headline = [
-    `**Built by its own swarm.** ${since} swarm has merged **${t.finished} task${t.finished === 1 ? "" : "s"}**`,
+    `**The swarm's track record.** ${since} swarm has merged **${t.finished} task${t.finished === 1 ? "" : "s"}**`,
     t.finished ? `, **${percent(t.firstTry, t.finished)}** on the first try` : "",
     t.tookOver ? ` (${t.tookOver} finished by a stronger model taking over)` : "",
     stats.plans.proposed ? `, from **${stats.plans.approved} of ${stats.plans.proposed}** proposed plans approved` : "",

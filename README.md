@@ -21,8 +21,11 @@ Git. LLM access goes only through the Hub, so workers never hold API credentials
    └────────────┘ └────────────┘ └────────────┘
 ```
 
+The swarm's work so far has been on a separate web UI and on test projects. This repository itself
+is written with Claude Code.
+
 <!-- swarm-stats:start -->
-**Built by its own swarm.** Since 27 Oct 2026, the swarm has merged **64 tasks**, **56%** on the first try (16 finished by a stronger model taking over), from **8 of 8** proposed plans approved, at about **$1.16 per task** in model costs.
+**The swarm's track record.** Since 27 Oct 2026, the swarm has merged **64 tasks**, **56%** on the first try (16 finished by a stronger model taking over), from **8 of 8** proposed plans approved, at about **$1.16 per task** in model costs.
 
 | Model | Tasks finished | First try | QA passed | Acceptance met | Plans approved | Checks it made: met | Its met held up | Cost per task started on it |
 |---|---|---|---|---|---|---|---|---|
@@ -59,15 +62,15 @@ Git. LLM access goes only through the Hub, so workers never hold API credentials
 ## Local models
 
 A free model on your own GPU can take part of the work, if the tests are written first. We ran
-four Ollama models up a ladder of five tasks, from one function to a change across the API and
+five Ollama models up a ladder of five tasks, from one function to a change across the API and
 the UI:
 
 - **Two can't drive an agent.** `devstral:24b` and `qwen2.5-coder:14b` describe tool calls
   instead of making them, so they never get as far as code.
-- **Two can, but trip on logic with edge cases.** `qwen3-coder:30b` and `glm-4.7-flash` wire
-  code together fine and fail where "done" is subtle. With Opus writing the tests first,
-  glm-4.7-flash passed all five levels and qwen3-coder four, at about $0.60 per finished task
-  all in, nearly all of it the test writing.
+- **Three can, but trip on logic with edge cases.** `qwen3-coder:30b`, `gpt-oss:20b` and
+  `glm-4.7-flash` each passed three levels: they wire code together fine and fail where "done"
+  is subtle. With Opus writing the tests first, glm-4.7-flash passed all five levels and
+  qwen3-coder four, at about $0.60 per finished task all in, nearly all of it the test writing.
 
 ```mermaid
 xychart-beta
@@ -78,7 +81,8 @@ xychart-beta
 ```
 
 <sub>glm-4.7-flash ran the same five tasks both ways. qwen3-coder's run without tests first was
-on tasks of the same size but not the same tasks, so compare that bar roughly.</sub>
+on tasks of the same size but not the same tasks, so compare that bar roughly. gpt-oss isn't
+shown: with tests first it ran only two tasks, and passed one.</sub>
 
 How we ran it, every failure, and what it changed in ASO:
 [The local-model experiment](docs/local-model-experiment.md).

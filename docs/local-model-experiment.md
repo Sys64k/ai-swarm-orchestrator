@@ -1,7 +1,7 @@
 # The local-model experiment
 
 How simple does a task have to be before a free model running on our own GPU gets it right?
-Run on 2026-10-29 on the `aso-test` project, with four models on avalon's Ollama. This page
+Run from 2026-10-29 to 2026-11-01 on the `aso-test` project, with five models on avalon's Ollama. This page
 says why we ran it, how, what we found, and what we changed in the core because of it.
 
 ## Why
@@ -39,18 +39,18 @@ The first aim is measured below. The second isn't yet: see [What's still open](#
 
 ## What we found
 
-### Two of the four models can't drive an agent
+### Two of the five models can't drive an agent
 
 | Model | Result |
 |---|---|
-| `devstral:24b` | Narrates its plan ("I'll read the file…") instead of calling a tool. Passes a one-call check (`aso llm-check`) but not a real conversation with twenty tools. 0 of 5. |
+| `devstral:24b` | Narrates its plan ("I'll read the file…") instead of calling a tool. Passes a one-call check (`aso llm-check`) but not a real conversation with a builder's full tool list. 0 of 5. |
 | `qwen2.5-coder:14b` | Writes tool calls as JSON in its text instead of calling the tool. 0 of 5. |
 
 No task level matters for these: they never get as far as code.
 
-### The two that can
+### The first two that can
 
-Without tests first:
+A third, glm-4.7-flash, came later and has [its own section](#glm-47-flash). Without tests first:
 
 | Level | qwen3-coder 30B | gpt-oss 20B |
 |---|---|---|
@@ -88,8 +88,9 @@ Opus wrote the tests, then the local model wrote the code ([Tests first](using-a
 | Text statistics (level 5) | glm-4.7-flash | ❌ 4 tries | ✅ 2 rework rounds, 17 min | $0.58 average |
 
 Almost all of that cost is Opus writing the tests (about $0.48); the local model is free. For
-scale, the swarm's Gemini tasks cost $1.88 each all in, but those are other tasks, so this isn't
-yet a fair comparison.
+scale, on 4 November the swarm's two busiest paid builders cost $0.62 (`gpt-6.1-terra`) and $1.48
+(`gemini-3.8-flash`) per task all in. Those are other tasks, so this isn't yet a fair comparison,
+and tests first isn't clearly cheaper than the cheaper of the two.
 
 Tests first rescued all four logic tasks. The UI task across three files stayed beyond gpt-oss,
 which is also why the Architect doesn't mark UI work tests first.
@@ -150,8 +151,8 @@ task), nearly all of it Opus writing the tests, plus $0.12 for acceptance checks
 - Levels 4 and 5 merged with one criterion left unclear (not unmet), and with 3 and 1 quality
   notes. Worth reading before giving it real work.
 
-Tests first takes glm-4.7-flash from three levels to five, the same as qwen3-coder without tests
-first, but it took more rework rounds to get there.
+Tests first takes glm-4.7-flash from three levels to five, though three of the five needed rework
+rounds.
 
 qwen3-coder on the same five tasks with tests first (project `ladder-qwen3-coder-30b-tf`, run
 2026-11-01), next to glm-4.7-flash:
@@ -187,9 +188,9 @@ $2.49 for the five tasks, most of it Opus writing the tests.
   and one round pushed the same commit unchanged. The product owner said "model" this time
   and proposed nothing: a plain retry would fail the same way, and the fix is one line.
 
-The two are about even: each passed four levels on the first try or with rework, and each run's
-level 5 tests were different, so level 5 doesn't separate them. qwen3-coder was quicker at
-level 4, glm at level 3. One run each is too few to call.
+The two are about even. Both passed levels 1 to 4, on the first try or with rework. glm also
+passed level 5, but each run's level 5 tests were different, so level 5 doesn't separate them.
+qwen3-coder was quicker at level 4, glm at level 3. One run each is too few to call.
 
 ### Many failures were ours
 
