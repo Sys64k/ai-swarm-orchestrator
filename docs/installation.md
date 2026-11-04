@@ -8,7 +8,7 @@ Install from source (this repository) and build the distributable package once:
 
 ```bash
 git clone https://github.com/Sys64k/ai-swarm-orchestrator.git aso && cd aso
-npm install
+npm ci
 npm run package            # builds everything + release/aso.tgz (the package workers install)
 npm link -w @aso/cli       # puts `aso` on your PATH (or use: npm run aso -- <command>)
 ```

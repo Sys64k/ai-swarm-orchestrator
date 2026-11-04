@@ -101,7 +101,7 @@ in `~/.config/aso/.env` (`ANTHROPIC_API_KEY=sk-ant-...`):
 
 ```bash
 git clone https://github.com/Sys64k/ai-swarm-orchestrator.git aso && cd aso
-npm install && npm run package && npm link -w @aso/cli
+npm ci && npm run package && npm link -w @aso/cli
 aso hub-service install --docker   # the Hub, its console and the Architect, as a service
 aso worker-key new                  # prints what to run on a worker machine
 aso console-link                    # a one-time link that signs your phone in to the console
