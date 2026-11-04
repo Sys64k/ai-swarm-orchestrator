@@ -7,7 +7,7 @@ Setting up the Hub machine and worker machines, keeping them running and up to d
 Install from source (this repository) and build the distributable package once:
 
 ```bash
-git clone git@github.com:Sys64k/ai-swarm-orchestrator.git aso && cd aso
+git clone https://github.com/Sys64k/ai-swarm-orchestrator.git aso && cd aso
 npm install
 npm run package            # builds everything + release/aso.tgz (the package workers install)
 npm link -w @aso/cli       # puts `aso` on your PATH (or use: npm run aso -- <command>)

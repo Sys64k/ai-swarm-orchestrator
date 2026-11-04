@@ -96,7 +96,7 @@ On the Hub machine (Linux with Docker, Node.js 20 or later and git), with an Ant
 in `~/.config/aso/.env` (`ANTHROPIC_API_KEY=sk-ant-...`):
 
 ```bash
-git clone git@github.com:Sys64k/ai-swarm-orchestrator.git aso && cd aso
+git clone https://github.com/Sys64k/ai-swarm-orchestrator.git aso && cd aso
 npm install && npm run package && npm link -w @aso/cli
 aso hub-service install --docker   # the Hub, its console and the Architect, as a service
 aso worker-key new                  # prints what to run on a worker machine
