@@ -101,7 +101,7 @@ in `~/.config/aso/.env` (`ANTHROPIC_API_KEY=sk-ant-...`):
 
 ```bash
 git clone https://github.com/Sys64k/ai-swarm-orchestrator.git aso && cd aso
-npm install && npm run package && npm link -w @aso/cli
+npm ci && npm run package && npm link -w @aso/cli
 aso hub-service install --docker   # the Hub, its console and the Architect, as a service
 aso worker-key new                  # prints what to run on a worker machine
 aso console-link                    # a one-time link that signs your phone in to the console
@@ -110,6 +110,9 @@ aso console-link                    # a one-time link that signs your phone in t
 On each worker machine (Linux with Docker and Node.js), run the two commands `aso worker-key new`
 printed: one installs `aso` from the Hub, the other joins and starts the worker service. Then
 describe what to build in the console, or with `aso plan "..."`.
+
+If `npm link` or `npm install -g` stops with `EACCES`, npm's global folder belongs to root:
+[give npm a folder of your own](docs/installation.md#if-npm-says-eacces) and run it again.
 
 The full setup, with options, updates and remote access, is in
 [docs/installation.md](docs/installation.md).
