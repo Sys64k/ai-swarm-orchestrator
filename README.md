@@ -65,8 +65,8 @@ A free model on your own GPU can take part of the work, if the tests are written
 five Ollama models up a ladder of five tasks, from one function to a change across the API and
 the UI:
 
-- **Two can't drive an agent.** `devstral:24b` and `qwen2.5-coder:14b` describe tool calls
-  instead of making them, so they never get as far as code.
+- **Two can't drive an agent.** `devstral:24b` makes a few tool calls and then only describes
+  them, and `qwen2.5-coder:14b` writes them as JSON in its text. Neither finished a task.
 - **Three can, but trip on logic with edge cases.** `qwen3-coder:30b`, `gpt-oss:20b` and
   `glm-4.7-flash` each passed three levels: they wire code together fine and fail where "done"
   is subtle. With Opus writing the tests first, glm-4.7-flash passed all five levels and

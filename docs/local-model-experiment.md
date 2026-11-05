@@ -1,7 +1,7 @@
 # The local-model experiment
 
 How simple does a task have to be before a free model running on our own GPU gets it right?
-Run from 2026-10-29 to 2026-11-01 on the `aso-test` project, with five models on avalon's Ollama. This page
+Run from 2026-10-29 to 2026-11-04 on the `aso-test` project, with five models on avalon's Ollama. This page
 says why we ran it, how, what we found, and what we changed in the core because of it.
 
 ## Why
@@ -43,10 +43,24 @@ The first aim is measured below. The second isn't yet: see [What's still open](#
 
 | Model | Result |
 |---|---|
-| `devstral:24b` | Narrates its plan ("I'll read the file…") instead of calling a tool. Passes a one-call check (`aso llm-check`) but not a real conversation with a builder's full tool list. 0 of 5. |
-| `qwen2.5-coder:14b` | Writes tool calls as JSON in its text instead of calling the tool. 0 of 5. |
+| `devstral:24b` | Makes a few tool calls, then narrates its plan ("I'll read the file…") and stops without calling another. Passes a one-call check (`aso llm-check`) but not a real conversation with a builder's full tool list. 0 of 5, twice. |
+| `qwen2.5-coder:14b` | Writes tool calls as JSON in its text instead of calling the tool. Never made a call. 0 of 5. |
 
-No task level matters for these: they never get as far as code.
+No task level matters for these: neither finishes even the simplest task.
+
+**devstral was run again** on 2026-11-04, on the ladder's standard tasks (project
+`ladder-devstral-24b-retest`), because its first run may have been held back: it had 32,768 tokens
+of context instead of 65,536, one round per task, and a Hub without the later fixes. All five still
+failed, in 4 to 10 minutes each.
+
+| Run | Rounds per task | Tool calls, all five levels | File writes |
+|---|---|---|---|
+| 2026-10-29 | 1 | 8 | 2 |
+| 2026-11-04 | 4 | 29 | 3 |
+
+That's about 1.5 calls per round in both runs, so neither the larger context nor the fixes changed
+the behaviour. Every round ended the same way, with the model describing its next step and not
+taking it. The tasks differed between the runs, and it's one run each.
 
 ### The first two that can
 
@@ -262,6 +276,7 @@ above compare only roughly. From here on, models compare on the same tasks.
 - **Tests written first can be wrong.** A test that refuses what its own notes allow can't be
   fixed by the builder, which may not change it. A writer that runs its tests against a
   sketch of the feature, or a dispute the product owner can settle, would catch that.
-- **devstral** might drive the agent with a firmer reminder to call a tool; not tried.
+- **devstral** might drive the agent with a firmer reminder to call a tool, or another prompt
+  template; not tried. More context didn't help.
 - **Ollama Cloud's larger models** (added as a provider in [#132](https://github.com/Sys64k/ai-swarm-orchestrator/pull/132))
   would show how much model size moves the line between pass and fail.
