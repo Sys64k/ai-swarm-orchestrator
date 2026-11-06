@@ -159,6 +159,9 @@ export const CreatePlanBodySchema = z.object({
 export const PlanReplyBodySchema = z.object({ message: z.string().min(1).max(MAX_PLAN_REPLY_LENGTH) });
 export const CreateTaskBodySchema = TaskSpecInputSchema.extend({ project: ProjectIdSchema.optional() });
 export const SyncBodySchema = z.object({ project: ProjectIdSchema.optional() });
+export const DeleteProjectBodySchema = z.object({
+  force: z.boolean().optional().describe("Also delete a project with task or plan history, uncommitted changes, or commits no remote has"),
+});
 export const RedeemSignInCodeBodySchema = z.object({ code: z.string().min(1).max(200) });
 /** What a worker key may do: its projects, whether its machine is trusted, its model budget. */
 const ScopeFields = {
@@ -478,6 +481,11 @@ export const HubUpdateSchema = z.object({
 });
 export type HubUpdate = z.infer<typeof HubUpdateSchema>;
 
+export const ProjectDeletedSchema = z.object({
+  project: z.string(),
+  tasks: z.number().int().describe("How many tasks went with it"),
+  plans: z.number().int().describe("How many plans went with it"),
+});
 export const ProjectSchema = z.object({
   id: ProjectIdSchema,
   dir: z.string(),

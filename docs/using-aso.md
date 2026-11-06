@@ -282,6 +282,13 @@ One Hub runs several projects at the same time. They share the workers and the A
   with code is cloned. Its `origin` is set, so `main` is pushed after merges and work goes to
   pull requests from the first task. Nothing is created if a check fails, and the token is
   never written to `.git/config`.
+- **Deleting one.** `aso project-delete my-app` removes the folder, tasks and plans; it can't be
+  undone. Its tasks also leave the track records and public stats. Its GitHub repository and
+  any open pull requests stay as they are. It's refused while tasks or plans are open or a
+  deploy is running, and without `--force` when the project has history, uncommitted changes, or commits
+  no remote has. Left behind: each worker's checkout (`~/.aso/work/<project>`, safe to delete),
+  any `deploy.json` entry, and worker keys' project lists. The console doesn't offer it: use the
+  CLI or `POST /api/projects/<id>/delete`.
 - **Separate state.** Each project has its own plans, tasks, transcripts and push-to-origin
   settings (its own `origin` remote), kept in its `.git/aso/`.
 - **Ids are global.** Task and plan ids are unique across projects, so `/api/tasks/<id>` and

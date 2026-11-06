@@ -84,6 +84,15 @@ export class Database {
     }
   }
 
+  /** Forget a deleted project: its tasks, its plans and that its state file was imported. */
+  async deleteProject(project: string): Promise<void> {
+    await this.transaction(async (db) => {
+      await db.query("DELETE FROM tasks WHERE project = $1", [project]);
+      await db.query("DELETE FROM plans WHERE project = $1", [project]);
+      await db.query("DELETE FROM hub_values WHERE key = $1", [`imported:project:${project}`]);
+    });
+  }
+
   async close(): Promise<void> {
     await this.pool.end();
   }

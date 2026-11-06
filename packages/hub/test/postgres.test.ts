@@ -118,6 +118,23 @@ describe("PostgreSQL store", { skip }, () => {
     await assert.rejects(Database.connect(nowhere, { waitMs: 0 }), /could not reach PostgreSQL at 127\.0\.0\.1:1\/aso/);
   });
 
+  it("forgets a deleted project's rows, and only that project's", async () => {
+    const url = await freshDatabase();
+    const db = await Database.connect(url);
+    const dir = tempDir();
+    for (const [project, id] of [["shop", "s1"], ["blog", "b1"]]) {
+      const store = projectStateStore(db, project, path.join(dir, project));
+      assert.equal(await store.load(), undefined);
+      await save(store, [task(id)], [plan(`p-${id}`)]);
+      await store.close();
+    }
+    await db.deleteProject("shop");
+    assert.deepEqual(await sql(url, "SELECT task_id FROM tasks ORDER BY task_id"), [{ task_id: "b1" }]);
+    assert.deepEqual(await sql(url, "SELECT count(*)::int AS n FROM plans"), [{ n: 1 }]);
+    assert.deepEqual(await sql(url, "SELECT key FROM hub_values WHERE key LIKE 'imported:project:%' ORDER BY key"), [{ key: "imported:project:blog" }]);
+    await db.close();
+  });
+
   it("keeps a project's tasks and plans in order, exactly, and writes only what changed", async () => {
     const url = await freshDatabase();
     let db = await Database.connect(url);

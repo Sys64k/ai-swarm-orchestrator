@@ -4,6 +4,7 @@ import {
   RetryTaskBodySchema,
   CreatePlanBodySchema,
   CreateProjectBodySchema,
+  DeleteProjectBodySchema,
   CreateTaskBodySchema,
   DiscoveryProofBodySchema,
   DeskAssignmentBodySchema,
@@ -37,6 +38,7 @@ import {
   NodeSchema,
   PlanReplyBodySchema,
   PlanSchema,
+  ProjectDeletedSchema,
   ProjectSchema,
   PushCheckSchema,
   PushEndpointSchema,
@@ -71,6 +73,7 @@ import {
 /** What clients send: documented as input, so fields with defaults are optional. */
 export const REQUEST_SCHEMAS = {
   CreateProject: CreateProjectBodySchema,
+  DeleteProject: DeleteProjectBodySchema,
   CreatePlan: CreatePlanBodySchema,
   PlanReply: PlanReplyBodySchema,
   CreateTask: CreateTaskBodySchema,
@@ -106,6 +109,7 @@ export const ANSWER_SCHEMAS = {
   Health: HealthSchema,
   Node: NodeSchema,
   Project: ProjectSchema,
+  ProjectDeleted: ProjectDeletedSchema,
   SyncStatus: SyncStatusSchema,
   DeployStarted: DeployStartedSchema,
   DeployNext: DeployNextSchema,
@@ -206,6 +210,10 @@ const PROJECTS: ApiOperation[] = [
   {
     method: "post", path: "/api/projects", tag: "Projects", summary: "Create an empty project (a git repository with one commit)", body: "CreateProject",
     responses: { 201: ok("Project", "Created"), 400: err("Invalid name, or the Hub has no projects root"), 409: err("It exists already") },
+  },
+  {
+    method: "post", path: "/api/projects/{id}/delete", tag: "Projects", summary: "Delete a project from the Hub: its folder, tasks and plans. Its GitHub repository is left alone", body: "DeleteProject", optionalBody: true,
+    responses: { 200: ok("ProjectDeleted", "Deleted"), 400: err("Invalid body, or this Hub serves a single project folder"), ...notFound("project"), 409: err("It has open work, or something only `force` may delete") },
   },
   {
     method: "post", path: "/api/projects/{id}/deploy", tag: "Projects", summary: "Deploy the project's main now with its command from the Hub's deploy.json",

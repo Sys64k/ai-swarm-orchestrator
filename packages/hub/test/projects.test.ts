@@ -39,6 +39,19 @@ async function withRoot(fn: (hub: HubHandle, root: string) => Promise<void>, roo
   }
 }
 
+/** A repository in the root with commits of its own and no remote. */
+async function startRemoteless(root: string, name: string): Promise<string> {
+  const dir = path.join(root, name);
+  mkdirSync(dir);
+  git(dir, "init", "--quiet", "--initial-branch=main");
+  for (const file of ["one.txt", "two.txt"]) {
+    writeFiles(dir, { [file]: file });
+    git(dir, "add", ".");
+    git(dir, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", file);
+  }
+  return dir;
+}
+
 const task = (taskId: string, project?: string, extra: Record<string, unknown> = {}) => ({
   taskId,
   project,
@@ -82,6 +95,108 @@ describe("projects", () => {
       assert.equal(health.body.projectsRoot, root);
       assert.deepEqual(health.body.projects, ["blog", "shop", "notes-app"]);
     }));
+
+  describe("deleting", () => {
+    const remove = (port: number, id: string, body: unknown = {}) => call(port, `/api/projects/${id}/delete`, body);
+
+    it("deletes a new, empty project without force, and its name can be used again", () =>
+      withRoot(async (hub, root) => {
+        assert.equal((await call(hub.port, "/api/projects", { name: "unused" })).status, 201);
+        const done = await remove(hub.port, "unused");
+        assert.equal(done.status, 200, JSON.stringify(done.body));
+        assert.deepEqual(done.body, { project: "unused", tasks: 0, plans: 0 });
+        assert.ok(!existsSync(path.join(root, "unused")));
+        assert.equal((await call(hub.port, "/api/projects/unused")).status, 404);
+        assert.equal((await remove(hub.port, "unused")).status, 404);
+        assert.equal((await call(hub.port, "/api/projects", { name: "unused" })).status, 201);
+      }));
+
+    it("leaves other projects and folders alone", () =>
+      withRoot(async (hub, root) => {
+        assert.equal((await remove(hub.port, "notes")).status, 404, "a folder that isn't a project");
+        assert.equal((await remove(hub.port, "shop", { force: true })).status, 200);
+        assert.ok(existsSync(path.join(root, "blog", ".git")));
+        assert.ok(existsSync(path.join(root, "notes")));
+        assert.deepEqual((await call(hub.port, "/api/projects")).body.map((p: { id: string }) => p.id), ["blog"]);
+      }));
+
+    it("refuses open work even with force, then needs force for the history", () =>
+      withRoot(async (hub, root) => {
+        await call(hub.port, "/api/tasks", task("open-one", "shop"));
+        const open = await remove(hub.port, "shop", { force: true });
+        assert.equal(open.status, 409);
+        assert.match(open.body.error, /open-one \(pending\)/);
+        assert.ok(existsSync(path.join(root, "shop", ".git")));
+
+        await call(hub.port, "/api/tasks/open-one/cancel", {});
+        const history = await remove(hub.port, "shop");
+        assert.equal(history.status, 409);
+        assert.match(history.body.error, /1 task and 0 plans.*track records/);
+        assert.ok(existsSync(path.join(root, "shop", ".git")));
+
+        const forced = await remove(hub.port, "shop", { force: true });
+        assert.equal(forced.status, 200);
+        assert.equal(forced.body.tasks, 1);
+        assert.equal((await call(hub.port, "/api/tasks/open-one")).status, 404);
+        assert.equal((await call(hub.port, "/api/tasks", task("open-one", "blog"))).status, 201, "its task ids are free again");
+      }));
+
+    it("needs force for commits no remote has and for uncommitted changes, not for pushed work", () =>
+      withRoot(async (hub, root) => {
+        // A clone: its commits are all on its remote-tracking refs, which is what the check reads.
+        assert.equal((await remove(hub.port, "shop")).status, 200, "pushed work needs no force");
+        const pushed = await startRemoteless(root, "kept");
+        writeFiles(pushed, { "dirty.txt": "not committed" });
+        const again = await startHub({ projectsRoot: root, port: 0, host: "127.0.0.1", token: TOKEN, sync: { enabled: false } });
+        try {
+          const unsaved = await remove(again.port, "kept");
+          assert.equal(unsaved.status, 409);
+          assert.match(unsaved.body.error, /uncommitted changes/);
+          assert.match(unsaved.body.error, /2 commits no remote has/);
+          assert.ok(existsSync(path.join(pushed, "dirty.txt")));
+          assert.equal((await remove(again.port, "kept", { force: true })).status, 200);
+        } finally {
+          await again.close();
+        }
+      }));
+
+    it("stays deleted after a restart", async () => {
+      const root = projectsRoot();
+      const start = () => startHub({ projectsRoot: root, port: 0, host: "127.0.0.1", token: TOKEN, sync: { enabled: false } });
+      try {
+        const first = await start();
+        await call(first.port, "/api/tasks", task("gone", "shop"));
+        await call(first.port, "/api/tasks/gone/cancel", {});
+        assert.equal((await remove(first.port, "shop", { force: true })).status, 200);
+        await first.close();
+        const second = await start();
+        try {
+          assert.deepEqual((await call(second.port, "/api/projects")).body.map((p: { id: string }) => p.id), ["blog"]);
+          assert.equal((await call(second.port, "/api/tasks/gone")).status, 404);
+        } finally {
+          await second.close();
+        }
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it("never deletes a single project folder, or anything without the token", async () => {
+      const repo = makeTargetRepo({ "a.txt": "a" });
+      const hub = await startHub({ targetDir: repo, port: 0, host: "127.0.0.1", token: TOKEN, sync: { enabled: false } });
+      try {
+        const refused = await remove(hub.port, "project", { force: true });
+        assert.equal(refused.status, 400);
+        assert.match(refused.body.error, /single project folder/);
+        assert.ok(existsSync(path.join(repo, ".git")));
+        const anonymous = await fetch(`http://127.0.0.1:${hub.port}/api/projects/project/delete`, { method: "POST" });
+        assert.equal(anonymous.status, 401);
+      } finally {
+        await hub.close();
+        rmSync(repo, { recursive: true, force: true });
+      }
+    });
+  });
 
   it("needs a project when there are several, and keeps task ids unique across them", () =>
     withRoot(async (hub) => {

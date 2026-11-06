@@ -28,6 +28,7 @@ import { listWorkerKeysCommand, newWorkerKeyCommand, setWorkerKeyCommand, revoke
 import { layout } from "./layout.js";
 import { approvePlanCommand, planCommand, rejectPlanCommand, replyPlanCommand } from "./commands/plan.js";
 import { taskDismissCommand } from "./commands/task-dismiss.js";
+import { projectDeleteCommand } from "./commands/project-delete.js";
 import { noticesCommand } from "./commands/notices.js";
 import { taskDiagnosisCommand } from "./commands/task-diagnosis.js";
 import { productOwnerCommand } from "./commands/product-owner.js";
@@ -411,6 +412,13 @@ program
   .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
   .option("--no-wait", "only start it")
   .action((project: string, opts: { hub: string; wait: boolean }) => deployCommand(project, opts));
+
+program
+  .command("project-delete <project>")
+  .description("Delete a project from the Hub: its folder, tasks and plans. Its GitHub repository is left alone")
+  .option("--hub <address>", "Hub address", process.env.ASO_HUB || "127.0.0.1")
+  .option("--force", "also delete task and plan history, uncommitted changes and commits no remote has")
+  .action((project: string, opts: { hub: string; force?: boolean }) => projectDeleteCommand(project, opts));
 
 const workerKeyCmd = program.command("worker-key").description("Let a worker machine join with its own key, or shut one out");
 workerKeyCmd
