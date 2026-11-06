@@ -50,6 +50,8 @@ describe("console access to push", () => {
     assert.equal(hubPath("GET", ["push"]), "/api/push");
     assert.equal(hubPath("POST", ["projects", "shop", "deploy"]), "/api/projects/shop/deploy");
     assert.equal(hubPath("GET", ["projects", "shop", "deploy"]), undefined);
+    assert.equal(hubPath("POST", ["projects", "shop", "delete"]), "/api/projects/shop/delete");
+    assert.equal(hubPath("GET", ["projects", "shop", "delete"]), undefined);
     assert.equal(hubPath("GET", ["hub", "update"]), "/api/hub/update");
     assert.equal(hubPath("POST", ["hub", "update"]), undefined, "only the updater on the Hub machine reports");
     assert.equal(hubPath("GET", ["worker-keys"]), "/api/worker-keys");

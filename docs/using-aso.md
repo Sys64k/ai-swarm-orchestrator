@@ -23,6 +23,7 @@ like an app.
   - **Deploy**, for a project with a deploy command: the last deploy (running, deployed, or
     failed with the reason and its output) and **Deploy now**.
   - **New plan** from here plans for this project.
+  - **Delete this project**, at the bottom. See [Projects](#projects).
   - **+ New project** on the home screen creates a new repository in the projects folder.
     The name is checked as you type, and the folder it will create is shown.
 - **Task.**
@@ -287,8 +288,9 @@ One Hub runs several projects at the same time. They share the workers and the A
   any open pull requests stay as they are. It's refused while tasks or plans are open or a
   deploy is running, and without `--force` when the project has history, uncommitted changes, or commits
   no remote has. Left behind: each worker's checkout (`~/.aso/work/<project>`, safe to delete),
-  any `deploy.json` entry, and worker keys' project lists. The console doesn't offer it: use the
-  CLI or `POST /api/projects/<id>/delete`.
+  any `deploy.json` entry, and worker keys' project lists. In the console, it's at the bottom of
+  the project's page: type the project's name, and tick the box in place of `--force`. Over the API:
+  `POST /api/projects/<id>/delete`.
 - **Separate state.** Each project has its own plans, tasks, transcripts and push-to-origin
   settings (its own `origin` remote), kept in its `.git/aso/`.
 - **Ids are global.** Task and plan ids are unique across projects, so `/api/tasks/<id>` and

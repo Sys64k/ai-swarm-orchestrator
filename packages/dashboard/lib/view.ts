@@ -831,6 +831,11 @@ export function previewBody(body: string | undefined, expanded: boolean, maxLine
 }
 
 /** Same rule as the Hub: the name becomes a folder, a URL segment and a Git path. */
+/** Deleting a project takes typing its name exactly: it can't be undone. */
+export function deleteConfirmed(id: string, typed: string): boolean {
+  return typed.trim() === id;
+}
+
 export function projectNameProblem(name: string): string | undefined {
   if (!name) return "Give the project a name.";
   if (name.length > 64) return "At most 64 characters.";

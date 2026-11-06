@@ -24,7 +24,7 @@ const RULES: ReadonlyArray<{ method: "GET" | "POST"; pattern: RegExp }> = [
   { method: "GET", pattern: /^projects$/ },
   { method: "POST", pattern: /^projects$/ },
   { method: "GET", pattern: new RegExp(`^projects/${ID}$`) },
-  { method: "POST", pattern: new RegExp(`^projects/${ID}/deploy$`) },
+  { method: "POST", pattern: new RegExp(`^projects/${ID}/(deploy|delete)$`) },
   { method: "GET", pattern: /^hub\/update$/ },
   { method: "GET", pattern: /^llm$/ },
   { method: "GET", pattern: /^models$/ },

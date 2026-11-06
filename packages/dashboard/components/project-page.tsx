@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { DeleteProject } from "./delete-project.tsx";
 import { hubPost } from "./hub-client.ts";
 import { usePoll } from "./use-poll.ts";
 import { ActionButton, Badge, Banner, LoadingPage, Section, TopBar } from "./ui.tsx";
@@ -61,6 +62,7 @@ export function ProjectPage({ id }: { id: string }) {
             {ready && <WorkLists tasks={tasks.data!} plans={plans.data!} showProject={false} sections={["plans", "running", "queued", "done"]} />}
           </div>
         </div>
+        <DeleteProject id={id} />
       </main>
       <Link href={`/plans/new?project=${id}`} className="fab">
         + New plan
