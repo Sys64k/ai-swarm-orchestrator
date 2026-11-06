@@ -3,7 +3,8 @@ import { existsSync } from "node:fs";
 import { mkdir, readdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import { createLogger, gitBasicAuthConfig, ProjectIdSchema, type LlmUsage } from "@aso/shared";
+import { createLogger, gitBasicAuthConfig, ProjectIdSchema, type LlmUsage, type PlanState, type TaskState } from "@aso/shared";
+import { simpleGit } from "simple-git";
 import { DependencyManager, type DependencyManagerOptions } from "./dependencies.js";
 import { GitHubApi, GitHubError, parseGitHubRepo, type RepoSlug } from "./git/github.js";
 import { pruneMergedTaskBranches } from "./git/task-branches.js";
@@ -42,6 +43,23 @@ const exec = promisify(execFile);
 async function initRepo(dir: string, branch: string): Promise<void> {
   await exec("git", ["init", "--quiet", `--initial-branch=${branch}`], { cwd: dir });
   await exec("git", ["-c", "user.name=ASO Hub", "-c", "user.email=aso-hub@localhost", "commit", "--quiet", "--allow-empty", "-m", "Initial commit"], { cwd: dir });
+}
+
+const TASK_ENDS: readonly TaskState[] = ["merged", "failed", "cancelled"];
+const PLAN_ENDS: readonly PlanState[] = ["approved", "rejected", "failed"];
+
+const counted = (n: number, what: string) => `${n} ${what}${n === 1 ? "" : "s"}`;
+
+/** What deleting the repository would lose for good: uncommitted changes, and commits no remote has. */
+async function unsavedWork(repo: HubRepository): Promise<string[]> {
+  const git = simpleGit(repo.dir);
+  const unsaved: string[] = [];
+  if ((await git.raw(["status", "--porcelain"])).trim()) unsaved.push("uncommitted changes");
+  const commits = (await git.raw(["rev-list", "--branches", "--not", "--remotes"])).trim().split("\n").filter(Boolean);
+  // The empty first commit of a new project holds nothing to lose.
+  const onlyEmptyStart = commits.length === 1 && !(await git.raw(["ls-tree", commits[0]])).trim();
+  if (commits.length && !onlyEmptyStart) unsaved.push(`${counted(commits.length, "commit")} no remote has`);
+  return unsaved;
 }
 
 /** Everything the Hub keeps for one project; each project's state lives in its own `.git/aso/`. */
@@ -197,6 +215,56 @@ export class ProjectSet {
     }
     log.info(`created project ${id} in ${dir}${github ? ` from GitHub ${github.slug.owner}/${github.slug.repo}` : ""}`);
     return this.add(id, dir);
+  }
+
+  /**
+   * Delete a project from the Hub: its folder (with its transcripts and screenshots), its tasks
+   * and plans. A remote such as GitHub is left alone. Open work is refused, since it may be running
+   * on a machine or have a pull request open; `force` is needed to lose history or unsaved code.
+   */
+  async delete(id: string, opts: { force?: boolean } = {}): Promise<{ project: string; tasks: number; plans: number }> {
+    const project = this.projects.get(id);
+    if (!project) throw new ProjectError(`project ${id} not found`, "not_found");
+    // Only a folder the Hub's root holds: a single project folder is the user's own.
+    if (!this.opts.root || project.dir !== path.join(this.opts.root, id)) {
+      throw new ProjectError("this Hub serves a single project folder, so it cannot delete it", "invalid");
+    }
+    const refuseOpenWork = () => {
+      const open = [
+        ...project.tasks.list().filter((t) => !TASK_ENDS.includes(t.state)).map((t) => `task ${t.spec.taskId} (${t.state})`),
+        ...project.plans.list().filter((p) => !PLAN_ENDS.includes(p.state)).map((p) => `plan ${p.planId} (${p.state})`),
+      ];
+      if (open.length) throw new ProjectError(`${id} has open work: cancel or finish ${open.join(", ")}`, "conflict");
+    };
+    refuseOpenWork();
+    if (!opts.force) {
+      const [taskCount, planCount] = [project.tasks.list().length, project.plans.list().length];
+      const history = taskCount || planCount ? [`${counted(taskCount, "task")} and ${counted(planCount, "plan")}, which also leave the track records`] : [];
+      const lost = [...history, ...(await unsavedWork(project.repo))];
+      if (lost.length) throw new ProjectError(`deleting ${id} would lose ${lost.join(", and ")}: use force to delete it anyway`, "conflict");
+      refuseOpenWork(); // reading Git took time: work may have arrived meanwhile
+    }
+    const tasks = project.tasks.list();
+    const plans = project.plans.list();
+
+    // Out of the set first: no more jobs, Git access or catching up start for it.
+    this.projects.delete(id);
+    const follow = this.follows.get(id);
+    clearInterval(follow?.timer);
+    await follow?.running;
+    this.follows.delete(id);
+    this.reviewers.get(id)?.stopPolling();
+    this.reviewers.delete(id);
+    await project.sync.stop();
+    await project.repo.withMainLock(async () => undefined);
+    await project.store?.close();
+    await project.transcripts.close();
+    await project.screenshots.flush();
+    // The rows first: if this fails the folder is still there, and a restart brings it all back.
+    await this.opts.database?.deleteProject(id);
+    await rm(project.dir, { recursive: true, force: true });
+    log.info(`deleted project ${id} (${counted(tasks.length, "task")}, ${counted(plans.length, "plan")})`);
+    return { project: id, tasks: tasks.length, plans: plans.length };
   }
 
   /** The GitHub repository to connect, once the Hub's token is known to write to it. */

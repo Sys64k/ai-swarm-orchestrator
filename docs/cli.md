@@ -158,6 +158,14 @@ the end, and prints how it went: the commit and how long it took, or the reason 
 lines of output (exit code 1). `--no-wait` only starts it. A project without a deploy command is
 refused with the reason.
 
+## `aso project-delete <project>`
+
+Deletes a project from the Hub: its folder, with its transcripts and screenshots, and its tasks
+and plans. This can't be undone. Its GitHub repository is left alone. Refused with the reason
+while it has open tasks or plans or a deploy is running; cancel or finish those first. `--force`
+also deletes a project with task or plan history, uncommitted changes, or commits no remote has.
+Details in [Using ASO](using-aso.md#projects).
+
 ## `aso worker-key new|set|revoke`, `aso worker-keys`
 
 `new` creates a one-time join code (30 minutes) and prints what to run on the new machine. On

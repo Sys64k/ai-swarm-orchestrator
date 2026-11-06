@@ -56,6 +56,7 @@ import {
   ApproveTaskBodySchema,
   CreatePlanBodySchema,
   CreateProjectBodySchema,
+  DeleteProjectBodySchema,
   CreateTaskBodySchema,
   DeployResultBodySchema,
   HubUpdateReportBodySchema,
@@ -1260,6 +1261,18 @@ export async function startHub(opts: HubOptions): Promise<HubHandle> {
     if (!req.ok) return c.json({ error: req.error }, 400);
     try {
       return c.json(projectView(await projects.create(req.data.name, { github: req.data.github })), 201);
+    } catch (err) {
+      return fail(c, err);
+    }
+  });
+
+  app.post("/api/projects/:id/delete", async (c) => {
+    const req = await parsed(c, DeleteProjectBodySchema, { optional: true });
+    if (!req.ok) return c.json({ error: req.error }, 400);
+    const id = c.req.param("id");
+    if (deployer?.deploying(id)) return c.json({ error: `${id} is being deployed: try again when that's done` }, 409);
+    try {
+      return c.json(await projects.delete(id, { force: req.data.force }));
     } catch (err) {
       return fail(c, err);
     }

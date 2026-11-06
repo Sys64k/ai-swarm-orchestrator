@@ -46,6 +46,7 @@ Answers can gain fields over time: clients should ignore fields they don't know.
 | `GET` | `/dist/aso.tgz` | The `aso` package for installing/updating machines (public; contains no secrets) |
 | `GET` | `/api/deploys/next` | For the host runner of a Hub in Docker: take the next deploy job (404 when the Hub runs deploys itself) |
 | `POST` | `/api/deploys/{id}/result` | For the host runner: report how a deploy job went |
+| `POST` | `/api/projects/{id}/delete` | Delete a project from the Hub: its folder, tasks and plans, never its GitHub repository. 409 with open work or a deploy running, and without `{"force": true}` when it has task or plan history, uncommitted changes, or commits no remote has |
 | `POST` | `/api/projects/{id}/deploy` | Deploy the project's `main` now with its command from `deploy.json` (409 without one) |
 | `GET` / `POST` | `/api/sync` | Push status / retry the push of `main` to `origin` |
 | `GET` | `/api/llm` | LLM status: the Architect's and the agents' models, queue, calls and estimated spend since start |

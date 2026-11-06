@@ -848,6 +848,32 @@
         ],
         "additionalProperties": false
       },
+      "ProjectDeleted": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "tasks": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "How many tasks went with it"
+          },
+          "plans": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "How many plans went with it"
+          }
+        },
+        "required": [
+          "project",
+          "tasks",
+          "plans"
+        ],
+        "additionalProperties": false
+      },
       "SyncStatus": {
         "type": "object",
         "properties": {
@@ -5243,6 +5269,15 @@
           "name"
         ]
       },
+      "DeleteProject": {
+        "type": "object",
+        "properties": {
+          "force": {
+            "description": "Also delete a project with task or plan history, uncommitted changes, or commits no remote has",
+            "type": "boolean"
+          }
+        }
+      },
       "CreatePlan": {
         "type": "object",
         "properties": {
@@ -6298,6 +6333,80 @@
           },
           "404": {
             "description": "No such project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/delete": {
+      "post": {
+        "operationId": "postProjectDelete",
+        "tags": [
+          "Projects"
+        ],
+        "summary": "Delete a project from the Hub: its folder, tasks and plans. Its GitHub repository is left alone",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteProject"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectDeleted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body, or this Hub serves a single project folder",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "No such project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "It has open work, or something only `force` may delete",
             "content": {
               "application/json": {
                 "schema": {

@@ -155,6 +155,11 @@ export class Deployer {
     return project in this.config;
   }
 
+  /** Whether a deploy of the project is under way. */
+  deploying(project: string): boolean {
+    return this.running.has(project);
+  }
+
   view(project: string): { configured: boolean; last?: DeployStatus } {
     const last = this.last.get(project);
     return { configured: this.configured(project), ...(last ? { last } : {}) };
