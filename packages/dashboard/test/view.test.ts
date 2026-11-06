@@ -36,6 +36,7 @@ import {
   isQuiet,
   planProgress,
   previewBody,
+  deleteConfirmed,
   projectNameProblem,
   projectSummary,
   deployView,
@@ -540,6 +541,14 @@ describe("formatting", () => {
 });
 
 describe("projects", () => {
+  it("deletes a project only once its exact name is typed", () => {
+    assert.equal(deleteConfirmed("shop", "shop"), true);
+    assert.equal(deleteConfirmed("shop", " shop "), true);
+    assert.equal(deleteConfirmed("shop", ""), false);
+    assert.equal(deleteConfirmed("shop", "Shop"), false);
+    assert.equal(deleteConfirmed("shop", "sho"), false);
+  });
+
   it("checks a new project's name like the Hub does", () => {
     assert.equal(projectNameProblem("my-app"), undefined);
     assert.equal(projectNameProblem("app_2"), undefined);
