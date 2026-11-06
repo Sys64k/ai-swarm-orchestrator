@@ -85,7 +85,8 @@ on tasks of the same size but not the same tasks, so compare that bar roughly. g
 shown: with tests first it ran only two tasks, and passed one.</sub>
 
 How we ran it, every failure, and what it changed in ASO:
-[The local-model experiment](docs/local-model-experiment.md).
+[The local-model experiment](docs/local-model-experiment.md). The code the models wrote:
+[aso-local-model-ladder](https://github.com/Sys64k/aso-local-model-ladder).
 
 ## Technologies
 

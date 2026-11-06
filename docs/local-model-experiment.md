@@ -2,7 +2,8 @@
 
 How simple does a task have to be before a free model running on our own GPU gets it right?
 Run from 2026-10-29 to 2026-11-04 on the `aso-test` project, with five models on avalon's Ollama. This page
-says why we ran it, how, what we found, and what we changed in the core because of it.
+says why we ran it, how, what we found, and what we changed in the core because of it. The code the
+models wrote is public in [aso-local-model-ladder](https://github.com/Sys64k/aso-local-model-ladder), without the agents' transcripts.
 
 ## Why
 
@@ -46,7 +47,8 @@ The first aim is measured below. The second isn't yet: see [What's still open](#
 | `devstral:24b` | Makes a few tool calls, then narrates its plan ("I'll read the file…") and stops without calling another. Passes a one-call check (`aso llm-check`) but not a real conversation with a builder's full tool list. 0 of 5, twice. |
 | `qwen2.5-coder:14b` | Writes tool calls as JSON in its text instead of calling the tool. Never made a call. 0 of 5. |
 
-No task level matters for these: neither finishes even the simplest task.
+No task level matters for these: neither finishes even the simplest task. What devstral did write
+is in [its attempts](https://github.com/Sys64k/aso-local-model-ladder/branches/all?query=attempt%2Fdevstral).
 
 **devstral was run again** on 2026-11-04, on the ladder's standard tasks (project
 `ladder-devstral-24b-retest`), because its first run may have been held back: it had 32,768 tokens
@@ -64,7 +66,10 @@ taking it. The tasks differed between the runs, and it's one run each.
 
 ### The first two that can
 
-A third, glm-4.7-flash, came later and has [its own section](#glm-47-flash). Without tests first:
+A third, glm-4.7-flash, came later and has [its own section](#glm-47-flash). Without tests first
+([what was merged](https://github.com/Sys64k/aso-local-model-ladder/compare/base...run/first-runs), and the failed attempts of
+[qwen3-coder](https://github.com/Sys64k/aso-local-model-ladder/branches/all?query=attempt%2Fqwen3-coder) and
+[gpt-oss](https://github.com/Sys64k/aso-local-model-ladder/branches/all?query=attempt%2Fgpt-oss)):
 
 | Level | qwen3-coder 30B | gpt-oss 20B |
 |---|---|---|
@@ -112,7 +117,7 @@ which is also why the Architect doesn't mark UI work tests first.
 ### glm-4.7-flash
 
 Run on 2026-10-30 with the ladder script, the first model on the same tasks from the same code
-(variant A from `9cac1e3`), without tests first:
+(variant A from `9cac1e3`), without tests first ([the code](https://github.com/Sys64k/aso-local-model-ladder/compare/base...run/glm-4-7-flash)):
 
 | Level | Task | Result | Minutes |
 |---|---|---|---|
@@ -139,7 +144,8 @@ Same pattern as the others: fine at wiring and simple functions, lost on logic w
 here including UI state. It does less than qwen3-coder at the top (qwen3-coder passed level 5),
 so it doesn't take qwen3-coder's desk.
 
-With tests first (`--tests-first`, project `ladder-glm-4-7-flash-tf`, run 2026-10-30 and 31):
+With tests first (`--tests-first`, project `ladder-glm-4-7-flash-tf`, run 2026-10-30 and 31,
+[the code](https://github.com/Sys64k/aso-local-model-ladder/compare/base...run/glm-4-7-flash-tests-first)):
 
 | Level | Task | Result | Minutes |
 |---|---|---|---|
@@ -169,7 +175,7 @@ Tests first takes glm-4.7-flash from three levels to five, though three of the f
 rounds.
 
 qwen3-coder on the same five tasks with tests first (project `ladder-qwen3-coder-30b-tf`, run
-2026-11-01), next to glm-4.7-flash:
+2026-11-01, [the code](https://github.com/Sys64k/aso-local-model-ladder/compare/base...run/qwen3-coder-tests-first)), next to glm-4.7-flash:
 
 | Level | Task | qwen3-coder | glm-4.7-flash |
 |---|---|---|---|
@@ -259,7 +265,8 @@ moves a task it fails twice to Opus.
    Each run gets a fresh project (`ladder-<model>`) holding aso-test as it was before the first
    ladder (commit `9cac1e3`), so every model does the same five tasks (variant A) from the same
    code. The script submits them one at a time, pinned to the model, and prints a table of
-   results. Variants B–D are the other tasks the first four models ran (`--variant`).
+   results. Variants B–D are the other tasks the first four models ran (`--variant`). To run it on
+   your own Hub, clone [aso-local-model-ladder](https://github.com/Sys64k/aso-local-model-ladder) into your projects folder as `aso-test`.
 3. **Add the results here**, next to the earlier ones, with anything it taught us, and keep
    [What's still open](#whats-still-open) current.
 
