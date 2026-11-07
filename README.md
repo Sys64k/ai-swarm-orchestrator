@@ -25,22 +25,22 @@ The swarm's work so far has been on a separate web UI and on test projects. This
 is written with Claude Code.
 
 <!-- swarm-stats:start -->
-**The swarm's track record.** Since 27 Oct 2026, the swarm has merged **64 tasks**, **56%** on the first try (16 finished by a stronger model taking over), from **8 of 8** proposed plans approved, at about **$1.16 per task** in model costs.
+**The swarm's track record.** Since 27 Oct 2026, the swarm has merged **65 tasks**, **57%** on the first try (16 finished by a stronger model taking over), from **8 of 8** proposed plans approved, at about **$1.15 per task** in model costs.
 
 | Model | Tasks finished | First try | QA passed | Acceptance met | Plans approved | Checks it made: met | Its met held up | Cost per task started on it |
 |---|---|---|---|---|---|---|---|---|
-| `gemini-3.8-flash` | 32 | 66% | 49 of 51 | 34 of 47 | – | – | – | $1.48 |
+| `gemini-3.8-flash` | 33 | 67% | 50 of 52 | 35 of 48 | – | – | – | $1.45 |
 | `claude-opus-5-5` | 14 | 0% | 21 of 21 | 15 of 21 | 8 of 8 | 4 of 6 | 4 of 4 | – |
 | `gpt-6.1-terra` | 14 | 86% | 20 of 20 | 16 of 20 | – | – | – | $0.62 |
 | `claude-haiku-5-5` | 2 | 50% | 2 of 2 | 2 of 2 | – | – | – | $0.58 |
 | `claude-opus-4-7` | 2 | 100% | 2 of 2 | 2 of 2 | – | – | – | $0.41 |
-| `gpt-6.1-sol` | 0 | – | – | – | – | 62 of 85 | 60 of 62 | – |
+| `gpt-6.1-sol` | 0 | – | – | – | – | 63 of 86 | 61 of 63 | – |
 
 <sub>Its met held up: of the work it passed as the reviewer, how much no person sent back or closed and whose deploy didn't fail.</sub>
 
 <sub>Cost per task started on it: all in, from a task's first build to its end (every model it escalated to, its acceptance checks, a share of its plan), and failed tasks too.</sub>
 
-<sub>From the Hub's public track record, updated daily (last: 5 Nov 2026). See [Track records](docs/models.md#track-records-how-each-model-has-done).</sub>
+<sub>From the Hub's public track record, updated daily (last: 7 Nov 2026). See [Track records](docs/models.md#track-records-how-each-model-has-done).</sub>
 <!-- swarm-stats:end -->
 
 ## What it does
