@@ -38,6 +38,62 @@ The first aim is measured below. The second isn't yet: see [What's still open](#
   Ollama answers one request at a time and keeps only one conversation's context loaded, so
   interleaved conversations are re-read from scratch on every call.
 
+### Hardware
+
+Every model ran on one machine, avalon:
+
+| Part | What it is |
+|---|---|
+| GPU | NVIDIA GeForce RTX 5060 Ti, 16 GB |
+| CPU | AMD Ryzen 7 5700X, 8 cores |
+| RAM | 46 GB as Linux reports it |
+| Ollama | Each model's default tag (below); 32,768 tokens of context per conversation in the first runs, 65,536 later |
+
+| Model | Ollama tag | Parameters | Quantisation | Size | Fits in 16 GB |
+|---|---|---|---|---|---|
+| qwen3-coder | `qwen3-coder:30b` | 30.5B | Q4_K_M | 18 GB | No |
+| glm-4.7-flash | `glm-4.7-flash` | 29.9B | Q4_K_M | 19 GB | No |
+| devstral | `devstral:24b` | 23.6B | Q4_K_M | 14 GB | Yes |
+| gpt-oss | `gpt-oss:20b` | 20.9B | MXFP4 | 13 GB | Yes |
+| qwen2.5-coder | `qwen2.5-coder:14b` | 14.8B | Q4_K_M | 9 GB | Yes |
+
+"Fits" is the model's weights alone; its context takes more memory on top. qwen3-coder and
+glm-4.7-flash don't fit, so Ollama ran part of each on the CPU. That makes them slower, but not
+worse: on a GPU with more memory the same weights should get the same things right, only faster.
+We didn't measure tokens per second. The minutes on this page are whole tasks, QA and reviews
+included.
+
+## Each model in short
+
+For a link to one model. The details are in [What we found](#what-we-found).
+
+### qwen3-coder 30B
+
+Passed 3 of 5 levels on its own and 4 of 5 with tests first. Good at wiring code across files,
+weak on logic with edge cases. It now does everyday tasks on one of our desks.
+[Details](#the-first-two-that-can).
+
+### glm-4.7-flash 30B
+
+Passed 3 of 5 levels on its own and all 5 with tests first, the only model to pass all five. Next
+to qwen3-coder on the same tasks it's about even, since each run's level 5 tests differed. Same
+weak spot: logic with edge cases, including UI state. [Details](#glm-47-flash).
+
+### gpt-oss 20B
+
+Passed 3 of 5 levels on its own. With tests first it ran two tasks and passed one; the UI task
+stayed beyond it. It deleted existing tests to make the suite pass. [Details](#the-first-two-that-can).
+
+### devstral 24B
+
+Passed 0 of 5, in two runs. It makes a few tool calls, then only describes its next step, so it
+can't drive an agent. [Details](#two-of-the-five-models-cant-drive-an-agent).
+
+### qwen2.5-coder 14B
+
+Passed 0 of 5. It writes tool calls as JSON in its text instead of making them.
+[Details](#two-of-the-five-models-cant-drive-an-agent).
+
 ## What we found
 
 ### Two of the five models can't drive an agent
