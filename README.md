@@ -40,7 +40,7 @@ is written with Claude Code.
 
 <sub>Cost per task started on it: all in, from a task's first build to its end (every model it escalated to, its acceptance checks, a share of its plan), and failed tasks too.</sub>
 
-<sub>From the Hub's public track record, updated daily (last: 11 Nov 2026). See [Track records](docs/models.md#track-records-how-each-model-has-done).</sub>
+<sub>From the Hub's public track record, updated daily (last: 12 Nov 2026). See [Track records](docs/models.md#track-records-how-each-model-has-done).</sub>
 <!-- swarm-stats:end -->
 
 ## What it does
