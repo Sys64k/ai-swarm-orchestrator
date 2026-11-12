@@ -49,7 +49,7 @@ Every model ran on one machine, avalon:
 | RAM | 46 GB as Linux reports it |
 | Ollama | Each model's default tag (below); 32,768 tokens of context per conversation in the first runs, 65,536 later |
 
-| Model | Ollama tag | Parameters | Quantisation | Size | Fits in 16 GB |
+| Model | Ollama tag | Parameters | Quantisation | Size | Weights fit in 16 GB |
 |---|---|---|---|---|---|
 | qwen3-coder | `qwen3-coder:30b` | 30.5B | Q4_K_M | 18 GB | No |
 | glm-4.7-flash | `glm-4.7-flash` | 29.9B | Q4_K_M | 19 GB | No |
@@ -57,11 +57,35 @@ Every model ran on one machine, avalon:
 | gpt-oss | `gpt-oss:20b` | 20.9B | MXFP4 | 13 GB | Yes |
 | qwen2.5-coder | `qwen2.5-coder:14b` | 14.8B | Q4_K_M | 9 GB | Yes |
 
-"Fits" is the model's weights alone; its context takes more memory on top. qwen3-coder and
-glm-4.7-flash don't fit, so Ollama ran part of each on the CPU. That makes them slower, but not
-worse: on a GPU with more memory the same weights should get the same things right, only faster.
-We didn't measure tokens per second. The minutes on this page are whole tasks, QA and reviews
-included.
+"Weights fit" counts the weights alone, not the context, which takes more memory on top. The
+GPU also isn't all free: at idle the desktop and driver already use 1,975 MiB of it, which leaves
+about 14 GB for a model.
+
+**Where Ollama put each model.** On 2026-11-12 we sent each model one request with `num_ctx` set
+to 32,768 and then 65,536 (`num_predict` 1), read `ollama ps`, and unloaded it (`keep_alive` 0),
+with nothing else loaded. SIZE and PROCESSOR as `ollama ps` reported them:
+
+| Model | 32K context | 64K context |
+|---|---|---|
+| qwen3-coder:30b | 13 GB, 2% CPU / 98% GPU | 13 GB, 2% / 98% |
+| glm-4.7-flash | 13 GB, 2% / 98% | 13 GB, 2% / 98% |
+| gpt-oss:20b | 13 GB, 9% / 91% | 12 GB, 10% / 90% |
+| devstral:24b | 20 GB, 35% / 65% | 25 GB, 49% / 51% |
+| qwen2.5-coder:14b | 14 GB, 8% / 92% | n/a: the model's limit is 32K, so Ollama loaded it at 32K |
+
+Every model ran partly on the CPU at the test's context, not only the two whose weights don't
+fit. That makes a model slower, not worse: on a GPU with more memory the same weights should get
+the same things right, only faster.
+
+- **Measured later than the runs.** This is Ollama 0.40.11 on 2026-11-12. The test ran from
+  2026-10-29 to 2026-11-04, possibly on an older Ollama that split the models differently.
+- **Don't read 2% as "almost all on the GPU".** qwen3-coder, glm-4.7-flash and gpt-oss are
+  mixture-of-experts models. `ollama ps` reports 12–13 GB for them, while their downloads are
+  18–19 GB (13 GB for gpt-oss). It probably doesn't fully count weights kept in system RAM. For
+  the dense models, devstral and qwen2.5-coder, the sizes match what their weights and context
+  should take.
+- **Placement isn't speed.** We still didn't measure tokens per second. The minutes on this page
+  are whole tasks, QA and reviews included.
 
 ## Each model in short
 
